@@ -1,0 +1,151 @@
+# Exported by three-d-stage
+newmtl slab
+Kd 0.6240 0.5906 0.5029
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl paving
+Kd 0.5089 0.4793 0.4072
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl wall_exterior
+Kd 0.8070 0.8388 0.8963
+Ks 0.2000 0.2000 0.2000
+Ns 20
+d 1.0000
+
+newmtl wall_cap
+Kd 0.0137 0.0467 0.1946
+Ks 0.2000 0.2000 0.2000
+Ns 80
+d 1.0000
+
+newmtl threshold
+Kd 0.3968 0.2195 0.0782
+Ks 0.2000 0.2000 0.2000
+Ns 40
+d 1.0000
+
+newmtl glass
+Kd 0.3467 0.6584 0.8070
+Ks 0.2000 0.2000 0.2000
+Ns 180
+d 0.4500
+
+newmtl wall_partition
+Kd 0.9047 0.9216 0.9560
+Ks 0.2000 0.2000 0.2000
+Ns 20
+d 1.0000
+
+newmtl floor_lab
+Kd 0.4678 0.7758 0.8550
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl floor_storage
+Kd 0.4851 0.5520 0.8550
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl floor_phlebotomy
+Kd 0.6867 0.5647 0.9131
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl floor_reception
+Kd 0.8963 0.4735 0.3278
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl floor_patient
+Kd 0.9047 0.3968 0.5089
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl floor_corridor
+Kd 0.7913 0.7605 0.6867
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl floor_free
+Kd 0.9131 0.6240 0.0467
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl floor_washroom
+Kd 0.5841 0.4508 0.8632
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl cabinet
+Kd 0.8714 0.8550 0.8070
+Ks 0.2000 0.2000 0.2000
+Ns 50
+d 1.0000
+
+newmtl bench_top
+Kd 0.5841 0.6308 0.6724
+Ks 0.2000 0.2000 0.2000
+Ns 110
+d 1.0000
+
+newmtl porcelain
+Kd 0.9647 0.9647 0.9560
+Ks 0.2000 0.2000 0.2000
+Ns 140
+d 1.0000
+
+newmtl steel
+Kd 0.4851 0.5271 0.5647
+Ks 0.2000 0.2000 0.2000
+Ns 130
+d 1.0000
+
+newmtl equip_dark
+Kd 0.0242 0.0307 0.0395
+Ks 0.2000 0.2000 0.2000
+Ns 90
+d 1.0000
+
+newmtl seat
+Kd 0.0284 0.2122 0.1946
+Ks 0.2000 0.2000 0.2000
+Ns 60
+d 1.0000
+
+newmtl accent
+Kd 0.6867 0.0578 0.0452
+Ks 0.2000 0.2000 0.2000
+Ns 100
+d 1.0000
+
+newmtl equip_body
+Kd 0.8388 0.8550 0.8714
+Ks 0.2000 0.2000 0.2000
+Ns 100
+d 1.0000
+
+newmtl screen
+Kd 0.0110 0.1590 0.4793
+Ks 0.2000 0.2000 0.2000
+Ns 140
+d 1.0000
+
+newmtl equip_top
+Kd 0.4020 0.4508 0.4969
+Ks 0.2000 0.2000 0.2000
+Ns 100
+d 1.0000
+
