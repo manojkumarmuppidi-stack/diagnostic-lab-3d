@@ -3,61 +3,457 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Diagnostic Lab – 3D Layout</title>
+
+  <title>Diagnostic Lab – Interactive 3D Layout</title>
 
   <script type="module"
     src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js">
   </script>
 
   <style>
+    * {
+      box-sizing: border-box;
+    }
+
     html, body {
       margin: 0;
       width: 100%;
       height: 100%;
       overflow: hidden;
-      font-family: Arial, sans-serif;
-      background: #f5f5f5;
-    }
-
-    .title {
-      position: absolute;
-      top: 15px;
-      left: 15px;
-      z-index: 10;
-      background: white;
-      padding: 12px 18px;
-      border-radius: 10px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.15);
-      font-size: 18px;
-      font-weight: bold;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #e9eef2;
     }
 
     model-viewer {
       width: 100%;
       height: 100%;
-      background: #eeeeee;
+      background: linear-gradient(#eef3f6, #dfe6eb);
+    }
+
+    /* TOP TITLE */
+
+    .header {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      z-index: 20;
+
+      background: rgba(255,255,255,0.96);
+      padding: 12px 18px;
+      border-radius: 12px;
+
+      box-shadow: 0 3px 15px rgba(0,0,0,0.18);
+
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      display: block;
+      font-size: 12px;
+      font-weight: 400;
+      margin-top: 3px;
+      color: #666;
+    }
+
+    /* CONTROL PANEL */
+
+    .controls {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+
+      z-index: 20;
+
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+
+      background: rgba(255,255,255,0.96);
+      padding: 10px;
+
+      border-radius: 14px;
+
+      box-shadow: 0 3px 15px rgba(0,0,0,0.18);
+    }
+
+    button {
+      border: none;
+      background: #ffffff;
+
+      padding: 10px 14px;
+
+      border-radius: 9px;
+
+      cursor: pointer;
+
+      font-size: 13px;
+      font-weight: 600;
+
+      box-shadow: 0 1px 5px rgba(0,0,0,0.12);
+    }
+
+    button:hover {
+      background: #f0f4f7;
+    }
+
+    /* ROOM LEGEND */
+
+    .legend {
+      position: absolute;
+
+      top: 90px;
+      right: 15px;
+
+      z-index: 20;
+
+      width: 210px;
+
+      background: rgba(255,255,255,0.96);
+
+      padding: 14px;
+
+      border-radius: 12px;
+
+      box-shadow: 0 3px 15px rgba(0,0,0,0.18);
+
+      font-size: 13px;
+    }
+
+    .legend-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .legend div {
+      padding: 4px 0;
+    }
+
+    /* 3D LABELS */
+
+    .room-label {
+      background: rgba(255,255,255,0.95);
+
+      color: #111;
+
+      padding: 6px 10px;
+
+      border-radius: 7px;
+
+      border: 1px solid rgba(0,0,0,0.15);
+
+      box-shadow: 0 2px 8px rgba(0,0,0,0.20);
+
+      font-size: 12px;
+
+      font-weight: 700;
+
+      white-space: nowrap;
+
+      pointer-events: none;
+    }
+
+    .main-label {
+      font-size: 13px;
+      padding: 7px 12px;
+    }
+
+    /* MOBILE */
+
+    @media (max-width: 700px) {
+
+      .header {
+        top: 10px;
+        left: 10px;
+
+        font-size: 15px;
+
+        padding: 9px 12px;
+      }
+
+      .subtitle {
+        font-size: 10px;
+      }
+
+      .legend {
+        top: 65px;
+        right: 10px;
+
+        width: 160px;
+
+        font-size: 11px;
+
+        padding: 9px;
+      }
+
+      .legend-title {
+        font-size: 13px;
+      }
+
+      .controls {
+        bottom: 10px;
+
+        width: calc(100% - 20px);
+
+        padding: 7px;
+      }
+
+      button {
+        padding: 8px 10px;
+        font-size: 11px;
+      }
+
+      .room-label {
+        font-size: 9px;
+        padding: 4px 6px;
+      }
     }
   </style>
 </head>
 
 <body>
 
-  <div class="title">
-    🏥 Diagnostic Lab – 3D Layout
+  <!-- TITLE -->
+
+  <div class="header">
+    🏥 Diagnostic Lab
+    <span class="subtitle">
+      Interactive 3D Layout
+    </span>
   </div>
 
+
+  <!-- ROOM LEGEND -->
+
+  <div class="legend">
+
+    <div class="legend-title">
+      🏷️ Room Labels
+    </div>
+
+    <div>• Reception</div>
+    <div>• Patient Area</div>
+    <div>• Phlebotomy</div>
+    <div>• Storage</div>
+    <div>• Corridor</div>
+    <div>• Main Lab Hall</div>
+    <div>• Free Space</div>
+    <div>• Washroom 1</div>
+    <div>• Washroom 2</div>
+
+  </div>
+
+
+  <!-- 3D MODEL -->
+
   <model-viewer
+    id="labModel"
+
     src="diagnostic-lab-plan-b.glb"
+
     camera-controls
+
     touch-action="pan-y"
-    auto-rotate
+
     shadow-intensity="1"
+
     exposure="1"
+
     environment-image="neutral"
-    camera-orbit="0deg 70deg 105%"
+
+    camera-orbit="35deg 65deg 115%"
+
     min-camera-orbit="auto auto 50%"
-    max-camera-orbit="auto auto 200%">
+
+    max-camera-orbit="auto auto 250%"
+
+    interaction-prompt="auto"
+
+    camera-target="0m 0m 0m">
+
+
+    <!-- ROOM LABELS -->
+
+    <button
+      class="room-label"
+      slot="hotspot-reception"
+      data-position="-2.145m 0.30m 3.21m"
+      data-normal="0m 1m 0m">
+      Reception
+    </button>
+
+
+    <button
+      class="room-label"
+      slot="hotspot-patient"
+      data-position="-0.60m 0.30m 3.21m"
+      data-normal="0m 1m 0m">
+      Patient Area
+    </button>
+
+
+    <button
+      class="room-label"
+      slot="hotspot-phlebotomy"
+      data-position="-0.625m 0.30m 1.365m"
+      data-normal="0m 1m 0m">
+      Phlebotomy
+    </button>
+
+
+    <button
+      class="room-label"
+      slot="hotspot-storage"
+      data-position="-2.17m 0.30m 1.365m"
+      data-normal="0m 1m 0m">
+      Storage
+    </button>
+
+
+    <button
+      class="room-label"
+      slot="hotspot-corridor"
+      data-position="0.775m 0.30m 2.37m"
+      data-normal="0m 1m 0m">
+      Corridor
+    </button>
+
+
+    <button
+      class="room-label main-label"
+      slot="hotspot-mainlab"
+      data-position="-0.77m 0.35m -1.845m"
+      data-normal="0m 1m 0m">
+      MAIN LAB HALL
+    </button>
+
+
+    <button
+      class="room-label"
+      slot="hotspot-free"
+      data-position="2.17m 0.30m 1.545m"
+      data-normal="0m 1m 0m">
+      Free Space
+    </button>
+
+
+    <button
+      class="room-label"
+      slot="hotspot-wash2"
+      data-position="2.17m 0.30m -1.925m"
+      data-normal="0m 1m 0m">
+      Washroom 2
+    </button>
+
+
+    <button
+      class="room-label"
+      slot="hotspot-wash1"
+      data-position="2.17m 0.30m -3.47m"
+      data-normal="0m 1m 0m">
+      Washroom 1
+    </button>
+
   </model-viewer>
+
+
+  <!-- CONTROLS -->
+
+  <div class="controls">
+
+    <button onclick="resetView()">
+      🏠 Reset
+    </button>
+
+    <button onclick="toggleLabels()">
+      🏷️ Labels
+    </button>
+
+    <button onclick="toggleRotation()">
+      🔄 Auto Rotate
+    </button>
+
+    <button onclick="fullScreen()">
+      ⛶ Full Screen
+    </button>
+
+  </div>
+
+
+  <script>
+
+    const model = document.getElementById("labModel");
+
+    let rotating = false;
+    let labelsVisible = true;
+
+
+    /* RESET CAMERA */
+
+    function resetView() {
+
+      model.cameraOrbit = "35deg 65deg 115%";
+
+      model.cameraTarget = "0m 0m 0m";
+
+    }
+
+
+    /* LABEL VISIBILITY */
+
+    function toggleLabels() {
+
+      labelsVisible = !labelsVisible;
+
+      document.querySelectorAll(".room-label").forEach(label => {
+
+        label.style.display =
+          labelsVisible ? "block" : "none";
+
+      });
+
+    }
+
+
+    /* AUTO ROTATION */
+
+    function toggleRotation() {
+
+      rotating = !rotating;
+
+      if (rotating) {
+
+        model.setAttribute("auto-rotate", "");
+
+      } else {
+
+        model.removeAttribute("auto-rotate");
+
+      }
+
+    }
+
+
+    /* FULL SCREEN */
+
+    function fullScreen() {
+
+      if (!document.fullscreenElement) {
+
+        document.documentElement.requestFullscreen();
+
+      } else {
+
+        document.exitFullscreen();
+
+      }
+
+    }
+
+  </script>
 
 </body>
 </html>
