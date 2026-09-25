@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-2: #475569;
+  --text-3: #64748b;
+  --brand: #1e5ae0;
+  --brand-contrast: #ffffff;
+  --good: #0f7a0f;
+  --bad: #c42b2b;
+  /* Chart palette (validated reference instance, light) */
+  --chart-surface: #ffffff;
+  --grid: #e8ebef;
+  --series-1: #2a78d6; /* OPD / income */
+  --series-2: #eb6834; /* IPD / expenses */
+  --series-3: #1baf7a; /* Lab */
+  --series-4: #eda100; /* Pharmacy */
+  --series-5: #e87ba4; /* Diet */
+  --series-6: #008300; /* Other */
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-critical: #d03b3b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f1115;
+    --surface: #181a1f;
+    --surface-2: #1f2228;
+    --border: #2c3038;
+    --text: #f1f5f9;
+    --text-2: #c3c8d0;
+    --text-3: #9aa3ae;
+    --brand: #4f86f0;
+    --good: #4ccf4c;
+    --bad: #ff7b7b;
+    --chart-surface: #181a1f;
+    --grid: #2a2e35;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #181a1f;
+  --surface-2: #1f2228;
+  --border: #2c3038;
+  --text: #f1f5f9;
+  --text-2: #c3c8d0;
+  --text-3: #9aa3ae;
+  --brand: #4f86f0;
+  --good: #4ccf4c;
+  --bad: #ff7b7b;
+  --chart-surface: #181a1f;
+  --grid: #2a2e35;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  -webkit-tap-highlight-color: transparent;
+}
+body {
+  font-feature-settings: "tnum" 1;
+}
+
+@layer components {
+  .card {
+    /* min-width: 0 lets cards inside CSS grids shrink so wide tables scroll inside them on phones. */
+    @apply min-w-0 rounded-xl border shadow-sm;
+    background: var(--surface);
+    border-color: var(--border);
+  }
+  .muted {
+    color: var(--text-3);
+  }
+  .text-2 {
+    color: var(--text-2);
+  }
+  .input {
+    @apply w-full rounded-lg border px-3 py-2.5 text-base outline-none transition sm:text-sm;
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--text);
+    min-height: 44px;
+  }
+  .input:focus {
+    border-color: var(--brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 20%, transparent);
+  }
+  .input[aria-invalid="true"] {
+    border-color: var(--bad);
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50;
+    min-height: 44px;
+  }
+  .btn-primary {
+    background: var(--brand);
+    color: var(--brand-contrast);
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .btn-secondary {
+    @apply border;
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--text);
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn-danger {
+    background: var(--bad);
+    color: #fff;
+  }
+  .btn-ghost {
+    color: var(--text-2);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+    min-height: 34px;
+  }
+  .table {
+    @apply w-full text-sm;
+  }
+  .table th {
+    @apply whitespace-nowrap px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide;
+    color: var(--text-3);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .table td {
+    @apply whitespace-nowrap px-3 py-2;
+    border-bottom: 1px solid var(--border);
+  }
+  .table tbody tr:hover {
+    background: var(--surface-2);
+  }
+  .num,
+  .table th.num {
+    @apply text-right tabular-nums;
+  }
+}
+
+.safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom) + 4.5rem);
+}
+@media (min-width: 1024px) {
+  .safe-bottom {
+    padding-bottom: 2rem;
+  }
+}
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

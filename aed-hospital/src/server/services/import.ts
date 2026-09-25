@@ -1,0 +1,620 @@
+/**
+ * Excel Import Centre: upload → map → validate → review → commit → history → reverse.
+ * See EXCEL_IMPORT_SPEC.md for the complete behaviour.
+ */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { createHash, randomUUID } from "node:crypto";
+import type { ImportRowStatus, Prisma } from "@prisma/client";
+import { z } from "zod";
+import ExcelJS from "exceljs";
+import { fromDbDate, todayISO, type ISODate } from "@/lib/dates";
+import { suggestMapping, missingRequired, type Mapping } from "@/lib/import/mapping";
+import { normalizeRow, parsePlaceholder, NEW_PREFIX, type MasterCtx, type NewMasterType } from "@/lib/import/normalize";
+import { norm } from "@/lib/import/text";
+import { IMPORT_TYPES, MODULES, importFieldsFor, isImportType, type ImportType, type ModuleKey } from "@/lib/modules";
+import { round2, toNum } from "@/lib/money";
+import { MODULE_SCHEMAS, zodErrorMap } from "@/lib/schemas";
+import { audit } from "../audit";
+import { can, requirePermission, type Actor } from "../authz";
+import { getDayStatuses, onDayMutated } from "../closing";
+import { prisma, type Tx } from "../db";
+import { AppError, badRequest, conflict, notFound } from "../errors";
+import { readSpreadsheet } from "../spreadsheet";
+import { fingerprintFor } from "./modules";
+import { insertRecord } from "./transactions";
+
+const LONG_TX = { timeout: 600_000, maxWait: 20_000 };
+
+/** Guess the import type from a sheet name (e.g. "OPD Sep", "Lab Register", "Expenses"). */
+export function guessType(sheetName: string, fallback?: string): ImportType | null {
+  const s = norm(sheetName);
+  const rules: [RegExp, ImportType][] = [
+    [/\bopd\b|consult/, "opd"],
+    [/\bipd\b|admission|inpatient/, "ipd"],
+    [/\blab|diagnos|investigation|radiology/, "lab"],
+    [/pharm.*purchase|purchase/, "pharmacy-purchase"],
+    [/pharm.*return|return/, "pharmacy-return"],
+    [/pharm|medicine/, "pharmacy-sale"],
+    [/diet|nutrition/, "diet"],
+    [/expen|expenditure|payment voucher/, "expense"],
+    [/income|collection|revenue/, "combined-income"],
+  ];
+  for (const [re, t] of rules) if (re.test(s)) return t;
+  return fallback && isImportType(fallback) ? fallback : null;
+}
+
+// ─────────────────────────── upload ───────────────────────────
+
+export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, typeHint?: string) {
+  requirePermission(actor, "import.run");
+  const safeName = fileName.replace(/[^\w.\- ()]/g, "_").slice(0, 150);
+  const sheets = await readSpreadsheet(safeName, buf);
+  const fileHash = createHash("sha256").update(buf).digest("hex");
+  const groupId = randomUUID();
+  const previous = await prisma.importBatch.findMany({
+    where: { fileHash, status: "IMPORTED" },
+    select: { id: true, sheetName: true, committedAt: true, uploadedById: true },
+  });
+
+  const batches = await prisma.$transaction(async (tx) => {
+    const out = [];
+    for (const sh of sheets) {
+      const type = guessType(sh.name, sheets.length === 1 ? typeHint : undefined) ?? (typeHint && isImportType(typeHint) ? typeHint : "opd");
+      const batch = await tx.importBatch.create({
+        data: {
+          groupId,
+          fileName: safeName,
+          fileHash,
+          sheetName: sh.name,
+          module: type,
+          headers: sh.headers,
+          recordsFound: sh.rows.length,
+          uploadedById: actor.id,
+        },
+      });
+      await tx.importRecord.createMany({
+        data: sh.rows.map((r) => ({ batchId: batch.id, rowNumber: r.rowNumber, raw: r.values as Prisma.InputJsonValue })),
+      });
+      out.push({
+        id: batch.id,
+        sheetName: sh.name,
+        headerRow: sh.headerRow,
+        headers: sh.headers,
+        rows: sh.rows.length,
+        type,
+        sample: sh.rows.slice(0, 5).map((r) => r.values),
+        suggestion: suggestMapping(sh.headers, importFieldsFor(type)),
+        previouslyImported: previous.filter((p) => p.sheetName === sh.name).map((p) => ({ batchId: p.id, at: p.committedAt })),
+      });
+    }
+    await audit(tx, actor, { action: "IMPORT_UPLOAD", entityType: "ImportBatch", entityId: groupId, after: { fileName: safeName, fileHash, sheets: out.map((b) => ({ id: b.id, sheet: b.sheetName, rows: b.rows })) } });
+    return out;
+  }, LONG_TX);
+  return { groupId, fileName: safeName, batches };
+}
+
+// ─────────────────────────── masters context ───────────────────────────
+
+export async function loadMasterCtx(tx: Tx = prisma): Promise<MasterCtx> {
+  const [specialties, doctors, consultationTypes, admissionTypes, ipdPackages, investigations, dietServices, departments, categories, paymentModes] = await Promise.all([
+    tx.specialty.findMany(),
+    tx.doctor.findMany(),
+    tx.consultationType.findMany(),
+    tx.admissionType.findMany(),
+    tx.ipdPackage.findMany(),
+    tx.labInvestigation.findMany(),
+    tx.dietService.findMany(),
+    tx.department.findMany(),
+    tx.expenseCategory.findMany(),
+    tx.paymentMode.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
+  ]);
+  return {
+    specialties,
+    doctors: doctors.filter((d) => d.kind !== "DIETICIAN"),
+    dieticians: doctors.filter((d) => d.kind === "DIETICIAN"),
+    consultationTypes,
+    admissionTypes,
+    ipdPackages: ipdPackages.map((p) => ({ ...p, rate: toNum(p.rate) })),
+    investigations: investigations.map((i) => ({ ...i, rate: toNum(i.rate) })),
+    dietServices,
+    departments,
+    categories: categories.filter((c) => !c.parentId),
+    subcategories: categories.filter((c) => c.parentId).map((c) => ({ ...c, parentId: c.parentId! })),
+    paymentModes: paymentModes.map((m) => ({ id: m.id, code: m.code, name: m.name, reconGroup: m.reconGroup })),
+    today: todayISO(),
+  };
+}
+
+// ─────────────────────────── validate ───────────────────────────
+
+const validateInput = z.object({
+  type: z.string().refine(isImportType, "Unknown import type"),
+  mapping: z.record(z.string(), z.string().nullable()),
+});
+
+interface RowOutcome {
+  status: ImportRowStatus;
+  normalized: any;
+  errors: string[];
+  warnings: string[];
+  fingerprint: string | null;
+  duplicateOf: string | null;
+}
+
+/** Map a normalized module input to the zod-validated shape (placeholders pass as ids). */
+function checkSchema(module: ModuleKey, input: Record<string, unknown>): string[] {
+  const r = MODULE_SCHEMAS[module].safeParse(input);
+  if (r.success) return [];
+  return Object.entries(zodErrorMap(r.error)).map(([k, v]) => `${labelFor(module, k)}: ${v}`);
+}
+
+function labelFor(module: ModuleKey, key: string) {
+  return MODULES[module].fields.find((f) => f.key === key)?.label ?? key;
+}
+
+export async function validateBatch(actor: Actor, batchId: string, raw: unknown) {
+  requirePermission(actor, "import.run");
+  const { type, mapping } = validateInput.parse(raw) as { type: ImportType; mapping: Mapping };
+  const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
+  if (!batch) throw notFound("Import batch not found");
+  if (!["UPLOADED", "VALIDATED"].includes(batch.status)) throw badRequest(`Batch is already ${batch.status.toLowerCase()}`);
+  const fields = importFieldsFor(type);
+  const missing = missingRequired(mapping, fields);
+  if (missing.length) throw badRequest(`Map these required columns (or set a fixed value): ${missing.join(", ")}`, { missing });
+
+  const [records, ctx] = await Promise.all([
+    prisma.importRecord.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } }),
+    loadMasterCtx(),
+  ]);
+
+  // Pass 1: normalise every row.
+  const results = records.map((rec) => {
+    const n = normalizeRow(type, rec.raw as Record<string, unknown>, mapping, ctx);
+    const errors = [...n.errors];
+    if (n.module && n.input) errors.push(...checkSchema(n.module, n.input));
+    for (const ex of n.extras) errors.push(...checkSchema(ex.module, ex.input));
+    let fingerprint: string | null = null;
+    if (!errors.length && n.module && n.input) fingerprint = fingerprintFor(n.module, n.input, n.amount);
+    return { rec, n, errors, warnings: [...n.warnings], fingerprint };
+  });
+
+  // Pass 2: closed days, in-file duplicates and database duplicates.
+  const dates = results.map((r) => (r.n.input?.date ?? r.n.input?.admissionDate) as ISODate | undefined).filter(Boolean) as ISODate[];
+  const statuses = await getDayStatuses(prisma, dates);
+  const fps = results.map((r) => r.fingerprint).filter(Boolean) as string[];
+  const existing = await findExistingFingerprints(fps);
+  const seen = new Map<string, number>();
+  const outcomes: RowOutcome[] = results.map((r) => {
+    const date = (r.n.input?.date ?? r.n.input?.admissionDate) as ISODate | undefined;
+    if (date && statuses.get(date) === "CLOSED") r.errors.push(`Day ${date} is closed — reopen it before importing into it`);
+    let status: ImportRowStatus = r.errors.length ? "INVALID" : r.warnings.length ? "WARNING" : "VALID";
+    let duplicateOf: string | null = null;
+    if (status !== "INVALID" && r.fingerprint) {
+      const inFile = seen.get(r.fingerprint);
+      const inDb = existing.get(r.fingerprint);
+      if (inDb) {
+        status = "DUPLICATE";
+        duplicateOf = `${inDb.module}:${inDb.id}`;
+      } else if (inFile !== undefined) {
+        status = "DUPLICATE";
+        duplicateOf = `row:${inFile}`;
+      }
+      if (inFile === undefined) seen.set(r.fingerprint, r.rec.rowNumber);
+    }
+    return {
+      status,
+      normalized: r.n.module ? { module: r.n.module, input: r.n.input, extras: r.n.extras, amount: r.n.amount, flags: r.n.flags } : { flags: r.n.flags },
+      errors: r.errors,
+      warnings: r.warnings,
+      fingerprint: r.fingerprint,
+      duplicateOf,
+    };
+  });
+
+  const summary = summarize(outcomes);
+  await prisma.$transaction(async (tx) => {
+    await tx.importRecord.deleteMany({ where: { batchId } });
+    await tx.importRecord.createMany({
+      data: records.map((rec, i) => ({
+        batchId,
+        rowNumber: rec.rowNumber,
+        raw: rec.raw as Prisma.InputJsonValue,
+        normalized: outcomes[i].normalized,
+        status: outcomes[i].status,
+        errors: outcomes[i].errors.length ? outcomes[i].errors : undefined,
+        warnings: outcomes[i].warnings.length ? outcomes[i].warnings : undefined,
+        fingerprint: outcomes[i].fingerprint,
+        duplicateOf: outcomes[i].duplicateOf,
+        forceImport: false,
+      })),
+    });
+    await tx.importBatch.update({
+      where: { id: batchId },
+      data: {
+        module: type,
+        mapping,
+        status: "VALIDATED",
+        validatedAt: new Date(),
+        validRows: summary.valid,
+        warningRows: summary.warnings,
+        invalidRows: summary.invalid,
+        duplicateRows: summary.duplicates,
+        totalAmount: summary.validAmount,
+      },
+    });
+  }, LONG_TX);
+  return { batchId, type, summary };
+}
+
+async function findExistingFingerprints(fps: string[]) {
+  const out = new Map<string, { module: string; id: string }>();
+  if (!fps.length) return out;
+  const unique = [...new Set(fps)];
+  const tables: [string, any][] = [
+    ["opd", prisma.consultation],
+    ["ipd", prisma.ipdAdmission],
+    ["lab", prisma.labTransaction],
+    ["pharmacy-sale", prisma.pharmacySale],
+    ["pharmacy-return", prisma.pharmacyReturn],
+    ["pharmacy-purchase", prisma.pharmacyPurchase],
+    ["diet", prisma.dietTransaction],
+    ["other-income", prisma.otherIncome],
+    ["expense", prisma.expense],
+  ];
+  for (let i = 0; i < unique.length; i += 5000) {
+    const chunk = unique.slice(i, i + 5000);
+    for (const [module, del] of tables) {
+      const hits = await del.findMany({ where: { fingerprint: { in: chunk }, status: "ACTIVE" }, select: { id: true, fingerprint: true } });
+      for (const h of hits) out.set(h.fingerprint, { module, id: h.id });
+    }
+  }
+  return out;
+}
+
+export function summarize(outcomes: { status: ImportRowStatus; errors: string[]; warnings: string[]; normalized: any }[]) {
+  const s = {
+    total: outcomes.length,
+    valid: 0,
+    warnings: 0,
+    invalid: 0,
+    duplicates: 0,
+    missingDates: 0,
+    missingAmounts: 0,
+    unknownServices: 0,
+    unknownCategories: 0,
+    invalidPaymentModes: 0,
+    totalsRows: 0,
+    negativeAmounts: 0,
+    validAmount: 0,
+    byModule: {} as Record<string, number>,
+  };
+  for (const o of outcomes) {
+    if (o.status === "VALID") s.valid++;
+    else if (o.status === "WARNING") s.warnings++;
+    else if (o.status === "INVALID") s.invalid++;
+    else if (o.status === "DUPLICATE") s.duplicates++;
+    const flags: string[] = o.normalized?.flags ?? [];
+    if (flags.includes("missingDate")) s.missingDates++;
+    if (flags.includes("missingAmount")) s.missingAmounts++;
+    if (flags.includes("unknownService")) s.unknownServices++;
+    if (flags.includes("unknownCategory")) s.unknownCategories++;
+    if (flags.includes("invalidPaymentMode")) s.invalidPaymentModes++;
+    if (flags.includes("totalsRow")) s.totalsRows++;
+    if (flags.includes("negative")) s.negativeAmounts++;
+    if (o.status === "VALID" || o.status === "WARNING") {
+      s.validAmount = round2(s.validAmount + (o.normalized?.amount ?? 0));
+      const m = o.normalized?.module;
+      if (m) s.byModule[m] = (s.byModule[m] ?? 0) + 1;
+    }
+  }
+  return s;
+}
+
+// ─────────────────────────── review ───────────────────────────
+
+export async function getBatch(actor: Actor, batchId: string) {
+  requirePermission(actor, "import.run");
+  const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
+  if (!batch) throw notFound();
+  const outcomes = await prisma.importRecord.findMany({ where: { batchId }, select: { status: true, errors: true, warnings: true, normalized: true } });
+  const summary = summarize(outcomes.map((o) => ({ status: o.status, errors: (o.errors as string[]) ?? [], warnings: (o.warnings as string[]) ?? [], normalized: o.normalized })));
+  const uploader = await prisma.user.findUnique({ where: { id: batch.uploadedById }, select: { name: true } });
+  const fields = importFieldsFor(batch.module as ImportType);
+  return {
+    batch: { ...batch, totalAmount: toNum(batch.totalAmount), uploadedBy: uploader?.name ?? null },
+    summary,
+    fields,
+    suggestion: batch.mapping ? null : suggestMapping(batch.headers as string[], fields),
+  };
+}
+
+export async function listRows(actor: Actor, batchId: string, q: { status?: string; page?: string; pageSize?: string }) {
+  requirePermission(actor, "import.run");
+  const page = Math.max(1, Number(q.page) || 1);
+  const pageSize = Math.min(200, Number(q.pageSize) || 50);
+  const statuses = q.status ? (q.status.split(",") as ImportRowStatus[]) : undefined;
+  const where = { batchId, ...(statuses ? { status: { in: statuses } } : {}) };
+  const [rows, total] = await Promise.all([
+    prisma.importRecord.findMany({ where, orderBy: { rowNumber: "asc" }, skip: (page - 1) * pageSize, take: pageSize }),
+    prisma.importRecord.count({ where }),
+  ]);
+  return { rows, total, page, pageSize };
+}
+
+/** Admin decision on duplicate rows: import anyway (true) or skip (false). */
+export async function setDuplicateDecision(actor: Actor, batchId: string, raw: unknown) {
+  requirePermission(actor, "import.override_duplicates");
+  const { rowIds, forceImport } = z.object({ rowIds: z.array(z.string()).min(1).max(5000), forceImport: z.boolean() }).parse(raw);
+  const r = await prisma.importRecord.updateMany({ where: { batchId, id: { in: rowIds }, status: "DUPLICATE" }, data: { forceImport } });
+  return { updated: r.count };
+}
+
+// ─────────────────────────── commit ───────────────────────────
+
+const commitInput = z.object({
+  approveWarnings: z.boolean().default(false),
+  duplicatePolicy: z.enum(["skip", "import"]).default("skip"),
+});
+
+/** Create any master rows referenced by placeholders; returns placeholder → real id. */
+async function createNewMasters(tx: Tx, actor: Actor, placeholders: Set<string>) {
+  const map = new Map<string, string>();
+  const ordered = [...placeholders].sort((a, b) => (a.includes("expenseSubcategories") ? 1 : 0) - (b.includes("expenseSubcategories") ? 1 : 0));
+  for (const ph of ordered) {
+    const p = parsePlaceholder(ph)!;
+    const name = p.name;
+    let created: { id: string };
+    const find = async (model: any, extra: object = {}) => model.findFirst({ where: { name: { equals: name, mode: "insensitive" }, ...extra } });
+    switch (p.type as NewMasterType) {
+      case "specialties":
+        created = (await find(tx.specialty)) ?? (await tx.specialty.create({ data: { name } }));
+        break;
+      case "doctors":
+        created = (await find(tx.doctor, { kind: "DOCTOR" })) ?? (await tx.doctor.create({ data: { name, kind: "DOCTOR" } }));
+        break;
+      case "dieticians":
+        created = (await find(tx.doctor, { kind: "DIETICIAN" })) ?? (await tx.doctor.create({ data: { name, kind: "DIETICIAN" } }));
+        break;
+      case "consultationTypes":
+        created = (await find(tx.consultationType)) ?? (await tx.consultationType.create({ data: { name } }));
+        break;
+      case "admissionTypes":
+        created = (await find(tx.admissionType)) ?? (await tx.admissionType.create({ data: { name } }));
+        break;
+      case "ipdPackages":
+        created = (await find(tx.ipdPackage)) ?? (await tx.ipdPackage.create({ data: { name } }));
+        break;
+      case "investigations":
+        // Rate 0: imported rows carry their own rate; Admin should set the master rate afterwards.
+        created = (await find(tx.labInvestigation)) ?? (await tx.labInvestigation.create({ data: { name, category: "Imported" } }));
+        break;
+      case "dietServices":
+        created = (await find(tx.dietService)) ?? (await tx.dietService.create({ data: { name } }));
+        break;
+      case "departments":
+        created = (await find(tx.department)) ?? (await tx.department.create({ data: { name } }));
+        break;
+      case "expenseCategories":
+        created =
+          (await find(tx.expenseCategory, { parentId: null })) ??
+          (await tx.expenseCategory.create({ data: { name, group: /^other/i.test(name) ? "OTHER" : "HOSPITAL" } }));
+        break;
+      case "expenseSubcategories": {
+        const parentId = p.parent?.startsWith(NEW_PREFIX) ? map.get(p.parent) : p.parent;
+        if (!parentId) throw badRequest(`Cannot resolve parent category for "${name}"`);
+        const parent = await tx.expenseCategory.findUniqueOrThrow({ where: { id: parentId } });
+        created = (await find(tx.expenseCategory, { parentId })) ?? (await tx.expenseCategory.create({ data: { name, parentId, group: parent.group } }));
+        break;
+      }
+    }
+    map.set(ph, created.id);
+    await audit(tx, actor, { action: "MASTER_CREATE_BY_IMPORT", entityType: `Master:${p.type}`, entityId: created.id, after: { name } });
+  }
+  return map;
+}
+
+function collectPlaceholders(v: unknown, out: Set<string>) {
+  if (typeof v === "string" && v.startsWith(NEW_PREFIX)) {
+    out.add(v);
+    const p = parsePlaceholder(v);
+    if (p?.parent?.startsWith(NEW_PREFIX)) out.add(p.parent);
+  } else if (v && typeof v === "object") for (const x of Object.values(v)) collectPlaceholders(x, out);
+}
+
+function replacePlaceholders<T>(v: T, map: Map<string, string>): T {
+  if (typeof v === "string" && v.startsWith(NEW_PREFIX)) return (map.get(v) ?? v) as T;
+  if (Array.isArray(v)) return v.map((x) => replacePlaceholders(x, map)) as T;
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, replacePlaceholders(x, map)])) as T;
+  return v;
+}
+
+export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
+  requirePermission(actor, "import.run");
+  const opts = commitInput.parse(raw);
+  const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
+  if (!batch) throw notFound();
+  if (batch.status !== "VALIDATED") throw badRequest(batch.status === "UPLOADED" ? "Validate the batch first" : `Batch is already ${batch.status.toLowerCase()}`);
+  const records = await prisma.importRecord.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } });
+  const anyForced = records.some((r) => r.status === "DUPLICATE" && r.forceImport);
+  if ((opts.duplicatePolicy === "import" || anyForced) && !can(actor, "import.override_duplicates")) {
+    throw new AppError(403, "Only an Admin can import duplicate rows", "FORBIDDEN");
+  }
+  const importable = (r: (typeof records)[number]) =>
+    r.status === "VALID" ||
+    (r.status === "WARNING" && opts.approveWarnings) ||
+    (r.status === "DUPLICATE" && (r.forceImport || opts.duplicatePolicy === "import") && (!(r.warnings as string[] | null)?.length || opts.approveWarnings));
+  const toImport = records.filter(importable);
+  if (!toImport.length) throw badRequest("Nothing to import. Approve warnings or fix errors and re-upload.");
+
+  return prisma.$transaction(async (tx) => {
+    // Claim the batch (guards against a double click / concurrent commit).
+    const claimed = await tx.importBatch.updateMany({ where: { id: batchId, status: "VALIDATED" }, data: { status: "IMPORTED", committedAt: new Date() } });
+    if (!claimed.count) throw conflict("This batch is already being imported");
+
+    const placeholders = new Set<string>();
+    for (const r of toImport) collectPlaceholders(r.normalized, placeholders);
+    const masterMap = await createNewMasters(tx, actor, placeholders);
+
+    const outcome = new Map<string, { status: ImportRowStatus; entityIds?: string[]; errors?: string[] }>();
+    const touchedDates = new Set<ISODate>();
+    let imported = 0;
+    let amount = 0;
+    for (const r of toImport) {
+      const norm = replacePlaceholders(r.normalized as any, masterMap);
+      const forced = r.status === "DUPLICATE";
+      try {
+        const main = await insertRecord(tx, actor, norm.module, norm.input, { importBatchId: batchId, allowDuplicate: forced, quietAudit: true });
+        const ids = [main.id];
+        for (const ex of norm.extras ?? []) {
+          const e = await insertRecord(tx, actor, ex.module, ex.input, { importBatchId: batchId, allowDuplicate: true, quietAudit: true });
+          ids.push(e.id);
+        }
+        touchedDates.add(main.date);
+        imported++;
+        amount = round2(amount + main.amount);
+        outcome.set(r.id, { status: "IMPORTED", entityIds: ids });
+      } catch (err) {
+        // Application-level rejections (duplicate appeared since validation, day closed) skip the row;
+        // any database error aborts the whole import so nothing is half-imported.
+        if (err instanceof AppError) outcome.set(r.id, { status: "SKIPPED", errors: [...((r.errors as string[]) ?? []), err.message] });
+        else throw err;
+      }
+    }
+    for (const r of records) {
+      const o = outcome.get(r.id);
+      if (o) {
+        await tx.importRecord.update({ where: { id: r.id }, data: { status: o.status, entityIds: o.entityIds, ...(o.errors ? { errors: o.errors } : {}) } });
+      } else if (r.status !== "INVALID") {
+        await tx.importRecord.update({ where: { id: r.id }, data: { status: "SKIPPED" } });
+      }
+    }
+    const rejected = records.length - imported;
+    const updated = await tx.importBatch.update({
+      where: { id: batchId },
+      data: { imported, rejected, totalAmount: amount, options: opts },
+    });
+    for (const d of touchedDates) await onDayMutated(tx, actor, d, `Import ${batch.fileName}`);
+    await audit(tx, actor, {
+      action: "IMPORT_COMMIT",
+      entityType: "ImportBatch",
+      entityId: batchId,
+      after: { fileName: batch.fileName, sheet: batch.sheetName, type: batch.module, found: records.length, imported, rejected, amount, options: opts, newMasters: [...masterMap.keys()].map((k) => parsePlaceholder(k)) },
+    });
+    return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected, amount, newMasters: masterMap.size };
+  }, LONG_TX);
+}
+
+export async function cancelBatch(actor: Actor, batchId: string) {
+  requirePermission(actor, "import.run");
+  const b = await prisma.importBatch.findUnique({ where: { id: batchId } });
+  if (!b) throw notFound();
+  if (!["UPLOADED", "VALIDATED"].includes(b.status)) throw badRequest("Only un-imported batches can be cancelled");
+  await prisma.$transaction(async (tx) => {
+    await tx.importBatch.update({ where: { id: batchId }, data: { status: "CANCELLED" } });
+    await tx.importRecord.deleteMany({ where: { batchId } }); // staging rows only; nothing was imported
+    await audit(tx, actor, { action: "IMPORT_CANCEL", entityType: "ImportBatch", entityId: batchId });
+  });
+  return { ok: true };
+}
+
+// ─────────────────────────── reverse ───────────────────────────
+
+const IMPORT_TABLES = ["consultation", "ipdTransaction", "ipdAdmission", "labTransaction", "pharmacySale", "pharmacyReturn", "pharmacyPurchase", "dietTransaction", "otherIncome", "expense"] as const;
+
+export async function reverseBatch(actor: Actor, batchId: string, raw: unknown) {
+  requirePermission(actor, "import.reverse");
+  const { reason } = z.object({ reason: z.string().trim().min(5, "Give a reason (min 5 characters)").max(500) }).parse(raw);
+  return prisma.$transaction(async (tx) => {
+    const b = await tx.importBatch.findUnique({ where: { id: batchId } });
+    if (!b) throw notFound();
+    if (b.status !== "IMPORTED") throw badRequest("Only imported batches can be reversed");
+    // Dates touched by the batch must not be closed.
+    const dateRows = await tx.$queryRaw<{ date: Date }[]>`
+      SELECT DISTINCT date FROM (
+        SELECT date FROM "Consultation" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT "admissionDate" FROM "IpdAdmission" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT date FROM "IpdTransaction" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT date FROM "LabTransaction" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT date FROM "PharmacySale" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT date FROM "PharmacyReturn" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT date FROM "PharmacyPurchase" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT date FROM "DietTransaction" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT date FROM "OtherIncome" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+        UNION SELECT date FROM "Expense" WHERE "importBatchId" = ${batchId} AND status = 'ACTIVE'
+      ) d`;
+    const dates = dateRows.map((d) => fromDbDate(d.date));
+    const statuses = await getDayStatuses(tx, dates);
+    const closed = dates.filter((d) => statuses.get(d) === "CLOSED");
+    if (closed.length) throw badRequest(`Reopen these closed days first: ${closed.slice(0, 10).join(", ")}${closed.length > 10 ? "…" : ""}`);
+    // Admission payments recorded later (not part of this batch) would be orphaned.
+    const foreignPayments = await tx.ipdTransaction.count({ where: { status: "ACTIVE", importBatchId: { not: batchId }, admission: { importBatchId: batchId } } });
+    if (foreignPayments) throw badRequest(`${foreignPayments} payment(s) were recorded later against admissions from this batch. Void them first.`);
+    const counts: Record<string, number> = {};
+    for (const t of IMPORT_TABLES) {
+      const r = await (tx as any)[t].updateMany({ where: { importBatchId: batchId, status: "ACTIVE" }, data: { status: "REVERSED" } });
+      counts[t] = r.count;
+    }
+    // Rows that were corrected after import live on as their (non-batch) corrected versions.
+    let corrected = 0;
+    for (const t of IMPORT_TABLES) corrected += await (tx as any)[t].count({ where: { importBatchId: batchId, status: "SUPERSEDED" } });
+    await tx.importRecord.updateMany({ where: { batchId, status: "IMPORTED" }, data: { status: "REVERSED" } });
+    await tx.importBatch.update({ where: { id: batchId }, data: { status: "REVERSED", reversedAt: new Date(), reversedById: actor.id, reverseReason: reason } });
+    for (const d of dates) await onDayMutated(tx, actor, d, `Import batch ${b.fileName} reversed`);
+    await audit(tx, actor, { action: "IMPORT_REVERSE", entityType: "ImportBatch", entityId: batchId, before: { status: "IMPORTED" }, after: { status: "REVERSED", counts }, reason });
+    return { reversed: Object.values(counts).reduce((a, b) => a + b, 0), counts, correctedRowsNotReversed: corrected };
+  }, LONG_TX);
+}
+
+// ─────────────────────────── history & error file ───────────────────────────
+
+export async function importHistory(actor: Actor, q: { page?: string }) {
+  requirePermission(actor, "import.run");
+  const page = Math.max(1, Number(q.page) || 1);
+  const [rows, total] = await Promise.all([
+    prisma.importBatch.findMany({ orderBy: { createdAt: "desc" }, skip: (page - 1) * 30, take: 30 }),
+    prisma.importBatch.count(),
+  ]);
+  const users = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.flatMap((r) => [r.uploadedById, r.reversedById].filter(Boolean) as string[]))] } }, select: { id: true, name: true } });
+  return {
+    total,
+    page,
+    rows: rows.map((r) => ({
+      ...r,
+      headers: undefined,
+      mapping: undefined,
+      totalAmount: toNum(r.totalAmount),
+      typeLabel: IMPORT_TYPES.find((t) => t.key === r.module)?.label ?? r.module,
+      uploadedBy: users.find((u) => u.id === r.uploadedById)?.name ?? "—",
+      reversedBy: users.find((u) => u.id === r.reversedById)?.name ?? null,
+    })),
+  };
+}
+
+export async function errorWorkbook(actor: Actor, batchId: string): Promise<Buffer> {
+  requirePermission(actor, "import.run");
+  const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
+  if (!batch) throw notFound();
+  const rows = await prisma.importRecord.findMany({
+    where: { batchId, status: { in: ["INVALID", "DUPLICATE", "WARNING", "SKIPPED"] } },
+    orderBy: { rowNumber: "asc" },
+  });
+  const headers = batch.headers as string[];
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Rows to fix");
+  ws.addRow(["Excel Row", "Status", "Errors", "Warnings", "Duplicate Of", ...headers]);
+  ws.getRow(1).font = { bold: true };
+  for (const r of rows) {
+    const raw = r.raw as Record<string, unknown>;
+    ws.addRow([
+      r.rowNumber,
+      r.status,
+      ((r.errors as string[]) ?? []).join("; "),
+      ((r.warnings as string[]) ?? []).join("; "),
+      r.duplicateOf ?? "",
+      ...headers.map((h) => (raw[h] as string | number | null) ?? ""),
+    ]);
+  }
+  ws.columns.forEach((c, i) => (c.width = i < 5 ? [10, 12, 50, 40, 22][i] : 16));
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
