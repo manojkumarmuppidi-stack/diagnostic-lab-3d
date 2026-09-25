@@ -2,6 +2,21 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## [0.2.0] — 2026-09-25 — Insights & Board Meeting pack
+
+### Added
+- **Insight engine** (`src/lib/insights.ts`): plain-English findings from current-vs-previous figures — biggest riser/faller, concentration risk, mix shift, activity that stopped, KPI moves, costs growing faster than revenue, operating loss. Every insight shows the numbers behind it and links to the transactions.
+- **Insights & comparison panels** on OPD, IPD, Laboratory, Pharmacy, Diet, Expenses, every Analytics tab and Daily Accounts (vs the same weekday last week): KPI deltas, comparison bars (current vs previous) and share pies with a table view for every chart.
+- **Dashboard**: key-insights strip and comparison bars + pies for income by stream, expenditure and payment modes.
+- **Board Meeting pack** (`/meeting`): 12-slide presentation — cover, executive summary, six-month trend, revenue mix (pies this vs last period), operations & collections, one slide per department, key findings with method notes. Full-screen slideshow (← → keys, Esc), prints one slide per A4-landscape page (Save as PDF).
+- Month-to-date ranges compare with the same days of the previous month; compact period labels ("1–25 Sep 2026").
+- 7 new unit/integration tests (117 total).
+
+### Changed
+- Removed the old per-module KPI strip (superseded by the comparison KPIs).
+- Compact currency drops trailing zeros (₹60 L, not ₹60.00 L); chart legends use text colours; pie slices beyond the sixth fold into "Other" with a distinct neutral.
+- Demo seed posts monthly bills even when the 5th falls on a Sunday.
+
 ## [0.1.0] — 2026-09-25
 
 ### Phase 1 — Project setup

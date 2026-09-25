@@ -27,6 +27,7 @@ import {
   Users,
   X,
   Database,
+  Presentation,
 } from "lucide-react";
 import type { PermissionCode } from "@/lib/permissions";
 import type { ModuleKey } from "@/lib/modules";
@@ -53,6 +54,7 @@ export const NAV: NavItem[] = [
   { href: "/expenses", label: "Expenses", icon: Receipt, perm: "expense.view" },
   { href: "/accounting", label: "Accounting & Reconciliation", icon: BookCheck, perm: "accounts.view" },
   { href: "/analytics", label: "Analytics", icon: BarChart3, perm: "analytics.view" },
+  { href: "/meeting", label: "Board Meeting", icon: Presentation, perm: "analytics.view" },
   { href: "/reports", label: "Reports", icon: ClipboardList, perm: "reports.view" },
   { href: "/import", label: "Excel Import", icon: Upload, perm: "import.run" },
   { href: "/export", label: "Excel Export", icon: Download, perm: "reports.export" },
@@ -124,7 +126,7 @@ function Shell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="min-h-screen lg:flex">
+    <div className="app-root min-h-screen lg:flex">
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r lg:flex no-print" style={{ background: "var(--surface)", borderColor: "var(--border)" }}>
         <div className="flex items-center gap-2 border-b px-4 py-4" style={{ borderColor: "var(--border)" }}>
@@ -149,7 +151,7 @@ function Shell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="app-main flex min-w-0 flex-1 flex-col">
         {/* Top bar */}
         <header className="sticky top-0 z-30 flex items-center gap-2 border-b px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] no-print sm:px-6" style={{ background: "color-mix(in srgb, var(--surface) 92%, transparent)", borderColor: "var(--border)", backdropFilter: "blur(8px)" }}>
           <button className="btn btn-ghost lg:hidden" onClick={() => setDrawer(true)} aria-label="Open menu">

@@ -204,3 +204,21 @@ describe("pharmacy & expenses", () => {
     await expect(createTransaction(f.accounts, "expense", { date: D, categoryId: f.ids.otherExp, subcategoryId: f.ids.veg, description: "x", amount: 1, paymentModeId: f.ids.CASH })).rejects.toThrow(/does not belong/);
   });
 });
+
+describe("insights & board pack", () => {
+  it("compares sections period-on-period and respects permissions", async () => {
+    const { getSectionInsights, getBoardPack } = await import("@/server/services/insights");
+    await createTransaction(f.reception, "opd", opd({ date: "2026-08-05", grossAmount: 500, discount: 0 }));
+    await createTransaction(f.reception, "opd", opd({ date: "2026-09-05", patientCode: "P-2", grossAmount: 1000, discount: 0 }));
+    const r = await getSectionInsights(f.admin, "opd", { from: "2026-09-01", to: "2026-09-30" });
+    expect(r.period.previous).toMatchObject({ from: "2026-08-01", to: "2026-08-31" });
+    const rev = r.section.kpis.find((k) => k.key === "revenue")!;
+    expect([rev.current, rev.previous]).toEqual([1000, 500]);
+    expect(r.section.insights.some((i) => /OPD revenue up 100\.0%/.test(i.headline))).toBe(true);
+    await expect(getSectionInsights(f.reception, "expense", {})).rejects.toThrow(/permission/);
+    const pack = await getBoardPack(f.management, { from: "2026-09-01", to: "2026-09-30" });
+    expect(pack.sections.map((s) => s.key)).toContain("overview");
+    expect(pack.trend).toHaveLength(6);
+    await expect(getBoardPack(f.reception, {})).rejects.toThrow();
+  });
+});

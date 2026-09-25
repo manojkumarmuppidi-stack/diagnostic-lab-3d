@@ -11,6 +11,7 @@ import { STREAM_HREF, withRange } from "@/lib/drill";
 import { Badge, Button, Card, ConfirmDialog, ErrorState, PageHeader, Spinner, StatusBadge, useToast } from "@/components/ui";
 import { Guard } from "@/components/Guard";
 import { useCan, useSession } from "@/components/session";
+import { ModuleInsights } from "@/components/insights/ModuleInsights";
 
 interface ReconLine {
   group: string;
@@ -281,6 +282,8 @@ function DayView({ date }: { date: string }) {
           </div>
         )}
       </Card>
+
+      <ModuleInsights section="overview" defaultOpen={false} query={{ from: date, to: date, compareFrom: addDays(date, -7), compareTo: addDays(date, -7) }} title="Compare with the same weekday last week" />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card title="Volumes">

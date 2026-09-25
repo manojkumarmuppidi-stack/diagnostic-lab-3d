@@ -14,6 +14,7 @@ import { Kpi } from "@/components/Kpi";
 import { PeriodPicker, periodQuery, type PeriodValue } from "@/components/PeriodPicker";
 import { BarsChart, ChartCard, DonutChart, SLOT, STREAM_COLORS, TrendChart } from "@/components/charts/Charts";
 import { masterOptions, useMasters } from "@/components/session";
+import { ModuleInsights } from "@/components/insights/ModuleInsights";
 
 type Tab = "revenue" | "opd" | "ipd" | "lab" | "pharmacy" | "expense" | "profitability";
 const TABS: { key: Tab; label: string }[] = [
@@ -112,6 +113,12 @@ function Inner() {
         {loading && !data && <Spinner />}
         {data && (
           <div style={{ opacity: loading ? 0.6 : 1 }} className="space-y-4">
+            <ModuleInsights
+              key={`${tab}-${JSON.stringify(period)}`}
+              section={({ revenue: "overview", profitability: "overview", opd: "opd", ipd: "ipd", lab: "lab", pharmacy: "pharmacy", expense: "expense" } as const)[tab]}
+              query={periodQuery(period)}
+              title="Insights, comparison bars & share pies"
+            />
             {tab === "revenue" && <Revenue d={data.data} g={g} drill={drill} filtered={!!(filters.doctorId || filters.specialtyId || filters.departmentId)} />}
             {tab === "opd" && <Opd d={data.data} g={g} drill={drill} />}
             {tab === "ipd" && <Ipd d={data.data} g={g} drill={drill} />}

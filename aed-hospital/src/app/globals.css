@@ -29,6 +29,8 @@
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-critical: #d03b3b;
+  --prev-bar: #b9c2cf;
+  --other-slice: #d6dbe3;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -54,6 +56,8 @@
     --series-6: #008300;
     --series-7: #9085e9;
     --series-8: #e66767;
+    --prev-bar: #4b5563;
+    --other-slice: #3a4150;
   }
 }
 :root[data-theme="dark"] {
@@ -78,6 +82,8 @@
   --series-6: #008300;
   --series-7: #9085e9;
   --series-8: #e66767;
+  --prev-bar: #4b5563;
+  --other-slice: #3a4150;
 }
 
 html,
@@ -184,5 +190,186 @@ body {
 @media print {
   .no-print {
     display: none !important;
+  }
+}
+
+/* ───────────── Board Meeting deck (always dark, navy + gold) ───────────── */
+.present-root {
+  color-scheme: dark;
+  --bg: #070b16;
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-2: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.1);
+  --text: #f4f6fb;
+  --text-2: #c3c9d6;
+  --text-3: #8d96a8;
+  --good: #4fd17a;
+  --bad: #ff7b7b;
+  --chart-surface: #0d1426;
+  --grid: rgba(255, 255, 255, 0.08);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --prev-bar: #4b5563;
+  --other-slice: #3a4150;
+  --gold: #c9a227;
+  color: var(--text);
+  border-radius: 1.5rem;
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(57, 135, 229, 0.18), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(201, 162, 39, 0.14), transparent 55%),
+    linear-gradient(180deg, #0a1122 0%, #070b16 100%);
+  padding: clamp(0.75rem, 2vw, 1.5rem);
+}
+.present-root .card {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.present-root .slide {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  padding: clamp(1rem, 3vw, 2.5rem);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+  box-shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.present-root .slide-kicker {
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--gold);
+  font-weight: 600;
+}
+.present-root .slide-title {
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-top: 0.25rem;
+}
+.present-root .cover {
+  min-height: min(78vh, 760px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.present-root .cover-title {
+  font-size: clamp(2.4rem, 6vw, 4.5rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  margin-top: 0.75rem;
+  background: linear-gradient(90deg, #ffffff 0%, #dfe7f7 55%, #e9c85a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.present-root .cover-glow {
+  position: absolute;
+  inset: auto -20% -40% auto;
+  width: 60%;
+  aspect-ratio: 1;
+  background: radial-gradient(circle, rgba(201, 162, 39, 0.22), transparent 60%);
+  pointer-events: none;
+}
+.present-root .gold-rule {
+  width: 7rem;
+  height: 3px;
+  margin: 1.75rem 0 1.25rem;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--gold), transparent);
+}
+.present-root .kpi-present,
+.present-root .panel-present,
+.present-root .insight-present {
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025));
+  border-color: var(--border);
+  backdrop-filter: blur(6px);
+}
+.present-root .table th {
+  background: rgba(255, 255, 255, 0.05);
+}
+/* Full-screen slideshow */
+.present-root.is-presenting {
+  border-radius: 0;
+  height: 100vh;
+  overflow: auto;
+  padding: 2vh 3vw 9vh;
+}
+.present-root.is-presenting .slide {
+  min-height: 88vh;
+}
+.present-controls {
+  position: fixed;
+  left: 50%;
+  bottom: 2.5vh;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 0.9rem;
+  border-radius: 999px;
+  background: rgba(10, 17, 34, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  backdrop-filter: blur(10px);
+  z-index: 70;
+}
+.present-controls button:disabled {
+  opacity: 0.3;
+}
+
+@media print {
+  /* Flex/sticky app chrome does not paginate — flatten it for printing. */
+  html,
+  body,
+  .app-root,
+  .app-main {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  @page {
+    size: A4 landscape;
+    margin: 0;
+  }
+  .present-root .slide-page {
+    padding: 7mm;
+    background: #070b16;
+  }
+  html,
+  body {
+    background: #070b16 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  .present-root,
+  .present-root.is-presenting {
+    border-radius: 0;
+    padding: 0;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .present-root .slide {
+    overflow: visible;
+    min-height: 186mm;
+    box-shadow: none;
+  }
+  .present-root .slide-page + .slide-page {
+    break-before: page;
+  }
+  .present-root .space-y-6 > * + * {
+    margin-top: 0 !important;
   }
 }

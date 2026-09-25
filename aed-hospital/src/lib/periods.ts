@@ -3,7 +3,6 @@ import {
   addMonths,
   daysBetweenInclusive,
   endOfMonth,
-  formatDate,
   isISODate,
   startOfMonth,
   startOfWeek,
@@ -63,8 +62,20 @@ export function startOfYear(iso: ISODate, fyStartMonth = 1): ISODate {
   return `${startYear}-${String(fyStartMonth).padStart(2, "0")}-01`;
 }
 
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Compact range label: "1–25 Sep 2026", "28 Aug – 3 Sep 2026", "1 Dec 2025 – 5 Jan 2026". */
+export function shortRangeLabel(from: ISODate, to: ISODate): string {
+  const [fy, fm, fd] = from.split("-").map(Number);
+  const [ty, tm, td] = to.split("-").map(Number);
+  if (from === to) return `${td} ${MON[tm - 1]} ${ty}`;
+  if (fy === ty && fm === tm) return `${fd}–${td} ${MON[tm - 1]} ${ty}`;
+  if (fy === ty) return `${fd} ${MON[fm - 1]} – ${td} ${MON[tm - 1]} ${ty}`;
+  return `${fd} ${MON[fm - 1]} ${fy} – ${td} ${MON[tm - 1]} ${ty}`;
+}
+
 function range(from: ISODate, to: ISODate, label?: string): DateRange {
-  return { from, to, label: label ?? (from === to ? formatDate(from) : `${formatDate(from)} – ${formatDate(to)}`) };
+  return { from, to, label: label ?? shortRangeLabel(from, to) };
 }
 
 /** Clip `to` so it never exceeds `max`. */

@@ -14,6 +14,8 @@ import { PeriodPicker, periodQuery, type PeriodValue } from "@/components/Period
 import { BarsChart, ChartCard, DonutChart, STREAM_COLORS } from "@/components/charts/Charts";
 import { useCan } from "@/components/session";
 import { STREAM_HREF, withRange } from "@/lib/drill";
+import { ComparisonCard, InsightList, type SectionData } from "@/components/insights/InsightViews";
+import { Lightbulb, Presentation } from "lucide-react";
 
 interface Summary {
   income: IncomeByStream;
@@ -40,6 +42,7 @@ export default function DashboardPage() {
   const { data, error, loading, reload } = useApi<DashboardData>(period.preset === "custom" && (!period.from || !period.to) ? null : `/api/dashboard${qs(periodQuery(period))}`);
   const router = useRouter();
   const can = useCan();
+  const ins = useApi<{ section: SectionData }>(period.preset === "custom" && (!period.from || !period.to) ? null : `/api/insights/overview${qs(periodQuery(period))}`);
 
   return (
     <div className="space-y-5">
@@ -75,6 +78,22 @@ export default function DashboardPage() {
                 );
               })}
             </div>
+          )}
+
+          {ins.data && ins.data.section.insights.length > 0 && (
+            <section className="rounded-2xl border p-4" style={{ borderColor: "var(--border)", background: "linear-gradient(135deg, color-mix(in srgb, var(--brand) 8%, var(--surface)), var(--surface))" }}>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-semibold">
+                  <Lightbulb className="h-4 w-4" style={{ color: "var(--status-warning)" }} /> Key insights · {data.period.current.label} vs {data.period.previous.label}
+                </h2>
+                {can("analytics.view") && (
+                  <Link href="/meeting" className="btn btn-secondary btn-sm">
+                    <Presentation className="h-4 w-4" /> Board meeting pack
+                  </Link>
+                )}
+              </div>
+              <InsightList insights={ins.data.section.insights} limit={6} />
+            </section>
           )}
 
           <Section title="Financial result">
@@ -206,6 +225,15 @@ export default function DashboardPage() {
               </div>
             </Card>
           </div>
+          {ins.data && (
+            <Section title={`Comparison · ${data.period.current.label} vs ${data.period.previous.label}`}>
+              <div className="grid gap-4">
+                {ins.data.section.comparisons.map((c) => (
+                  <ComparisonCard key={c.id} c={c} curLabel={data.period.current.label} prevLabel={data.period.previous.label} />
+                ))}
+              </div>
+            </Section>
+          )}
           <p className="text-xs muted">
             Figures use the transaction date and include only active records (voided, superseded and reversed entries are excluded). Pharmacy purchases are counted once, as expenditure; see Analytics → Pharmacy for gross margin.
           </p>

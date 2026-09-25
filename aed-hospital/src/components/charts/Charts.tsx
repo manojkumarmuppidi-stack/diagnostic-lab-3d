@@ -175,9 +175,9 @@ export function TrendChart({
       >
         <CartesianGrid stroke="var(--grid)" vertical={false} />
         <XAxis dataKey={xKey} tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--grid)" }} tickFormatter={(v) => bucketLabel(String(v), granularity)} minTickGap={16} />
-        <YAxis tick={axisStyle} tickLine={false} axisLine={false} tickFormatter={fmtAxis(format)} width={64} />
+        <YAxis tick={axisStyle} tickLine={false} axisLine={false} tickFormatter={fmtAxis(format)} width={72} />
         <Tooltip content={<TooltipBox format={format} labelFormatter={(l) => bucketLabel(l, granularity)} />} cursor={{ stroke: "var(--text-3)", strokeDasharray: "3 3" }} />
-        {series.length > 1 && <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, color: "var(--text-2)" }} />}
+        {series.length > 1 && <Legend iconType="plainline" wrapperStyle={{ fontSize: 12, color: "var(--text-2)" }} formatter={(v: string) => <span style={{ color: "var(--text-2)" }}>{v}</span>} />}
         {series.map((s) => (
           <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2} dot={data.length <= 31 ? { r: 3, strokeWidth: 0, fill: s.color } : false} activeDot={{ r: 5, stroke: "var(--chart-surface)", strokeWidth: 2 }} isAnimationActive={false} />
         ))}
@@ -217,9 +217,9 @@ export function BarsChart({
         {horizontal && <XAxis type="number" tick={axisStyle} tickLine={false} axisLine={false} tickFormatter={fmtAxis(format)} />}
         {horizontal && <YAxis type="category" dataKey={xKey} tick={axisStyle} tickLine={false} axisLine={false} width={120} />}
         {!horizontal && <XAxis dataKey={xKey} tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--grid)" }} tickFormatter={tickFmt} minTickGap={8} />}
-        {!horizontal && <YAxis tick={axisStyle} tickLine={false} axisLine={false} tickFormatter={fmtAxis(format)} width={64} />}
+        {!horizontal && <YAxis tick={axisStyle} tickLine={false} axisLine={false} tickFormatter={fmtAxis(format)} width={72} />}
         <Tooltip content={<TooltipBox format={format} labelFormatter={granularity ? (l) => bucketLabel(l, granularity) : undefined} />} cursor={{ fill: "color-mix(in srgb, var(--text-3) 10%, transparent)" }} />
-        {series.length > 1 && <Legend wrapperStyle={{ fontSize: 12, color: "var(--text-2)" }} iconType="square" />}
+        {series.length > 1 && <Legend wrapperStyle={{ fontSize: 12, color: "var(--text-2)" }} iconType="square" formatter={(v: string) => <span style={{ color: "var(--text-2)" }}>{v}</span>} />}
         {series.map((s, i) => (
           <Bar
             key={s.key}

@@ -67,7 +67,8 @@ test("daily accounts show the statement and closing workflow", async ({ page }) 
 
 test("role-based access: reception cannot see or open expenses", async ({ page }) => {
   await login(page, "reception", DEMO_PASSWORD);
-  await expect(page.getByRole("link", { name: "Expenses" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Expenses", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "OPD", exact: true })).toHaveCount(1);
   await page.goto("/expenses");
   await expect(page.getByText("You do not have access to this page")).toBeVisible();
   const res = await page.request.get("/api/tx/expense");
@@ -78,4 +79,17 @@ test("audit log records activity", async ({ page }) => {
   await login(page);
   await page.goto("/audit");
   await expect(page.getByRole("cell", { name: "LOGIN" }).first()).toBeVisible();
+});
+
+test("board meeting pack: slides, present mode and keyboard navigation", async ({ page }) => {
+  await login(page);
+  await page.goto("/meeting");
+  await expect(page.getByRole("heading", { name: "What changed this period" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Revenue mix and movement" })).toBeVisible();
+  await page.getByRole("button", { name: "Present", exact: true }).click();
+  await expect(page.locator(".cover-title")).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("heading", { name: "What changed this period" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Present", exact: true })).toBeVisible();
 });

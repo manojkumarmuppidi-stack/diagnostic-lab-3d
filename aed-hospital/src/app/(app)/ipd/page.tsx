@@ -5,7 +5,7 @@ import Link from "next/link";
 import { PageHeader, Spinner, Tabs, Card, EmptyState } from "@/components/ui";
 import { Guard } from "@/components/Guard";
 import { ModuleList } from "@/components/ModuleList";
-import { ModuleSummary } from "@/components/ModuleSummary";
+import { ModuleInsights } from "@/components/insights/ModuleInsights";
 import { useApi } from "@/lib/client";
 import { formatDate } from "@/lib/dates";
 import { formatINR } from "@/lib/money";
@@ -63,7 +63,7 @@ function IpdInner() {
   };
   return (
     <div className="space-y-4">
-      <ModuleSummary module="ipd" />
+      <ModuleInsights section="ipd" />
       <Tabs<Tab>
         value={tab}
         onChange={setTab}

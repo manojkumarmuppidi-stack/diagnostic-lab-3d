@@ -206,6 +206,13 @@ async function seedDemo() {
 
   for (let d = start; d < today; d = addDays(d, 1)) {
     const dow = new Date(`${d}T00:00:00Z`).getUTCDay();
+    if (d.endsWith("-05")) {
+      for (const [name, amount] of [["Electricity", between(38, 52) * 1000], ["Water", between(6, 9) * 1000], ["Marketing", between(15, 30) * 1000], ["Salaries & Wages", between(1750, 1850) * 1000], ["Rent", 300000]] as const) {
+        const cat = topCats.find((c) => c.name === name)!;
+        expenses.push({ date: toDbDate(d), categoryId: cat.id, departmentId: depts.Administration, description: `${name} – monthly (demo)`, vendor: "Demo Utility", billNumber: `DEMO-${name}-${d}`, amount, paymentModeId: modes.BANK, fingerprint: fingerprintFor("expense", { date: d, vendor: "Demo Utility", billNumber: `DEMO-${name}-${d}`, categoryId: cat.id }, amount), createdById: by });
+      }
+      others.push({ date: toDbDate(d), source: "Canteen Rent (demo)", amount: 8000, paymentModeId: modes.BANK, fingerprint: fingerprintFor("other-income", { date: d, source: "Canteen Rent (demo)" }, 8000), createdById: by });
+    }
     if (dow === 0) continue; // closed on Sundays
     const growth = 1 + (118 - (Date.parse(today) - Date.parse(d)) / 86_400_000) / 400; // mild growth trend
     const nOpd = Math.round(between(28, 55) * growth * (dow === 6 ? 0.7 : 1));
@@ -276,13 +283,7 @@ async function seedDemo() {
         fingerprint: fingerprintFor("expense", { date: d, vendor: "Demo Vendor", billNumber: bill, categoryId: cat.id }, amount), createdById: by,
       });
     }
-    if (d.endsWith("-05")) {
-      for (const [name, amount] of [["Electricity", between(38, 52) * 1000], ["Water", between(6, 9) * 1000], ["Marketing", between(15, 30) * 1000], ["Salaries & Wages", between(1750, 1850) * 1000], ["Rent", 300000]] as const) {
-        const cat = topCats.find((c) => c.name === name)!;
-        expenses.push({ date: toDbDate(d), categoryId: cat.id, departmentId: depts.Administration, description: `${name} – monthly (demo)`, vendor: "Demo Utility", billNumber: `DEMO-${name}-${d}`, amount, paymentModeId: modes.BANK, fingerprint: fingerprintFor("expense", { date: d, vendor: "Demo Utility", billNumber: `DEMO-${name}-${d}`, categoryId: cat.id }, amount), createdById: by });
-      }
-      others.push({ date: toDbDate(d), source: "Canteen Rent (demo)", amount: 8000, paymentModeId: modes.BANK, fingerprint: fingerprintFor("other-income", { date: d, source: "Canteen Rent (demo)" }, 8000), createdById: by });
-    }
+
   }
   const chunk = async <T,>(rows: T[], fn: (c: T[]) => Promise<unknown>) => {
     for (let i = 0; i < rows.length; i += 2000) await fn(rows.slice(i, i + 2000));

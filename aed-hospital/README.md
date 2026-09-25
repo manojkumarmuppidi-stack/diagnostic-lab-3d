@@ -2,6 +2,11 @@
 
 Income, expenditure, daily closing, reconciliation, historical Excel import and analytics for **AED Hospital, KPHB, Hyderabad**. It is a responsive web app/PWA for desktop, tablet, Android and iPhone.
 
+## Board meetings
+Open **Board Meeting** in the menu, pick the period, then **Present** (full screen, ← → keys) or **PDF** (one slide per page). Every module page and analytics tab also carries an *Insights & comparison* panel with comparison bars and share pies.
+
+> The demo seed is fictional. Import real AED data before presenting figures.
+
 ## Quick start (development)
 ```bash
 cp .env.example .env            # set DATABASE_URL and SEED_ADMIN_PASSWORD

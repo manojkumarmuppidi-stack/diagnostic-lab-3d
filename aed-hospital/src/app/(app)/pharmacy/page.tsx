@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PageHeader, Spinner, Tabs } from "@/components/ui";
 import { Guard } from "@/components/Guard";
 import { ModuleList } from "@/components/ModuleList";
-import { ModuleSummary } from "@/components/ModuleSummary";
+import { ModuleInsights } from "@/components/insights/ModuleInsights";
 
 type Tab = "sales" | "purchases" | "returns";
 
@@ -21,7 +21,7 @@ function Inner() {
   };
   return (
     <div className="space-y-4">
-      <ModuleSummary module="pharmacy-sale" />
+      <ModuleInsights section="pharmacy" />
       <Tabs<Tab>
         value={tab}
         onChange={setTab}

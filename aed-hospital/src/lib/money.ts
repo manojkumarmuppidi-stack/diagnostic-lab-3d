@@ -50,9 +50,10 @@ export function formatINRCompact(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return "—";
   const abs = Math.abs(n);
   const sign = n < 0 ? "−" : "";
-  if (abs >= 1e7) return `${sign}₹${(abs / 1e7).toFixed(2)} Cr`;
-  if (abs >= 1e5) return `${sign}₹${(abs / 1e5).toFixed(2)} L`;
-  if (abs >= 1e3) return `${sign}₹${(abs / 1e3).toFixed(1)} K`;
+  const trim = (x: number, d: number) => String(Number(x.toFixed(d)));
+  if (abs >= 1e7) return `${sign}₹${trim(abs / 1e7, 2)} Cr`;
+  if (abs >= 1e5) return `${sign}₹${trim(abs / 1e5, 2)} L`;
+  if (abs >= 1e3) return `${sign}₹${trim(abs / 1e3, 1)} K`;
   return `${sign}₹${abs.toFixed(0)}`;
 }
 

@@ -141,6 +141,8 @@ All routes live under `/api`, return JSON unless they are downloads, and are pro
 | `/api/templates/[module]` | GET | Downloadable template (.xlsx) |
 | `/api/export/[module]` | GET | Raw transaction export (xlsx/csv) |
 | `/api/reports/[type]` | GET | Report JSON / xlsx / csv / pdf |
+| `/api/insights/[section]` | GET | KPI deltas, comparisons (bars/pies) and insights for overview/opd/ipd/lab/pharmacy/diet/expense |
+| `/api/board-pack` | GET | Board Meeting pack (all permitted sections + 6-month trend + top findings) |
 | `/api/search` | GET | Global search |
 | `/api/users`, `/api/users/[id]`, `/api/roles`, `/api/roles/[id]` | GET, POST, PATCH | Users and role-permission matrix |
 | `/api/audit` | GET | Audit log query |
