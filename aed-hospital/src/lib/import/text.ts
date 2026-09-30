@@ -71,8 +71,23 @@ export function matchByName<T extends NamedItem>(value: string, items: T[], thre
   }
   let best: MatchResult<T> = null;
   for (const it of items) {
+    if (meaningDiffers(v, norm(it.name))) continue;
     const s = Math.max(similarity(v, it.name), it.code ? similarity(v, it.code) : 0);
     if (s >= threshold && (!best || s > best.score)) best = { item: it, exact: false, score: s };
   }
   return best;
+}
+
+/**
+ * Words that flip the meaning of an otherwise similar name. "Thyroid New Consultation" is
+ * 3 edits from "Thyroid Old Consultation", and "T3" is one edit from "T4" — never a typo.
+ */
+const MEANING_WORDS = new Set(["new", "old", "with", "without", "pre", "post", "male", "female", "left", "right", "plain", "contrast", "fasting", "random", "single", "double", "first", "second", "adult", "child", "baby", "free", "total"]);
+export function meaningDiffers(a: string, b: string): boolean {
+  const ta = new Set(a.split(" "));
+  const tb = new Set(b.split(" "));
+  for (const t of ta) if (MEANING_WORDS.has(t) && !tb.has(t)) return true;
+  for (const t of tb) if (MEANING_WORDS.has(t) && !ta.has(t)) return true;
+  const digits = (s: string) => (s.match(/\d+/g) ?? []).join(",");
+  return digits(a) !== digits(b);
 }

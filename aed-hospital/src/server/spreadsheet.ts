@@ -18,7 +18,10 @@ export interface SheetData {
   rows: { rowNumber: number; values: Record<string, Cell> }[];
 }
 
-export const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB || 10) * 1024 * 1024;
+// Vercel functions accept at most 4.5 MB request bodies. Browsers gzip large files before
+// upload (see import page), so the file itself may be larger than the request.
+export const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_MB || (process.env.VERCEL ? 4 : 10)) * 1024 * 1024;
+export const MAX_FILE_BYTES = 40 * 1024 * 1024;
 const MAX_ROWS = 50_000;
 
 export type FileKind = "xlsx" | "xls" | "csv";
@@ -199,7 +202,7 @@ export function parseCsv(text: string): Cell[][] {
 
 export async function readSpreadsheet(fileName: string, buf: Buffer): Promise<SheetData[]> {
   if (buf.length === 0) throw badRequest("The file is empty");
-  if (buf.length > MAX_UPLOAD_BYTES) throw badRequest(`File too large (max ${Math.round(MAX_UPLOAD_BYTES / 1024 / 1024)} MB)`);
+  if (buf.length > MAX_FILE_BYTES) throw badRequest(`File too large (max ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB). Export one month at a time.`);
   const kind = detectKind(fileName, buf);
   let sheets: SheetData[];
   if (kind === "xlsx") sheets = await readXlsx(buf);

@@ -19,9 +19,11 @@ import { can, requirePermission, type Actor } from "../authz";
 import { getDayStatuses, onDayMutated } from "../closing";
 import { prisma, type Tx } from "../db";
 import { AppError, badRequest, conflict, notFound } from "../errors";
-import { readSpreadsheet } from "../spreadsheet";
+import { readSpreadsheet, type SheetData } from "../spreadsheet";
+import { convertHmsSheet, HmsReportError, HMS_LABELS, type ConvertedSheet } from "@/lib/import/hms";
 import { fingerprintFor } from "./modules";
-import { insertRecord } from "./transactions";
+import { bulkInsertPrepared, insertRecord, prepareRecord } from "./transactions";
+import { withBulkCache } from "../bulk-cache";
 
 const LONG_TX = { timeout: 600_000, maxWait: 20_000 };
 
@@ -48,7 +50,7 @@ export function guessType(sheetName: string, fallback?: string): ImportType | nu
 export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, typeHint?: string) {
   requirePermission(actor, "import.run");
   const safeName = fileName.replace(/[^\w.\- ()]/g, "_").slice(0, 150);
-  const sheets = await readSpreadsheet(safeName, buf);
+  const sheets = expandHmsReports(await readSpreadsheet(safeName, buf));
   const fileHash = createHash("sha256").update(buf).digest("hex");
   const groupId = randomUUID();
   const previous = await prisma.importBatch.findMany({
@@ -59,7 +61,8 @@ export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, ty
   const batches = await prisma.$transaction(async (tx) => {
     const out = [];
     for (const sh of sheets) {
-      const type = guessType(sh.name, sheets.length === 1 ? typeHint : undefined) ?? (typeHint && isImportType(typeHint) ? typeHint : "opd");
+      const hms = "source" in sh ? (sh as ConvertedSheet) : null;
+      const type = hms?.type ?? guessType(sh.name, sheets.length === 1 ? typeHint : undefined) ?? (typeHint && isImportType(typeHint) ? typeHint : "opd");
       const batch = await tx.importBatch.create({
         data: {
           groupId,
@@ -70,11 +73,14 @@ export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, ty
           headers: sh.headers,
           recordsFound: sh.rows.length,
           uploadedById: actor.id,
+          options: hms ? { source: hms.source, sourceLabel: HMS_LABELS[hms.source], note: hms.note } : undefined,
         },
       });
-      await tx.importRecord.createMany({
-        data: sh.rows.map((r) => ({ batchId: batch.id, rowNumber: r.rowNumber, raw: r.values as Prisma.InputJsonValue })),
-      });
+      for (let i = 0; i < sh.rows.length; i += 2000) {
+        await tx.importRecord.createMany({
+          data: sh.rows.slice(i, i + 2000).map((r) => ({ batchId: batch.id, rowNumber: r.rowNumber, raw: r.values as Prisma.InputJsonValue })),
+        });
+      }
       out.push({
         id: batch.id,
         sheetName: sh.name,
@@ -85,12 +91,31 @@ export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, ty
         sample: sh.rows.slice(0, 5).map((r) => r.values),
         suggestion: suggestMapping(sh.headers, importFieldsFor(type)),
         previouslyImported: previous.filter((p) => p.sheetName === sh.name).map((p) => ({ batchId: p.id, at: p.committedAt })),
+        note: hms?.note ?? null,
       });
     }
     await audit(tx, actor, { action: "IMPORT_UPLOAD", entityType: "ImportBatch", entityId: groupId, after: { fileName: safeName, fileHash, sheets: out.map((b) => ({ id: b.id, sheet: b.sheetName, rows: b.rows })) } });
     return out;
   }, LONG_TX);
   return { groupId, fileName: safeName, batches };
+}
+
+/** Replace recognised OneGlance report sheets with converted, month-split sheets. */
+function expandHmsReports(sheets: SheetData[]): (SheetData | ConvertedSheet)[] {
+  const out: (SheetData | ConvertedSheet)[] = [];
+  for (const sh of sheets) {
+    let converted: ConvertedSheet[] | null;
+    try {
+      converted = convertHmsSheet(sh);
+    } catch (e) {
+      if (e instanceof HmsReportError) throw badRequest(e.message);
+      throw e;
+    }
+    if (converted === null) out.push(sh);
+    else if (converted.length) out.push(...converted);
+  }
+  if (!out.length) throw badRequest("No importable rows found in this report");
+  return out;
 }
 
 // ─────────────────────────── masters context ───────────────────────────
@@ -359,58 +384,66 @@ const commitInput = z.object({
 /** Create any master rows referenced by placeholders; returns placeholder → real id. */
 async function createNewMasters(tx: Tx, actor: Actor, placeholders: Set<string>) {
   const map = new Map<string, string>();
+  let createdCount = 0;
   const ordered = [...placeholders].sort((a, b) => (a.includes("expenseSubcategories") ? 1 : 0) - (b.includes("expenseSubcategories") ? 1 : 0));
   for (const ph of ordered) {
     const p = parsePlaceholder(ph)!;
     const name = p.name;
     let created: { id: string };
+    let isNew = false;
+    const make = <T,>(p: Promise<T>) => {
+      isNew = true;
+      return p;
+    };
     const find = async (model: any, extra: object = {}) => model.findFirst({ where: { name: { equals: name, mode: "insensitive" }, ...extra } });
     switch (p.type as NewMasterType) {
       case "specialties":
-        created = (await find(tx.specialty)) ?? (await tx.specialty.create({ data: { name } }));
+        created = (await find(tx.specialty)) ?? (await make(tx.specialty.create({ data: { name } })));
         break;
       case "doctors":
-        created = (await find(tx.doctor, { kind: "DOCTOR" })) ?? (await tx.doctor.create({ data: { name, kind: "DOCTOR" } }));
+        created = (await find(tx.doctor, { kind: "DOCTOR" })) ?? (await make(tx.doctor.create({ data: { name, kind: "DOCTOR" } })));
         break;
       case "dieticians":
-        created = (await find(tx.doctor, { kind: "DIETICIAN" })) ?? (await tx.doctor.create({ data: { name, kind: "DIETICIAN" } }));
+        created = (await find(tx.doctor, { kind: "DIETICIAN" })) ?? (await make(tx.doctor.create({ data: { name, kind: "DIETICIAN" } })));
         break;
       case "consultationTypes":
-        created = (await find(tx.consultationType)) ?? (await tx.consultationType.create({ data: { name } }));
+        created = (await find(tx.consultationType)) ?? (await make(tx.consultationType.create({ data: { name } })));
         break;
       case "admissionTypes":
-        created = (await find(tx.admissionType)) ?? (await tx.admissionType.create({ data: { name } }));
+        created = (await find(tx.admissionType)) ?? (await make(tx.admissionType.create({ data: { name } })));
         break;
       case "ipdPackages":
-        created = (await find(tx.ipdPackage)) ?? (await tx.ipdPackage.create({ data: { name } }));
+        created = (await find(tx.ipdPackage)) ?? (await make(tx.ipdPackage.create({ data: { name } })));
         break;
       case "investigations":
         // Rate 0: imported rows carry their own rate; Admin should set the master rate afterwards.
-        created = (await find(tx.labInvestigation)) ?? (await tx.labInvestigation.create({ data: { name, category: "Imported" } }));
+        created = (await find(tx.labInvestigation)) ?? (await make(tx.labInvestigation.create({ data: { name, category: "Imported" } })));
         break;
       case "dietServices":
-        created = (await find(tx.dietService)) ?? (await tx.dietService.create({ data: { name } }));
+        created = (await find(tx.dietService)) ?? (await make(tx.dietService.create({ data: { name } })));
         break;
       case "departments":
-        created = (await find(tx.department)) ?? (await tx.department.create({ data: { name } }));
+        created = (await find(tx.department)) ?? (await make(tx.department.create({ data: { name } })));
         break;
       case "expenseCategories":
         created =
           (await find(tx.expenseCategory, { parentId: null })) ??
-          (await tx.expenseCategory.create({ data: { name, group: /^other/i.test(name) ? "OTHER" : "HOSPITAL" } }));
+          (await make(tx.expenseCategory.create({ data: { name, group: /^other/i.test(name) ? "OTHER" : "HOSPITAL" } })));
         break;
       case "expenseSubcategories": {
         const parentId = p.parent?.startsWith(NEW_PREFIX) ? map.get(p.parent) : p.parent;
         if (!parentId) throw badRequest(`Cannot resolve parent category for "${name}"`);
         const parent = await tx.expenseCategory.findUniqueOrThrow({ where: { id: parentId } });
-        created = (await find(tx.expenseCategory, { parentId })) ?? (await tx.expenseCategory.create({ data: { name, parentId, group: parent.group } }));
+        created = (await find(tx.expenseCategory, { parentId })) ?? (await make(tx.expenseCategory.create({ data: { name, parentId, group: parent.group } })));
         break;
       }
     }
     map.set(ph, created.id);
+    if (!isNew) continue;
+    createdCount++;
     await audit(tx, actor, { action: "MASTER_CREATE_BY_IMPORT", entityType: `Master:${p.type}`, entityId: created.id, after: { name } });
   }
-  return map;
+  return { map, createdCount };
 }
 
 function collectPlaceholders(v: unknown, out: Set<string>) {
@@ -453,45 +486,68 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
 
     const placeholders = new Set<string>();
     for (const r of toImport) collectPlaceholders(r.normalized, placeholders);
-    const masterMap = await createNewMasters(tx, actor, placeholders);
+    const { map: masterMap, createdCount } = await createNewMasters(tx, actor, placeholders);
 
     const outcome = new Map<string, { status: ImportRowStatus; entityIds?: string[]; errors?: string[] }>();
     const touchedDates = new Set<ISODate>();
     let imported = 0;
     let amount = 0;
-    for (const r of toImport) {
-      const norm = replacePlaceholders(r.normalized as any, masterMap);
-      const forced = r.status === "DUPLICATE";
-      try {
-        const main = await insertRecord(tx, actor, norm.module, norm.input, { importBatchId: batchId, allowDuplicate: forced, quietAudit: true });
-        const ids = [main.id];
-        for (const ex of norm.extras ?? []) {
-          const e = await insertRecord(tx, actor, ex.module, ex.input, { importBatchId: batchId, allowDuplicate: true, quietAudit: true });
-          ids.push(e.id);
+    // One bulk query replaces a duplicate lookup per row; rows that became duplicates since validation are skipped.
+    const existing = await findExistingFingerprints(toImport.filter((r) => r.status !== "DUPLICATE" && r.fingerprint).map((r) => r.fingerprint!));
+    await withBulkCache(async () => {
+      const bulk: { module: ModuleKey; data: Record<string, unknown> }[] = [];
+      for (const r of toImport) {
+        const norm = replacePlaceholders(r.normalized as any, masterMap);
+        if (r.status !== "DUPLICATE" && r.fingerprint && existing.has(r.fingerprint)) {
+          outcome.set(r.id, { status: "SKIPPED", errors: [...((r.errors as string[]) ?? []), "Possible duplicate: a matching record was added after validation"] });
+          continue;
         }
-        touchedDates.add(main.date);
-        imported++;
-        amount = round2(amount + main.amount);
-        outcome.set(r.id, { status: "IMPORTED", entityIds: ids });
-      } catch (err) {
-        // Application-level rejections (duplicate appeared since validation, day closed) skip the row;
-        // any database error aborts the whole import so nothing is half-imported.
-        if (err instanceof AppError) outcome.set(r.id, { status: "SKIPPED", errors: [...((r.errors as string[]) ?? []), err.message] });
-        else throw err;
+        try {
+          const main = await prepareRecord(tx, actor, norm.module, norm.input, batchId);
+          const extras = await Promise.all((norm.extras ?? []).map((ex: { module: ModuleKey; input: unknown }) => prepareRecord(tx, actor, ex.module, ex.input, batchId)));
+          let mainId = main.id;
+          if (main.needsSingleInsert) {
+            // e.g. IPD admission + initial payment: needs the created row, so insert it individually.
+            mainId = (await insertRecord(tx, actor, norm.module, norm.input, { importBatchId: batchId, allowDuplicate: true, quietAudit: true })).id;
+          } else bulk.push({ module: main.module, data: main.data });
+          for (const e of extras) bulk.push({ module: e.module, data: e.data });
+          touchedDates.add(main.date);
+          imported++;
+          amount = round2(amount + main.amount);
+          outcome.set(r.id, { status: "IMPORTED", entityIds: [mainId, ...extras.map((e) => e.id)] });
+        } catch (err) {
+          // Application-level rejections (e.g. day closed) skip the row; any database error aborts the
+          // whole import so nothing is half-imported.
+          if (err instanceof AppError) outcome.set(r.id, { status: "SKIPPED", errors: [...((r.errors as string[]) ?? []), err.message] });
+          else throw err;
+        }
       }
-    }
-    for (const r of records) {
+      await bulkInsertPrepared(tx, bulk);
+    });
+    // Rewrite the staging rows in bulk (one delete + chunked inserts instead of one UPDATE per row).
+    await tx.importRecord.deleteMany({ where: { batchId } });
+    const rewritten = records.map((r) => {
       const o = outcome.get(r.id);
-      if (o) {
-        await tx.importRecord.update({ where: { id: r.id }, data: { status: o.status, entityIds: o.entityIds, ...(o.errors ? { errors: o.errors } : {}) } });
-      } else if (r.status !== "INVALID") {
-        await tx.importRecord.update({ where: { id: r.id }, data: { status: "SKIPPED" } });
-      }
-    }
+      return {
+        id: r.id,
+        batchId,
+        rowNumber: r.rowNumber,
+        raw: r.raw as Prisma.InputJsonValue,
+        normalized: (r.normalized ?? undefined) as Prisma.InputJsonValue | undefined,
+        status: o ? o.status : r.status === "INVALID" ? r.status : ("SKIPPED" as ImportRowStatus),
+        errors: ((o?.errors ?? r.errors) ?? undefined) as Prisma.InputJsonValue | undefined,
+        warnings: (r.warnings ?? undefined) as Prisma.InputJsonValue | undefined,
+        fingerprint: r.fingerprint,
+        duplicateOf: r.duplicateOf,
+        forceImport: r.forceImport,
+        entityIds: (o?.entityIds ?? undefined) as Prisma.InputJsonValue | undefined,
+      };
+    });
+    for (let i = 0; i < rewritten.length; i += 1000) await tx.importRecord.createMany({ data: rewritten.slice(i, i + 1000) });
     const rejected = records.length - imported;
     const updated = await tx.importBatch.update({
       where: { id: batchId },
-      data: { imported, rejected, totalAmount: amount, options: opts },
+      data: { imported, rejected, totalAmount: amount, options: { ...((batch.options as Record<string, unknown> | null) ?? {}), ...opts } },
     });
     for (const d of touchedDates) await onDayMutated(tx, actor, d, `Import ${batch.fileName}`);
     await audit(tx, actor, {
@@ -500,7 +556,7 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
       entityId: batchId,
       after: { fileName: batch.fileName, sheet: batch.sheetName, type: batch.module, found: records.length, imported, rejected, amount, options: opts, newMasters: [...masterMap.keys()].map((k) => parsePlaceholder(k)) },
     });
-    return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected, amount, newMasters: masterMap.size };
+    return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected, amount, newMasters: createdCount };
   }, LONG_TX);
 }
 

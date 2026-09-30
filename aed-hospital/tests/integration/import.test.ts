@@ -139,3 +139,60 @@ describe("Excel import", () => {
     expect((await incomeByStream({ from: "2026-01-05", to: "2026-01-05" })).LAB).toBe(1800);
   });
 });
+
+describe("bulk commit paths", () => {
+  it("IPD rows (admission + payment) and pharmacy rows with returns/purchases import and reverse correctly", async () => {
+    const ipdCsv = "Date,Patient ID,Patient Name,Admission Type,Net Amount,Payment Mode\n05/01/2026,IP-9,In Nine,Sugar Control Plan,40000,Card\n";
+    const up1 = await uploadFile(f.admin, "ipd.csv", Buffer.from(ipdCsv), "ipd");
+    await validateBatch(f.admin, up1.batches[0].id, { type: "ipd", mapping: up1.batches[0].suggestion.mapping });
+    expect((await commitBatch(f.admin, up1.batches[0].id, {})).imported).toBe(1);
+    expect(await prisma.ipdTransaction.count({ where: { type: "FINAL_SETTLEMENT", importBatchId: up1.batches[0].id } })).toBe(1);
+    expect((await incomeByStream({ from: "2026-01-05", to: "2026-01-05" })).IPD).toBe(40000);
+
+    const phCsv = "Date,Invoice,Sales,Discount,Return,Net Sales,Purchases,Payment Mode\n05/01/2026,PH-1,1000,0,100,900,5000,Cash\n06/01/2026,PH-2,500,0,0,500,0,UPI\n";
+    const up2 = await uploadFile(f.admin, "ph.csv", Buffer.from(phCsv), "pharmacy-sale");
+    await validateBatch(f.admin, up2.batches[0].id, { type: "pharmacy-sale", mapping: up2.batches[0].suggestion.mapping });
+    expect((await commitBatch(f.admin, up2.batches[0].id, {})).imported).toBe(2);
+    const inc = await incomeByStream({ from: "2026-01-05", to: "2026-01-06" });
+    expect(inc.PHARMACY).toBe(1400); // 1000 − 100 return + 500
+    const rec = await prisma.importRecord.findFirstOrThrow({ where: { batchId: up2.batches[0].id, rowNumber: 2 } });
+    expect(rec.entityIds).toHaveLength(3); // sale + return + purchase
+    const r = await reverseBatch(f.admin, up2.batches[0].id, { reason: "bulk path reversal test" });
+    expect(r.counts).toMatchObject({ pharmacySale: 2, pharmacyReturn: 1, pharmacyPurchase: 1 });
+    expect((await incomeByStream({ from: "2026-01-05", to: "2026-01-06" })).PHARMACY).toBe(0);
+  });
+});
+
+describe("OneGlance HMS exports", () => {
+  const PREAMBLE = " Period:01/04/2026  - To:30/04/2026\nAdvanced Endocrine and Diabetes Hospital\nAED Hospital; KPHB\nHyderabad - 500072.\n9059600930\nOutpatient Collection Report(01/04/2026 to 30/04/2026)\n\n\n";
+  const OPD_CSV =
+    PREAMBLE +
+    "BillNO,BillDate,BillTime,Patientid,PatientName,DoctorName,Particulars,Quantity,BillAmount,ToatlAmount,Discount,S/C,Refferby,Category,UHID,Area,Admit No\n" +
+    '"170834","01-04-2026","08:08 AM","54001","Mrs.Demo Patient A(45)","Dr.Ravi K Muppidi  ","Diabetes Old Consultation","1","600","600","0","0","Dr.Demo Referrer","","","Demo Area"," ",\n' +
+    '"170839","01-04-2026","08:58 AM","60001","Mr.Demo Patient B(58)","Dr.Ravi K Muppidi  ","Diabetic new consultation and Registration charges","1","1200","1200","200","0","","","","Demo Area"," ",\n' +
+    '"170840","02-04-2026","09:00 AM","60002","Mrs.Demo Patient C(40)","Dr.Ravi K Muppidi  ","Diet Follow up ","1","300","300","0","0","","","",""," ",\n';
+
+  it("converts the Outpatient Collection Report into OPD + Diet batches that import with exact totals", async () => {
+    const up = await uploadFile(f.admin, "Outpatient_Collection_Report.csv", Buffer.from(OPD_CSV));
+    expect(up.batches.map((b) => [b.type, b.sheetName, b.rows])).toEqual([
+      ["opd", "OPD Apr 2026", 2],
+      ["diet", "Diet Apr 2026", 1],
+    ]);
+    expect(up.batches[0].note).toContain("OneGlance");
+    expect(up.batches[0].suggestion.missingRequired).toEqual([]);
+    for (const b of up.batches) {
+      await validateBatch(f.admin, b.id, { type: b.type, mapping: b.suggestion.mapping });
+      await commitBatch(f.admin, b.id, { approveWarnings: true });
+    }
+    const apr = await incomeByStream({ from: "2026-04-01", to: "2026-04-30" });
+    expect(apr.OPD).toBe(1600);
+    expect(apr.DIET).toBe(300);
+    const c = await prisma.consultation.findMany({ orderBy: { reference: "asc" }, include: { specialty: true } });
+    expect(c.map((x) => [x.reference, x.visitType, x.specialty?.name])).toEqual([
+      ["OP-170834", "OLD", "Diabetes"],
+      ["OP-170839", "NEW", "Diabetes"],
+    ]);
+    const batch = await prisma.importBatch.findUniqueOrThrow({ where: { id: up.batches[0].id } });
+    expect((batch.options as any).source).toBe("oneglance-opd");
+  });
+});

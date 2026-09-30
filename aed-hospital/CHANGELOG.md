@@ -2,6 +2,15 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.4.0: OneGlance HMS import
+- The importer recognises OneGlance exports (Outpatient Collection, Bill Item Wise Collection, Pharmacy Collection) and converts them to OPD/Diet, Lab and Pharmacy records, split by month. Lab Bill Collection is refused with guidance. See EXCEL_IMPORT_SPEC.md §8a.
+- "Check all months → Import all months" panel for recognised reports.
+- Browser gzips uploads over 1 MB, so large HMS exports fit Vercel's request limit (40 MB uncompressed max).
+- Fix: new master names longer than about 20 characters were rejected during import validation.
+- Fix: fuzzy matching no longer matches across meaning-changing words or numbers ("New" ↔ "Old", "T3" ↔ "T4").
+- Import results count only master entries actually created.
+- Verified on AED's Apr–Sep 2026 exports: OPD, lab and pharmacy monthly totals match OneGlance to the rupee.
+
 ## 0.3.1: Zero-terminal Vercel setup
 - `vercel-build` applies migrations and the idempotent base seed before `next build`, so importing the repo on Vercel sets up a fresh Neon database without a terminal.
 - The build fails fast when `DIRECT_URL` is missing, `DIRECT_URL` is a pooler URL, or demo data is enabled on production.

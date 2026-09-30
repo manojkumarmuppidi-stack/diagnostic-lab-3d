@@ -24,6 +24,8 @@ interface UploadedBatch {
   sample: Record<string, unknown>[];
   suggestion: { mapping: Mapping; confidence: Record<string, number>; unmappedHeaders: string[]; missingRequired: string[] };
   previouslyImported: { batchId: string; at: string }[];
+  /** Set when the sheet was converted from a recognised OneGlance HMS report. */
+  note?: string | null;
 }
 
 // ─────────────────────────── step 1: upload ───────────────────────────
@@ -40,7 +42,12 @@ function UploadStep({ onUploaded }: { onUploaded: (b: UploadedBatch[], fileName:
     setErr(null);
     try {
       const fd = new FormData();
-      fd.append("file", file);
+      // Compress large files in the browser: HMS exports compress ~10×, which keeps them under the server's request limit.
+      if (file.size > 1_000_000 && typeof CompressionStream !== "undefined") {
+        const gz = await new Response(file.stream().pipeThrough(new CompressionStream("gzip"))).blob();
+        fd.append("file", new File([gz], file.name));
+        fd.append("encoding", "gzip");
+      } else fd.append("file", file);
       fd.append("type", type);
       const r = await apiFetch<{ batches: UploadedBatch[]; fileName: string }>("/api/import/upload", { method: "POST", body: fd });
       onUploaded(r.batches, r.fileName);
@@ -81,7 +88,7 @@ function UploadStep({ onUploaded }: { onUploaded: (b: UploadedBatch[], fileName:
           >
             {busy ? <Spinner label="Reading file…" /> : <Upload className="h-8 w-8" style={{ color: "var(--brand)" }} />}
             <span className="font-medium">Tap to choose a file, or drop it here</span>
-            <span className="text-xs muted">.xlsx, .xls or .csv · up to 10 MB · every sheet is read</span>
+            <span className="text-xs muted">.xlsx, .xls or .csv · OneGlance HMS exports are recognised automatically · up to 40 MB · every sheet is read</span>
             <input type="file" className="sr-only" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" onChange={(e) => upload(e.target.files?.[0])} disabled={busy} />
           </label>
           {err && <ErrorState error={{ message: err }} />}
@@ -141,6 +148,11 @@ function MappingStep({ batch, onValidated }: { batch: UploadedBatch; onValidated
 
   return (
     <div className="space-y-4">
+      {batch.note && (
+        <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--status-good)" }} role="status">
+          <b>Recognised hospital billing report — converted automatically.</b> {batch.note}
+        </div>
+      )}
       {batch.previouslyImported.length > 0 && (
         <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--status-warning)" }} role="alert">
           <b>This exact file/sheet was already imported</b> on {batch.previouslyImported.map((p) => formatDateTime(p.at)).join(", ")}. Importing again will be caught by duplicate detection, but check Import History first.
@@ -431,6 +443,139 @@ function ReviewStep({ batchId, onDone, onRemap }: { batchId: string; onDone: (r:
   );
 }
 
+// ─────────────────────────── recognised HMS reports: check & import all months ───────────────────────────
+
+type BulkRow = { id: string; name: string; rows: number; state: "pending" | "checking" | "checked" | "importing" | "imported" | "failed"; summary?: any; result?: any; error?: string };
+
+function HmsBulkImport({ batches, onFinished, onReviewOne }: { batches: UploadedBatch[]; onFinished: (r: any) => void; onReviewOne: (id: string) => void }) {
+  const toast = useToast();
+  const [items, setItems] = useState<BulkRow[]>(() => batches.map((b) => ({ id: b.id, name: b.sheetName, rows: b.rows, state: "pending" })));
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const set = (id: string, patch: Partial<BulkRow>) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const checked = items.every((x) => x.state === "checked" || x.state === "imported");
+  const totals = items.reduce(
+    (a, x) => ({ valid: a.valid + (x.summary?.valid ?? 0), warnings: a.warnings + (x.summary?.warnings ?? 0), invalid: a.invalid + (x.summary?.invalid ?? 0), duplicates: a.duplicates + (x.summary?.duplicates ?? 0) }),
+    { valid: 0, warnings: 0, invalid: 0, duplicates: 0 },
+  );
+
+  const checkAll = async () => {
+    setBusy(true);
+    for (const b of batches) {
+      const item = items.find((x) => x.id === b.id);
+      if (item?.state === "checked" || item?.state === "imported") continue;
+      set(b.id, { state: "checking", error: undefined });
+      try {
+        const v = await apiFetch<any>(`/api/import/${b.id}/validate`, { method: "POST", json: { type: b.type, mapping: b.suggestion.mapping } });
+        set(b.id, { state: "checked", summary: v.summary });
+      } catch (e) {
+        set(b.id, { state: "failed", error: (e as Error).message });
+      }
+    }
+    setBusy(false);
+  };
+
+  const importAll = async () => {
+    setBusy(true);
+    const sum = { imported: 0, rejected: 0, amount: 0, newMasters: 0 };
+    for (const x of items) {
+      if (x.state !== "checked") continue;
+      set(x.id, { state: "importing" });
+      try {
+        const r = await apiFetch<any>(`/api/import/${x.id}/commit`, { method: "POST", json: { approveWarnings: true, duplicatePolicy: "skip" } });
+        set(x.id, { state: "imported", result: r });
+        sum.imported += r.imported;
+        sum.rejected += r.rejected;
+        sum.amount += Number(r.amount) || 0;
+        sum.newMasters += r.newMasters || 0;
+      } catch (e) {
+        set(x.id, { state: "failed", error: (e as Error).message });
+      }
+    }
+    setBusy(false);
+    toast("success", `Imported ${formatNumber(sum.imported)} records (${formatINR(sum.amount)})`);
+    onFinished(sum);
+  };
+
+  const label: Record<BulkRow["state"], string> = { pending: "Not checked", checking: "Checking…", checked: "Checked", importing: "Importing…", imported: "Imported", failed: "Failed" };
+  return (
+    <Card title={`Hospital billing report recognised — ${items.length} monthly batch${items.length > 1 ? "es" : ""}, ${formatNumber(items.reduce((a, x) => a + x.rows, 0))} rows`}>
+      <div className="space-y-3 text-sm">
+        <p className="muted">{batches[0]?.note}</p>
+        <div className="overflow-x-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Batch</th>
+                <th className="text-right">Rows</th>
+                <th className="text-right">Valid</th>
+                <th className="text-right">Warnings</th>
+                <th className="text-right">Errors</th>
+                <th className="text-right">Duplicates</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((x) => (
+                <tr key={x.id}>
+                  <td>{x.name}</td>
+                  <td className="text-right tabular-nums">{formatNumber(x.rows)}</td>
+                  <td className="text-right tabular-nums">{x.summary ? formatNumber(x.summary.valid) : "—"}</td>
+                  <td className="text-right tabular-nums">{x.summary ? formatNumber(x.summary.warnings) : "—"}</td>
+                  <td className="text-right tabular-nums">{x.summary ? formatNumber(x.summary.invalid) : "—"}</td>
+                  <td className="text-right tabular-nums">{x.summary ? formatNumber(x.summary.duplicates) : "—"}</td>
+                  <td>
+                    {x.state === "imported" ? `Imported ${formatNumber(x.result.imported)}` : label[x.state]}
+                    {x.error && <div className="text-xs" style={{ color: "var(--status-critical)" }}>{x.error}</div>}
+                  </td>
+                  <td>
+                    {(x.state === "checked" || x.state === "failed") && (
+                      <Button size="sm" variant="ghost" disabled={busy} onClick={() => onReviewOne(x.id)}>
+                        Review rows
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {checked && (
+          <p>
+            <b>{formatNumber(totals.valid + totals.warnings)}</b> rows ready. Warnings are mostly new doctors, tests and consultation types that will be added to Master Data — review them there afterwards.
+            {totals.invalid > 0 && <> <b>{formatNumber(totals.invalid)}</b> rows have errors and will not be imported (use “Review rows”).</>}
+            {totals.duplicates > 0 && <> <b>{formatNumber(totals.duplicates)}</b> rows are already in the system and will be skipped.</>}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {!checked ? (
+            <Button onClick={checkAll} disabled={busy}>
+              {busy ? "Checking…" : "Check all months"}
+            </Button>
+          ) : (
+            <Button onClick={() => setConfirm(true)} disabled={busy || items.every((x) => x.state === "imported")}>
+              {busy ? "Importing…" : "Import all months"}
+            </Button>
+          )}
+        </div>
+      </div>
+      <ConfirmDialog
+        open={confirm}
+        onClose={() => setConfirm(false)}
+        title="Import all months?"
+        message={
+          <p>
+            About <b>{formatNumber(totals.valid + totals.warnings)}</b> records will be added on their bill dates, warnings approved and duplicates skipped. Each month is a separate batch an Admin can reverse from Import history.
+          </p>
+        }
+        confirmLabel="Import all"
+        onConfirm={importAll}
+      />
+    </Card>
+  );
+}
+
 // ─────────────────────────── history ───────────────────────────
 
 function History({ onContinue }: { onContinue: (id: string) => void }) {
@@ -530,6 +675,8 @@ function Inner() {
   const [result, setResult] = useState<any>(null);
   const [fileName, setFileName] = useState("");
   const activeBatch = batches.find((b) => b.id === active);
+  /** For recognised HMS reports the bulk panel is the default; this switches to the one-batch review. */
+  const [reviewOne, setReviewOne] = useState(false);
 
   const continueBatch = async (id: string) => {
     const d = await apiFetch<any>(`/api/import/${id}`);
@@ -539,7 +686,7 @@ function Inner() {
       setStage("review");
     } else {
       const raw = await apiFetch<any>(`/api/import/${id}/rows?pageSize=5`);
-      setBatches([{ id, sheetName: d.batch.sheetName, headerRow: 1, headers: d.batch.headers, rows: d.batch.recordsFound, type: d.batch.module, sample: raw.rows.map((r: any) => r.raw), suggestion: d.suggestion, previouslyImported: [] }]);
+      setBatches([{ id, sheetName: d.batch.sheetName, headerRow: 1, headers: d.batch.headers, rows: d.batch.recordsFound, type: d.batch.module, sample: raw.rows.map((r: any) => r.raw), suggestion: d.suggestion, previouslyImported: [], note: d.batch.options?.note ?? null }]);
       setActive(id);
       setStage("map");
     }
@@ -554,7 +701,7 @@ function Inner() {
           <History onContinue={continueBatch} />
         ) : (
           <>
-            {batches.length > 1 && stage !== "upload" && (
+            {batches.length > 1 && stage !== "upload" && (!batches.every((b) => b.note) || reviewOne) && (
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="muted">{fileName} — sheets:</span>
                 {batches.map((b) => (
@@ -575,13 +722,30 @@ function Inner() {
               <UploadStep
                 onUploaded={(bs, name) => {
                   setBatches(bs);
+                  setReviewOne(false);
                   setFileName(name);
                   setActive(bs[0].id);
                   setStage("map");
                 }}
               />
             )}
-            {stage === "map" && activeBatch && <MappingStep key={activeBatch.id} batch={activeBatch} onValidated={() => setStage("review")} />}
+            {stage === "map" && batches.length > 0 && batches.every((b) => b.note) && !reviewOne && (
+              <HmsBulkImport
+                key={batches.map((b) => b.id).join()}
+                batches={batches}
+                onReviewOne={(id) => {
+                  setActive(id);
+                  setReviewOne(true);
+                  setStage("review");
+                }}
+                onFinished={(r) => {
+                  setResult(r);
+                  setBatches([]);
+                  setStage("done");
+                }}
+              />
+            )}
+            {stage === "map" && activeBatch && (!batches.every((b) => b.note) || reviewOne) && <MappingStep key={activeBatch.id} batch={activeBatch} onValidated={() => setStage("review")} />}
             {stage === "review" && active && (
               <ReviewStep
                 key={active}

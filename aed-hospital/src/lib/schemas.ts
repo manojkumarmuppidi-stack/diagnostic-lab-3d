@@ -27,7 +27,8 @@ export const zMoney = z.preprocess(
 export const zOptMoney = z.preprocess(emptyToUndef, zMoney.optional());
 export const zPositiveMoney = zMoney.refine((n) => n > 0, "Must be greater than zero");
 
-const zId = z.string().min(1).max(40);
+// Import validation passes not-yet-created masters as "__new__:<type>:<name>" placeholders (see import/normalize).
+const zId = z.string().min(1).refine((v) => v.length <= 40 || (v.startsWith("__new__:") && v.length <= 300), "Invalid id");
 const zOptId = z.preprocess(emptyToUndef, zId.optional());
 const zText = (max = 200) => z.preprocess((v) => (typeof v === "string" ? v.trim() : v), z.string().max(max));
 const zOptText = (max = 200) =>

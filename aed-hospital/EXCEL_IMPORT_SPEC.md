@@ -49,8 +49,24 @@ Imported rows are ordinary transactions: they use their **own transaction date**
 ## 8. Security
 Import needs `import.run`. Importing duplicates needs `import.override_duplicates` and reversal needs `import.reverse` (Admin only by default). Uploads are size-limited and magic-byte checked. Staging rows of a cancelled batch are deleted; nothing reaches financial tables until commit.
 
+## 8a. OneGlance HMS exports (recognised automatically)
+AED's billing software exports fixed-layout CSV/Excel reports: a hospital-address preamble, then a header row. The importer recognises each report by its header row (`src/lib/import/hms.ts`) and converts it to the app's template columns. The converted sheets are split into **one batch per month** so each validate/commit stays well inside the 60-second server limit. They then go through the normal validation, duplicate detection, review and reversal. The page shows a single "Check all months → Import all months" panel. Each month can still be reviewed on its own.
+
+| OneGlance report | Becomes | Rules |
+|---|---|---|
+| Outpatient Collection Report | OPD (and Diet for "Diet Follow up") | Net = ToatlAmount − Discount + S/C. **New/Old** comes from the consultation name ("new"/"registration" → New, "old"/"follow" → Old). If the name says neither (Sugar Control Plan, Physio, Surgeon…), the bill is New only when it is the patient's first bill in the file and the patient ID is at or above the lowest ID billed as "new" (IDs are sequential); otherwise it is Old. **Specialty** comes from the name (thyroid, diabetes/sugar, thyroid & diabetes, obesity, hormones/growth, gynaecology, physiotherapy, general surgery, dermatology, else General). The consultation name is kept as the consultation type. Referral source and area go to Remarks. |
+| Bill Item Wise Collection With Account Group | Laboratory (one record per test line) | Rate = Amount, Net = NetAmount, Discount = Rate − Net. "OP service" lines go to department "OP Procedures". The same test twice on one bill is two lines (reference `BILL-n/2`), not a duplicate. |
+| Pharmacy Collection Report | Pharmacy sales, one per payment mode per day | Online/PhonePe/GPay → UPI, OneGlance Wallet → Other. Refund Amount becomes a separate pharmacy return (`PH-DAY-yyyymmdd-REFUND`). "Adjust deposit" is left out: it was counted when the IPD deposit was taken. Collections − refunds equals OneGlance "Net Revenue". These rows are daily totals, so pharmacy bill counts are not meaningful for these days. |
+| Lab Bill Collection | Rejected with guidance | Bill totals without test names; use the item-wise report. |
+
+The OPD and item-wise exports carry **no payment mode**. Their rows are recorded under "Other", and Remarks says so. Reconciliation for those historical days therefore shows them under Other.
+
+Large files: the browser gzips uploads over 1 MB before sending. HMS CSVs compress about 10×, so a 5 MB export fits Vercel's 4.5 MB request limit. The server accepts up to 40 MB uncompressed.
+
+Fuzzy master matching never matches across a meaning-changing word (new/old, with/without, pre/post, left/right, free/total…) or a different number (T3/T4). "Thyroid New Consultation" is therefore never recorded as "Thyroid Old Consultation".
+
 ## 9. Not supported (by design)
-**Daily-total spreadsheets** (one row per day with "OPD total", "Lab total"…) are not imported as transactions. Doing so would fabricate patient, test and consultation counts. Options: import them as Other Income per stream (amounts only, no volumes), or add a dedicated summary table. This decision belongs to the hospital.
+**Daily-total spreadsheets** (one row per day with "OPD total", "Lab total"…) are not imported as transactions. Doing so would fabricate patient, test and consultation counts. Options: import them as Other Income per stream (amounts only, no volumes), or add a dedicated summary table. This decision belongs to the hospital. Exception: the OneGlance Pharmacy Collection Report (§8a) is imported as sales per payment mode, because pharmacy analytics are amount-based.
 
 ## 10. Known dependency risk
 The npm build of SheetJS (`xlsx@0.18.5`, used only for legacy `.xls`) has published advisories (prototype pollution, ReDoS) fixed in versions distributed only from cdn.sheetjs.com. Mitigations: `.xlsx`/`.csv` never touch it, uploads need an authenticated user with `import.run`, and files are size-capped. For production, install `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz` or ask users to save `.xls` as `.xlsx`.
