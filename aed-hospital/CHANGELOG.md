@@ -2,6 +2,15 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.7.0: One-page daily summary PDF
+- New **Daily summary** page (`/daily-summary?date=…`), opened from the Dashboard button **Day summary PDF**. It is one A4 portrait page on white paper, whatever the screen theme. It shows:
+  - total income vs the same weekday last week, vs yesterday, and vs a typical weekday (average of the last four with activity)
+  - patients, consultations (New/Old), lab tests, pharmacy bills and margin, admissions, expenses and net
+  - income by stream vs last week, collections by payment mode, the last 14 days, stream split, top tests and top medicines
+  - up to 6 plain-language insights
+- It has previous/next day and a date picker. `?print=1` opens the print dialog automatically (choose "Save as PDF").
+- Board Meeting PDF fix: with real data, slides spilled onto a second page (24 pages for 15 slides) and printed in the narrow layout. Now each slide is exactly one landscape page: tall slides are zoomed to fit and the wide layout is pinned in print. The daily sheet uses a named portrait page, and the deck's dark print background is scoped to the deck.
+
 ## 0.6.1: Fix Analytics crash when switching tabs
 - Switching from one Analytics tab to another rendered the new tab with the previous tab's data for a moment and crashed ("Application error: a client-side exception"). The API now tags each response with its `kind`, and the page only renders data for the tab that is open.
 - New E2E test switches every tab on every tabbed page and fails on any client-side exception.

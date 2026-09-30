@@ -336,9 +336,19 @@ body {
     min-height: 0 !important;
     overflow: visible !important;
   }
+  /* Default page = A4 landscape edge-to-edge (Board Meeting deck). Chrome evaluates responsive
+     layout against the default page, so the deck keeps its wide layout. The daily summary sheet
+     uses a named portrait page. */
   @page {
     size: A4 landscape;
     margin: 0;
+  }
+  @page daily {
+    size: A4 portrait;
+    margin: 9mm;
+  }
+  .ds-sheet {
+    page: daily;
   }
   .present-root .slide-page {
     padding: 7mm;
@@ -346,9 +356,12 @@ body {
   }
   html,
   body {
-    background: #070b16 !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+  html:has(.present-root),
+  body:has(.present-root) {
+    background: #070b16 !important;
   }
   main {
     padding: 0 !important;
@@ -369,7 +382,234 @@ body {
   .present-root .slide-page + .slide-page {
     break-before: page;
   }
+  /* One slide = exactly one page (the fit-to-page zoom in the meeting page shrinks tall slides),
+     so a few pixels of overflow can never create a blank page. */
+  .present-root .slide-page {
+    height: 210mm;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  /* The deck is designed wide. Print engines may evaluate breakpoints against a narrower box,
+     so pin the wide (lg) grid layout inside the deck. */
+  .present-root .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .present-root .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .present-root .lg\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .present-root .lg\:grid-cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .present-root .lg\:col-span-2 { grid-column: span 2 / span 2; }
+  .present-root .lg\:col-span-3 { grid-column: span 3 / span 3; }
   .present-root .space-y-6 > * + * {
     margin-top: 0 !important;
+  }
+}
+
+/* ───────────── Daily summary sheet (always light paper, one A4 page) ───────────── */
+.ds-sheet {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f6f8fb;
+  --border: #e3e8ef;
+  --text: #0f172a;
+  --text-2: #475569;
+  --text-3: #64748b;
+  --good: #0f7a0f;
+  --bad: #c42b2b;
+  --chart-surface: #ffffff;
+  --grid: #e8ebef;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --prev-bar: #b9c2cf;
+  --other-slice: #d6dbe3;
+  background: #fff;
+  color: var(--text);
+  max-width: 200mm;
+  margin: 0 auto;
+  padding: 9mm 10mm;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.ds-sheet h2 {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+.ds-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #1e5ae0;
+  margin-bottom: 10px;
+}
+.ds-kicker {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1e5ae0;
+}
+.ds-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 2px 0;
+}
+.ds-total {
+  text-align: right;
+  min-width: 42%;
+}
+.ds-big {
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.ds-muted {
+  color: var(--text-3);
+}
+.ds-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ds-sub {
+  font-size: 10.5px;
+  margin-top: 2px;
+}
+.ds-grid6 {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ds-stat {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  background: var(--surface-2);
+}
+.ds-value {
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.ds-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ds-row:has(.ds-wide) {
+  grid-template-columns: 3fr 2fr;
+}
+.ds-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 0;
+  break-inside: avoid;
+}
+.ds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.ds-table th {
+  text-align: left;
+  font-size: 9.5px;
+  color: var(--text-3);
+  font-weight: 600;
+  padding: 2px 0;
+}
+.ds-table td {
+  padding: 2.5px 0;
+  border-top: 1px solid var(--border);
+}
+.ds-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  padding-left: 6px;
+}
+.ds-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.ds-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+.ds-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+.ds-insights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+}
+.ds-insights li {
+  padding-left: 10px;
+  border-left: 3px solid var(--text-3);
+}
+.ds-insights li[data-tone="positive"] {
+  border-color: var(--good);
+}
+.ds-insights li[data-tone="negative"] {
+  border-color: var(--bad);
+}
+.ds-empty {
+  padding: 30px 0;
+  text-align: center;
+  color: var(--text-2);
+}
+.ds-foot {
+  margin-top: 8px;
+  font-size: 9px;
+  color: var(--text-3);
+}
+@media (max-width: 760px) {
+  .ds-grid6 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ds-row,
+  .ds-row:has(.ds-wide),
+  .ds-insights {
+    grid-template-columns: 1fr;
+  }
+  .ds-head {
+    flex-direction: column;
+  }
+  .ds-total {
+    text-align: left;
+  }
+}
+@media print {
+  .ds-sheet {
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    max-width: none;
+    zoom: 0.94;
+  }
+  html:has(.ds-sheet),
+  body:has(.ds-sheet) {
+    background: #fff !important;
   }
 }

@@ -122,3 +122,20 @@ test("switching between tabs never crashes a page (stale data from the previous 
   }
   expect(crashes).toEqual([]);
 });
+
+test("one-page daily summary: dashboard button, figures and print layout", async ({ page }) => {
+  await login(page);
+  const btn = page.getByRole("link", { name: "Day summary PDF" });
+  await expect(btn).toBeVisible();
+  const href = await btn.getAttribute("href");
+  expect(href).toMatch(/\/daily-summary\?date=\d{4}-\d{2}-\d{2}&print=1/);
+  // Open without auto-print (the print dialog would block the test browser).
+  await page.goto(href!.replace("&print=1", ""));
+  await expect(page.getByText(/Daily summary — /)).toBeVisible();
+  await expect(page.getByText("Total income").first()).toBeVisible();
+  await page.getByRole("button", { name: "Previous day" }).click();
+  await expect(page).toHaveURL(/date=\d{4}-\d{2}-\d{2}$/);
+  await expect(page.getByText(/Daily summary — /)).toBeVisible();
+  await page.emulateMedia({ media: "print" });
+  await expect(page.getByRole("button", { name: "Download PDF" })).toBeHidden();
+});

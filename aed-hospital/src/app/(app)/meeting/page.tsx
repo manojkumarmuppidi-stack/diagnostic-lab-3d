@@ -162,6 +162,34 @@ export default function MeetingPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [presenting, go, slides.length]);
 
+  // Printing: each slide must fit one A4 landscape page. Real data can make a slide taller than
+  // the page, so measure every slide at page width just before printing and zoom it down to fit.
+  useEffect(() => {
+    const PAGE_W = 1122 - 53; // 297 mm at 96 dpi, minus the 7 mm print padding on each side
+    const PAGE_H = 794 - 60; // 210 mm, minus padding and a small safety margin
+    const fit = () => {
+      const root = document.querySelector<HTMLElement>(".present-root");
+      if (!root) return;
+      const pages = [...root.querySelectorAll<HTMLElement>(".slide-page")];
+      const width = root.style.width;
+      root.style.width = `${PAGE_W}px`;
+      for (const el of pages) {
+        el.style.removeProperty("zoom");
+        const slide = el.firstElementChild as HTMLElement | null;
+        const h = slide ? slide.scrollHeight : el.scrollHeight;
+        if (h > PAGE_H) el.style.setProperty("zoom", String(Math.max(0.45, PAGE_H / h)));
+      }
+      root.style.width = width;
+    };
+    const reset = () => document.querySelectorAll<HTMLElement>(".present-root .slide-page").forEach((el) => el.style.removeProperty("zoom"));
+    window.addEventListener("beforeprint", fit);
+    window.addEventListener("afterprint", reset);
+    return () => {
+      window.removeEventListener("beforeprint", fit);
+      window.removeEventListener("afterprint", reset);
+    };
+  }, []);
+
   const present = async () => {
     setIdx(0);
     if (deckRef.current?.requestFullscreen) await deckRef.current.requestFullscreen().catch(() => setPresenting(true));

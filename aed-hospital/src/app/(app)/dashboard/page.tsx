@@ -15,7 +15,7 @@ import { BarsChart, ChartCard, DonutChart, STREAM_COLORS } from "@/components/ch
 import { useCan } from "@/components/session";
 import { STREAM_HREF, withRange } from "@/lib/drill";
 import { ComparisonCard, InsightList, type SectionData } from "@/components/insights/InsightViews";
-import { Lightbulb, Presentation } from "lucide-react";
+import { FileDown, Lightbulb, Presentation } from "lucide-react";
 
 interface Summary {
   income: IncomeByStream;
@@ -49,7 +49,18 @@ export default function DashboardPage() {
       <PageHeader
         title="Executive Dashboard"
         subtitle={data ? `${data.period.current.label} · compared with ${data.period.previous.label} (${data.period.previous.from} → ${data.period.previous.to})` : "Loading…"}
-        actions={<PeriodPicker value={period} onChange={setPeriod} />}
+        actions={
+          <div className="flex flex-wrap items-end gap-2">
+            <PeriodPicker value={period} onChange={setPeriod} />
+            <Link
+              className="btn btn-secondary no-print"
+              href={`/daily-summary?date=${data && data.period.current.from === data.period.current.to ? data.period.current.to : data?.today ?? ""}&print=1`}
+              title="One-page A4 summary of the day — save as PDF"
+            >
+              <FileDown className="h-4 w-4" /> Day summary PDF
+            </Link>
+          </div>
+        }
       />
       <ErrorState error={error} onRetry={reload} />
       {loading && !data && <Spinner />}
