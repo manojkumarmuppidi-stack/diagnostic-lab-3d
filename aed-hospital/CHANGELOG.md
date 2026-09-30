@@ -2,6 +2,24 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.8.0: Expense heads, approval and month-wise expenses
+- **Expense heads** (Masters → Expense heads): recurring items such as rent, electricity, salaries, ESI/PF, TDS, milk, gas, oxygen and water cans. Each head has keywords, category/subcategory, payee, default payment mode, an optional typical amount and a "monthly" flag. The seed adds 36 generic heads with no amounts or names; the Admin fills those in.
+- **One-word quick pick** in the expense form. Typing "rent", "milk" or "esi" shows the matching heads. Picking one fills the category, payee, description ("Milk – Sep 2026"), typical amount and payment mode.
+- **Payment mode suggestion** from the amount: below ₹3,000 Cash, above ₹1,00,000 Bank Transfer, otherwise Card. The suggestion stops once staff pick a mode themselves.
+- **Admin approval.** Expenses entered by staff (anyone without the new permission `expense.approve`) wait in Expenses → Waiting approval and are not counted until approved.
+  - Approve counts the expense. Reject voids it with the reason.
+  - Both are audited, and the dashboard shows an alert to approvers.
+  - A day with waiting expenses cannot be closed.
+  - The database guard allows only PENDING → ACTIVE/VOIDED.
+- **Monthly checklist**: for any month, every recurring head marked as entered, waiting approval or not entered, with last month's amount and an Add button.
+- **Month-wise** view: approved expenses by category, subcategory or head × month (pharmacy purchases as their own line), with CSV download.
+- **Cash book import**: a cash book with Date/Description/Debit/Credit/Balance columns is recognised.
+  - Debit lines become expenses, split by month, with the category taken from the description.
+  - Dates that Excel had read month-first are corrected from the neighbouring rows.
+  - The payment mode is estimated from the amount.
+  - Verified on AED's Jan–Aug 2026 cash book: 1,452 payments, ₹35.36 L, 82 dates corrected.
+- New categories: Doctor & consultant fees, Referral fees, Outsourced lab tests, Taxes & compliance, Staff welfare, Equipment (capital), Patient refunds. New subcategories: OT technicians, Security, Uniforms, Bio-medical waste.
+
 ## 0.7.0: One-page daily summary PDF
 - New **Daily summary** page (`/daily-summary?date=…`), opened from the Dashboard button **Day summary PDF**. It is one A4 portrait page on white paper, whatever the screen theme. It shows:
   - total income vs the same weekday last week, vs yesterday, and vs a typical weekday (average of the last four with activity)

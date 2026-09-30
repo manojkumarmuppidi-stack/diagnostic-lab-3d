@@ -75,6 +75,25 @@ export const MASTER_TYPES = {
     orderBy: [{ parentId: "asc" }, { name: "asc" }],
     include: { parent: true },
   },
+  expenseHeads: {
+    label: "Monthly Expense Heads",
+    model: (tx: Tx) => tx.expenseHead,
+    schema: z.object({
+      name,
+      keywords: z.string().trim().max(300).optional(),
+      categoryId: z.string().min(1, "Required"),
+      subcategoryId: optId,
+      departmentId: optId,
+      vendor: z.string().trim().max(120).nullable().optional(),
+      defaultMode: z.preprocess((v) => (v === "" ? null : v), z.string().trim().toUpperCase().max(20).nullable().optional()),
+      typicalAmount: z.preprocess((v) => (v === "" || v === null ? null : v), money.nullable().optional()),
+      monthly: z.boolean().optional(),
+      sortOrder: z.coerce.number().int().optional(),
+      active,
+    }),
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    include: { category: true, subcategory: true },
+  },
   paymentModes: {
     label: "Payment Modes",
     model: (tx: Tx) => tx.paymentMode,
@@ -95,7 +114,8 @@ export const isMasterType = (s: string): s is MasterType => s in MASTER_TYPES;
 function serialize(r: any) {
   const out: Record<string, unknown> = { ...r };
   for (const k of ["rate", "defaultRate"]) if (k in out) out[k] = toNum(out[k] as any);
-  for (const k of ["specialty", "department", "admissionType", "parent"]) {
+  if ("typicalAmount" in out) out.typicalAmount = out.typicalAmount === null ? null : toNum(out.typicalAmount as any);
+  for (const k of ["specialty", "department", "admissionType", "parent", "category", "subcategory"]) {
     if (k in out) out[`${k}Name`] = (out[k] as any)?.name ?? null;
     delete out[k];
   }
@@ -127,6 +147,15 @@ async function validateRefs(tx: Tx, type: MasterType, data: any, id?: string) {
     if (parent.parentId) throw badRequest("Only two levels are allowed (category → subcategory)");
     if (id && data.parentId === id) throw badRequest("A category cannot be its own parent");
     data.group = parent.group; // subcategories inherit the accounting group
+  }
+  if (type === "expenseHeads") {
+    const cat = data.categoryId ? await tx.expenseCategory.findUnique({ where: { id: data.categoryId } }) : null;
+    if (!cat || cat.parentId) throw badRequest("Choose a top-level expense category");
+    if (data.subcategoryId) {
+      const sub = await tx.expenseCategory.findUnique({ where: { id: data.subcategoryId } });
+      if (!sub || sub.parentId !== cat.id) throw badRequest("Subcategory does not belong to the category");
+    }
+    if (data.defaultMode && !(await tx.paymentMode.findUnique({ where: { code: data.defaultMode } }))) throw badRequest(`Unknown payment mode code "${data.defaultMode}"`);
   }
   if (type === "expenseCategories") {
     // NULL parentId is not unique in PostgreSQL; enforce top-level uniqueness here.

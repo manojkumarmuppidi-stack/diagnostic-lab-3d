@@ -17,6 +17,9 @@ npm run dev                            # http://localhost:3000  (user: admin)
 ```
 Demo users (demo seed only, password `Demo#12345`): `accounts`, `reception`, `ipd`, `lab`, `pharmacy`, `management`.
 
+## Deployment
+**Vercel + Neon:** follow [VERCEL.md](VERCEL.md). Own server / Docker: follow [DEPLOYMENT.md](DEPLOYMENT.md) → "Deploy with your own PostgreSQL". Check any database with `DATABASE_URL="…" npm run check:deploy`.
+
 ## Tests
 ```bash
 npm test                                         # 110 unit + integration tests (needs PostgreSQL test DB)

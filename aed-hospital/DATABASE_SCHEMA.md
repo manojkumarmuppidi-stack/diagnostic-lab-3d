@@ -63,3 +63,8 @@ Indexes: `(date, status)` on every transaction table (all analytics filter on th
 - Views `v_income_line` and `v_expense_line`: the single definition of income and expense lines.
 
 These guards hold even against a buggy code path or a manual SQL session. `TRUNCATE` (used by test fixtures and full restores) needs the table-owner privilege, so production should run the app as a role that is **not** the table owner (see DEPLOYMENT.md).
+
+## ExpenseHead (0.8.0)
+Recurring expense heads for the one-word quick pick and the monthly checklist. `name` (unique), `keywords` (comma separated), `categoryId` (top-level category), `subcategoryId` (must belong to it), `departmentId`, `vendor`, `defaultMode` (payment-mode code; empty = suggest from amount), `typicalAmount` (optional), `monthly` (appears in the checklist as "not entered" when missing), `active`, `sortOrder`.
+`Expense` gains `headId`, `approvedById`, `approvedAt`. `RecordStatus` gains `PENDING` (expenses waiting for approval). Migrations `20261002000000_record_status_pending`, `20261002000100_expense_heads_approval`.
+

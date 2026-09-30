@@ -19,6 +19,7 @@ export default defineConfig({
     env: {
       TZ: "UTC",
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "postgresql://aed:aed_dev_pw@localhost:5432/aed_test?schema=public",
+      DIRECT_URL: process.env.TEST_DATABASE_URL ?? "postgresql://aed:aed_dev_pw@localhost:5432/aed_test?schema=public",
       UPLOAD_DIR: path.resolve(__dirname, ".test-uploads"),
       APP_TIMEZONE: "Asia/Kolkata",
     },

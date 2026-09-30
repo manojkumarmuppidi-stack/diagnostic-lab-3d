@@ -75,6 +75,34 @@ test("role-based access: reception cannot see or open expenses", async ({ page }
   expect(res.status()).toBe(403);
 });
 
+test("staff enter an expense with one word; it waits for Admin approval", async ({ browser, page }) => {
+  const staffCtx = await browser.newContext();
+  const staff = await staffCtx.newPage();
+  await login(staff, "accounts", DEMO_PASSWORD);
+  await staff.goto("/expenses");
+  await staff.getByRole("button", { name: "Add Expense" }).click();
+  const dialog = staff.getByRole("dialog");
+  await expect(dialog.getByText(/go to an Admin for approval/)).toBeVisible();
+  await dialog.getByLabel("Quick pick — type one word").fill("milk");
+  await dialog.getByRole("listbox", { name: "Matching expense heads" }).getByRole("option", { name: "Milk", exact: true }).click();
+  await expect(dialog.getByLabel("Description")).toHaveValue(/^Milk – /);
+  const amount = String(1000 + Math.floor(Math.random() * 900));
+  await dialog.getByLabel("Amount").fill(amount);
+  await expect(dialog.getByLabel("Payment Mode")).toHaveValue(/.+/);
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(staff.getByText(/sent to Admin for approval/)).toBeVisible();
+  await staffCtx.close();
+
+  await login(page);
+  await page.goto("/expenses?tab=pending");
+  const row = page.getByRole("row").filter({ hasText: `₹${Number(amount).toLocaleString("en-IN")}` }).first();
+  await expect(row).toBeVisible();
+  await row.getByRole("button", { name: "Approve" }).click();
+  await expect(page.getByText("Approved — now counted in expenses")).toBeVisible();
+  await page.goto("/expenses?tab=checklist");
+  await expect(page.getByRole("row").filter({ hasText: /^Milk/ }).first()).toBeVisible();
+});
+
 test("audit log records activity", async ({ page }) => {
   await login(page);
   await page.goto("/audit");
@@ -106,6 +134,7 @@ test("switching between tabs never crashes a page (stale data from the previous 
     ["/accounting", []],
     ["/users", []],
     ["/import", ["Import history", "Import"]],
+    ["/expenses", []],
   ];
   for (const [path, names] of pages) {
     await page.goto(path);
@@ -126,9 +155,9 @@ test("switching between tabs never crashes a page (stale data from the previous 
 test("one-page daily summary: dashboard button, figures and print layout", async ({ page }) => {
   await login(page);
   const btn = page.getByRole("link", { name: "Day summary PDF" });
-  await expect(btn).toBeVisible();
+  // The date fills in once the dashboard period has loaded.
+  await expect(btn).toHaveAttribute("href", /\/daily-summary\?date=\d{4}-\d{2}-\d{2}&print=1/);
   const href = await btn.getAttribute("href");
-  expect(href).toMatch(/\/daily-summary\?date=\d{4}-\d{2}-\d{2}&print=1/);
   // Open without auto-print (the print dialog would block the test browser).
   await page.goto(href!.replace("&print=1", ""));
   await expect(page.getByText(/Daily summary — /)).toBeVisible();

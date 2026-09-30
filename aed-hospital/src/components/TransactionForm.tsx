@@ -3,13 +3,15 @@
  * Generic entry / correction form for every transaction module. Field layout comes
  * from src/lib/modules.ts; rates come from master data (never hard-coded).
  */
-import { useEffect, useMemo, useState } from "react";
-import { Camera, Paperclip } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Camera, Paperclip, Search } from "lucide-react";
+import { monthLabel, searchHeads, suggestModeCode } from "@/lib/expenses";
 import { MODULES, type FieldDef, type ModuleKey } from "@/lib/modules";
 import { apiFetch, ApiError, cn, useApi } from "@/lib/client";
+import { compressImage } from "@/lib/compress-image";
 import { formatINR, round2 } from "@/lib/money";
 import { Button, Field, Modal, useToast } from "./ui";
-import { masterOptions, useMasters, useSession } from "./session";
+import { masterOptions, useCan, useMasters, useSession, type MasterItem } from "./session";
 
 type Values = Record<string, string>;
 
@@ -40,7 +42,27 @@ function initialValues(module: ModuleKey, today: string, masters: ReturnType<typ
   const cash = masters?.paymentModes.find((m) => m.code === "CASH" && m.active);
   if ("paymentModeId" in v && cash && module !== "pharmacy-purchase") v.paymentModeId = cash.id;
   if (module === "ipd-payment") v.type = "PAYMENT";
-  return { ...v, ...(preset ?? {}) };
+  const out = { ...v, ...(preset ?? {}) };
+  // Checklist "Add" passes a head: fill everything from it.
+  if (module === "expense" && out.headId && masters) {
+    const head = masters.expenseHeads.find((h) => h.id === out.headId);
+    if (head) fillFromHead(head, out, masters, !!preset?.amount);
+  }
+  return out;
+}
+
+/** Fill an expense from a recurring head: category, vendor, "Rent – Cash – Sep 2026", typical amount and mode. */
+function fillFromHead(head: MasterItem, v: Values, masters: NonNullable<ReturnType<typeof useMasters>["masters"]>, keepAmount = false) {
+  v.headId = head.id;
+  v.categoryId = String(head.categoryId ?? "");
+  v.subcategoryId = head.subcategoryId ? String(head.subcategoryId) : "";
+  if (head.departmentId) v.departmentId = String(head.departmentId);
+  if (head.vendor) v.vendor = String(head.vendor);
+  v.description = `${head.name} – ${monthLabel((v.date || new Date().toISOString()).slice(0, 7))}`;
+  if (!keepAmount && typeof head.typicalAmount === "number" && head.typicalAmount > 0) v.amount = String(head.typicalAmount);
+  const code = (head.defaultMode as string | null) || suggestModeCode(Number(v.amount) || null);
+  const mode = code ? masters.paymentModes.find((m) => m.code === code && m.active) : undefined;
+  if (mode) v.paymentModeId = mode.id;
 }
 
 export function TransactionForm({ module, open, onClose, onSaved, correct, preset }: Props) {
@@ -55,9 +77,13 @@ export function TransactionForm({ module, open, onClose, onSaved, correct, prese
   const [busy, setBusy] = useState(false);
   const [dup, setDup] = useState<string | null>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const can = useCan();
+  // Once staff pick a payment mode themselves, stop suggesting one from the amount.
+  const modeTouched = useRef(false);
 
   useEffect(() => {
     if (open) {
+      modeTouched.current = false;
       setValues(initialValues(module, today, masters, preset, correct));
       setErrors({});
       setFormError(null);
@@ -69,13 +95,31 @@ export function TransactionForm({ module, open, onClose, onSaved, correct, prese
   }, [open, module, correct?.id]);
 
   const set = (k: string, val: string) => {
+    if (k === "paymentModeId") modeTouched.current = true;
     setValues((prev) => {
       const next = { ...prev, [k]: val };
       applyDefaults(module, k, val, next, masters);
+      if (module === "expense" && k === "amount" && !modeTouched.current && masters) {
+        const code = suggestModeCode(Number(val) || null);
+        const mode = code ? masters.paymentModes.find((m) => m.code === code && m.active) : undefined;
+        if (mode) next.paymentModeId = mode.id;
+      }
       return next;
     });
     setErrors((e) => ({ ...e, [k]: "" }));
   };
+
+  const pickHead = (head: MasterItem) => {
+    if (!masters) return;
+    modeTouched.current = false;
+    setValues((prev) => {
+      const next = { ...prev };
+      fillFromHead(head, next, masters);
+      return next;
+    });
+    setErrors({});
+  };
+  const needsApproval = module === "expense" && !correct && !can("expense.approve");
 
   const net = useMemo(() => computeNet(module, values, masters), [module, values, masters]);
   const fields = def.fields.filter((f) => !f.importOnly && !(module === "ipd" && correct && f.key.startsWith("initialPayment")));
@@ -94,14 +138,16 @@ export function TransactionForm({ module, open, onClose, onSaved, correct, prese
         if (files.length && res.id) {
           for (const f of files) {
             const fd = new FormData();
-            fd.append("file", f);
+            fd.append("file", await compressImage(f));
             await apiFetch(`/api/expenses/${res.id}/attachments`, { method: "POST", body: fd }).catch((e) => toast("error", `Attachment ${f.name}: ${e.message}`));
           }
         }
-        toast("success", `${def.singular} saved${net !== null ? ` · ${formatINR(net)}` : ""}`);
+        if ((res as { pending?: boolean }).pending) toast("info", `${def.singular} sent to Admin for approval — it counts once approved`);
+        else toast("success", `${def.singular} saved${net !== null ? ` · ${formatINR(net)}` : ""}`);
       }
       onSaved?.(res);
       if (addAnother && !correct) {
+        modeTouched.current = false;
         const keep = { date: values.date, admissionDate: values.admissionDate, paymentModeId: values.paymentModeId, doctorId: values.doctorId, specialtyId: values.specialtyId };
         setValues({ ...initialValues(module, today, masters, preset), ...Object.fromEntries(Object.entries(keep).filter(([, v]) => v !== undefined)) });
         setFiles([]);
@@ -171,6 +217,12 @@ export function TransactionForm({ module, open, onClose, onSaved, correct, prese
             {formError}
           </p>
         )}
+        {module === "expense" && !correct && <HeadPicker heads={masters?.expenseHeads ?? []} selectedId={values.headId} onPick={pickHead} />}
+        {needsApproval && (
+          <p className="rounded-lg px-3 py-2 text-xs" style={{ background: "var(--surface-2)" }}>
+            Expenses you enter go to an Admin for approval. They are not counted in totals until approved.
+          </p>
+        )}
         <div className={cn("grid gap-3", fields.length > 8 ? "sm:grid-cols-2 lg:grid-cols-3" : "sm:grid-cols-2")}>
           {fields.map((f) => (
             <div key={f.key} className={f.type === "textarea" ? "sm:col-span-2 lg:col-span-3" : f.type === "visitType" ? "sm:col-span-2 lg:col-span-1" : ""}>
@@ -208,6 +260,44 @@ export function TransactionForm({ module, open, onClose, onSaved, correct, prese
         <button type="submit" className="hidden" />
       </form>
     </Modal>
+  );
+}
+
+/** Type one word ("rent", "milk", "esi") to pick a recurring expense head and fill the form from it. */
+function HeadPicker({ heads, selectedId, onPick }: { heads: MasterItem[]; selectedId?: string; onPick: (h: MasterItem) => void }) {
+  const [q, setQ] = useState("");
+  const hits = useMemo(() => searchHeads(heads as (MasterItem & { keywords?: string | null; vendor?: string | null; categoryName?: string | null })[], q, 8), [heads, q]);
+  const selected = selectedId ? heads.find((h) => h.id === selectedId) : undefined;
+  if (!heads.some((h) => h.active)) return null;
+  return (
+    <div className="space-y-2">
+      <Field label="Quick pick — type one word" htmlFor="head-quick" help={selected ? `Filled from “${selected.name}”. Check the amount and mode.` : "e.g. rent, milk, electricity, esi, salary, oxygen"}>
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 muted" />
+          <input id="head-quick" className="input !pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search expense heads…" autoComplete="off" />
+        </div>
+      </Field>
+      {hits.length > 0 && (
+        <div className="flex flex-wrap gap-2" role="listbox" aria-label="Matching expense heads">
+          {hits.map((h) => (
+            <button
+              key={h.id}
+              type="button"
+              role="option"
+              aria-selected={h.id === selectedId}
+              className={cn("btn btn-sm", h.id === selectedId ? "btn-primary" : "btn-secondary")}
+              onClick={() => {
+                onPick(h);
+                setQ("");
+              }}
+            >
+              {h.name}
+              {typeof h.typicalAmount === "number" && h.typicalAmount > 0 ? <span className="muted"> · {formatINR(h.typicalAmount)}</span> : null}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

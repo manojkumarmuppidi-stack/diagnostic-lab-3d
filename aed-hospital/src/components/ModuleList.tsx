@@ -9,6 +9,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Download, FileText, History, Paperclip, Pencil, Plus, Trash2, Camera, LogOut as DischargeIcon } from "lucide-react";
 import { MODULES, writePerm, type ColumnDef, type ModuleKey } from "@/lib/modules";
 import { apiFetch, download, qs, useApi } from "@/lib/client";
+import { compressImage } from "@/lib/compress-image";
 import { formatDate, formatDateTime, addDays, startOfMonth } from "@/lib/dates";
 import { formatINR, formatNumber } from "@/lib/money";
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Field, Modal, Spinner, StatusBadge, useToast } from "./ui";
@@ -579,7 +580,7 @@ function Attachments({ expenseId, canAdd }: { expenseId: string; canAdd: boolean
     try {
       for (const f of Array.from(files)) {
         const fd = new FormData();
-        fd.append("file", f);
+        fd.append("file", await compressImage(f));
         await apiFetch(`/api/expenses/${expenseId}/attachments`, { method: "POST", body: fd });
       }
       toast("success", "Bill attached");

@@ -45,7 +45,7 @@ Companion documents:
 5. Laboratory: configurable investigation master
 6. Pharmacy: sales, purchases, returns and margin
 7. Diet & Nutrition
-8. Expenses: categories/subcategories, bill attachments (camera on mobile)
+8. Expenses: categories/subcategories, bill attachments (camera on mobile); recurring **expense heads** picked with one word; staff entries wait for **Admin approval**; monthly checklist of recurring heads; month-wise category × month view
 9. Accounting & Reconciliation: reconciliation by mode, correction approvals, day status
 10. Analytics: Revenue, OPD, IPD, Lab, Pharmacy, Expense, Profitability
 11. Reports: 13 report types, exported as Excel, CSV or PDF
@@ -121,6 +121,10 @@ All routes live under `/api`, return JSON unless they are downloads, and are pro
 | `/api/tx/[module]/[id]/void` | POST | Soft-delete with reason |
 | `/api/ipd/[id]/discharge` | POST | Record discharge date |
 | `/api/expenses/[id]/attachments` | GET, POST | Bill/receipt upload & list |
+| `/api/expenses/pending` | GET | Expenses waiting for approval (approvers: all; others: their own) |
+| `/api/expenses/[id]/decision` | POST | `{decision: APPROVE}` or `{decision: REJECT, reason}` (permission `expense.approve`) |
+| `/api/expenses/checklist?month=YYYY-MM` | GET | Recurring heads: entered / waiting / not entered, with last month |
+| `/api/expenses/pivot?from&to&by=category\|subcategory\|head` | GET | Approved expenses by month (plus pharmacy purchases) |
 | `/api/attachments/[id]` | GET | Authenticated file download |
 | `/api/corrections`, `/api/corrections/[id]` | GET, POST | Correction request queue / approve / reject |
 | `/api/masters`, `/api/masters/[type]`, `/api/masters/[type]/[id]` | GET, POST, PATCH | Master data |

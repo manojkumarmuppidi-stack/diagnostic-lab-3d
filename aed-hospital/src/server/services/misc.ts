@@ -100,7 +100,7 @@ export async function globalSearch(actor: Actor, qRaw: string) {
 export async function addAttachment(actor: Actor, expenseId: string, fileName: string, buf: Buffer) {
   requirePermission(actor, "expense.write");
   const exp = await prisma.expense.findUnique({ where: { id: expenseId } });
-  if (!exp || exp.status !== "ACTIVE") throw notFound("Expense not found");
+  if (!exp || (exp.status !== "ACTIVE" && exp.status !== "PENDING")) throw notFound("Expense not found");
   await assertDayWritable(prisma, fromDbDate(exp.date));
   const count = await prisma.attachment.count({ where: { expenseId } });
   if (count >= 10) throw badRequest("Maximum 10 attachments per expense");

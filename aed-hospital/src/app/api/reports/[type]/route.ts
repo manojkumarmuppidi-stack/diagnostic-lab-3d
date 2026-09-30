@@ -6,6 +6,9 @@ import { reportToCsv, reportToPdf, reportToXlsx } from "@/server/exporters";
 import { audit } from "@/server/audit";
 import { prisma } from "@/server/db";
 
+/** Vercel function time limit (60 s is allowed on every Vercel plan). */
+export const maxDuration = 60;
+
 export const GET = api<{ type: string }>(async ({ actor, params, url }) => {
   if (!REPORT_TYPES.some((t) => t.key === params.type)) throw badRequest("Unknown report");
   const q = Object.fromEntries(url.searchParams);

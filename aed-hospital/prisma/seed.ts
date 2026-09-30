@@ -51,7 +51,7 @@ const EXPENSE_CATEGORIES: [string, "HOSPITAL" | "OTHER", string[]][] = [
   ["Groceries", "HOSPITAL", ["Vegetables", "Provisions", "Milk & Dairy"]],
   ["Kitchen", "HOSPITAL", ["Gas", "Utensils"]],
   ["Toiletries", "HOSPITAL", []],
-  ["Housekeeping", "HOSPITAL", ["Linen & Laundry"]],
+  ["Housekeeping", "HOSPITAL", ["Linen & Laundry", "Uniforms", "Bio-medical waste"]],
   ["Cleaning materials", "HOSPITAL", []],
   ["Stationery", "HOSPITAL", ["Printing", "Printer paper"]],
   ["Maintenance", "HOSPITAL", ["Electrical", "Plumbing", "AC service"]],
@@ -62,9 +62,60 @@ const EXPENSE_CATEGORIES: [string, "HOSPITAL" | "OTHER", string[]][] = [
   ["Marketing", "HOSPITAL", ["Print ads", "Digital"]],
   ["Medical supplies", "HOSPITAL", ["Consumables", "Lab reagents"]],
   // Not in the original brief, but usually the largest hospital costs — without them the net result is overstated.
-  ["Salaries & Wages", "HOSPITAL", ["Doctors", "Nursing", "Support staff"]],
+  ["Salaries & Wages", "HOSPITAL", ["Doctors", "Nursing", "Support staff", "OT technicians", "Security"]],
   ["Rent", "HOSPITAL", []],
+  ["Doctor & consultant fees", "HOSPITAL", []],
+  ["Referral fees", "HOSPITAL", []],
+  ["Outsourced lab tests", "HOSPITAL", []],
+  ["Taxes & compliance", "HOSPITAL", []],
+  ["Staff welfare", "OTHER", []],
+  ["Equipment (capital)", "OTHER", []],
+  // Refunds of patient payments found in cash books: an income reversal, kept apart so it is visible.
+  ["Patient refunds", "OTHER", []],
   ["Other", "OTHER", []],
+];
+/**
+ * Recurring monthly expense heads (the "one word" quick pick). Generic only: no amounts or
+ * people's names — an Admin adds typical amounts and payees under Masters → Expense heads.
+ * [name, category, subcategory, keywords, default mode (null = suggest from amount), monthly]
+ */
+const EXPENSE_HEADS: [string, string, string | null, string, string | null, boolean][] = [
+  ["Rent – Cash", "Rent", null, "rent,building rent", "CASH", true],
+  ["Rent – Online", "Rent", null, "rent,building rent,neft", "BANK", true],
+  ["Building maintenance", "Maintenance", null, "maintenance,society,building", null, true],
+  ["Electricity bill", "Electricity", null, "electricity,current,power,eb", null, true],
+  ["Staff salaries", "Salaries & Wages", "Support staff", "salary,salaries,wages,staff", null, true],
+  ["Nursing salaries", "Salaries & Wages", "Nursing", "salary,nurse,nursing", null, true],
+  ["OT technicians", "Salaries & Wages", "OT technicians", "ot,technician,ot tech,salary", null, true],
+  ["Security", "Salaries & Wages", "Security", "security,watchman,guard,salary", null, true],
+  ["Housekeeping staff", "Salaries & Wages", "Support staff", "housekeeping,cleaning staff,salary", null, true],
+  ["Doctor fees", "Doctor & consultant fees", null, "doctor,consultant,visiting,dr", null, true],
+  ["OP referral – Cash", "Referral fees", null, "referral,op referral", "CASH", true],
+  ["OP referral – Online", "Referral fees", null, "referral,op referral", "BANK", true],
+  ["IP referral", "Referral fees", null, "referral,ip referral", null, true],
+  ["Milk", "Groceries", "Milk & Dairy", "milk,curd,dairy", "CASH", true],
+  ["Newspaper", "Administrative", null, "newspaper,news", "CASH", true],
+  ["Gas cylinders", "Kitchen", "Gas", "gas,cylinder,lpg", null, true],
+  ["Drinking water cans", "Water", "Drinking water cans", "water,cans,bottles", null, true],
+  ["Oxygen cylinders", "Medical supplies", "Consumables", "oxygen,o2,cylinder", null, true],
+  ["Lab reagents", "Medical supplies", "Lab reagents", "reagent,stock,diagnostics,lab", null, true],
+  ["Outsourced lab tests", "Outsourced lab tests", null, "outside,outsource,sample,lab", null, true],
+  ["Tissue rolls & toiletries", "Toiletries", null, "tissue,toilet,hand wash", "CASH", true],
+  ["Scan papers & stationery", "Stationery", null, "scan paper,a4,bond,printing,stationery", null, true],
+  ["Phone & internet", "Administrative", "Internet & Phone", "phone,mobile,internet,wifi,recharge", null, true],
+  ["TV subscription", "Administrative", "Internet & Phone", "tv,dth,tata sky", null, true],
+  ["Hospital software & SMS", "Administrative", "Software", "software,sms,hms,oneglance", null, true],
+  ["Digital marketing", "Marketing", "Digital", "marketing,digital,seo,ads", null, true],
+  ["Online listings", "Marketing", "Digital", "practo,justdial,listing", null, false],
+  ["Bio-medical waste", "Housekeeping", "Bio-medical waste", "biomedical,bio waste,waste", null, true],
+  ["ESI", "Taxes & compliance", null, "esi,esic", "BANK", true],
+  ["PF", "Taxes & compliance", null, "pf,epf,provident fund", "BANK", true],
+  ["Professional tax", "Taxes & compliance", null, "pt,professional tax", null, true],
+  ["TDS", "Taxes & compliance", null, "tds,194c,194j,192b", "BANK", true],
+  ["GST", "Taxes & compliance", null, "gst", "BANK", true],
+  ["Accountant fees", "Taxes & compliance", null, "accounts,accountant,ca", null, true],
+  ["Audit & ROC filing", "Taxes & compliance", null, "audit,roc,filing", null, false],
+  ["GHMC / trade licence", "Taxes & compliance", null, "ghmc,trade licence,property tax,license", null, false],
 ];
 const PAYMENT_MODES: [string, string, "CASH" | "CARD" | "UPI" | "BANK" | "OTHER"][] = [
   ["CASH", "Cash", "CASH"],
@@ -128,6 +179,13 @@ async function seedMasters() {
   }
   for (const [i, [code, name, reconGroup]] of PAYMENT_MODES.entries()) {
     await prisma.paymentMode.upsert({ where: { code }, create: { code, name, reconGroup, sortOrder: i }, update: {} });
+  }
+  // Heads are created once; later Admin edits (amounts, payees, keywords) are never overwritten.
+  for (const [i, [name, catName, subName, keywords, defaultMode, monthly]] of EXPENSE_HEADS.entries()) {
+    if (await prisma.expenseHead.findUnique({ where: { name } })) continue;
+    const cat = await prisma.expenseCategory.findFirstOrThrow({ where: { name: catName, parentId: null } });
+    const sub = subName ? await prisma.expenseCategory.findFirst({ where: { name: subName, parentId: cat.id } }) : null;
+    await prisma.expenseHead.create({ data: { name, keywords, categoryId: cat.id, subcategoryId: sub?.id ?? null, defaultMode, monthly, sortOrder: i * 10 } });
   }
   if (!(await prisma.setting.findUnique({ where: { key: "app" } }))) {
     await prisma.setting.create({ data: { key: "app", value: DEFAULT_SETTINGS } });

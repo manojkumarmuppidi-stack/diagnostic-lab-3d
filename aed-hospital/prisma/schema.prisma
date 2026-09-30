@@ -18,6 +18,7 @@ datasource db {
 /// Lifecycle of every financial row. Only ACTIVE rows are counted anywhere.
 enum RecordStatus {
   ACTIVE
+  PENDING // entered by staff, waiting for approval (expenses) — excluded from every figure
   SUPERSEDED // replaced by a correction (see correctionOfId on the new row)
   VOIDED // soft-deleted with a reason
   REVERSED // its import batch was reversed
@@ -174,6 +175,7 @@ model Department {
   investigations  LabInvestigation[]
   labTransactions LabTransaction[]
   expenses        Expense[]
+  expenseHeads    ExpenseHead[]
 }
 
 model Specialty {
@@ -200,10 +202,10 @@ model Doctor {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
 
-  consultations   Consultation[]
-  admissions      IpdAdmission[]
-  labReferrals    LabTransaction[]
-  dietServices    DietTransaction[]
+  consultations Consultation[]
+  admissions    IpdAdmission[]
+  labReferrals  LabTransaction[]
+  dietServices  DietTransaction[]
 
   @@unique([name, kind])
 }
@@ -277,8 +279,10 @@ model ExpenseCategory {
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
-  expenses          Expense[] @relation("ExpenseCategory")
-  subcategoryExpenses Expense[] @relation("ExpenseSubcategory")
+  expenses            Expense[]     @relation("ExpenseCategory")
+  subcategoryExpenses Expense[]     @relation("ExpenseSubcategory")
+  heads               ExpenseHead[] @relation("ExpenseHeadCategory")
+  subcategoryHeads    ExpenseHead[] @relation("ExpenseHeadSubcategory")
 
   @@unique([name, parentId])
 }
@@ -362,22 +366,22 @@ model Consultation {
 }
 
 model IpdAdmission {
-  id              String         @id @default(cuid())
-  admissionDate   DateTime       @db.Date
-  dischargeDate   DateTime?      @db.Date
+  id              String           @id @default(cuid())
+  admissionDate   DateTime         @db.Date
+  dischargeDate   DateTime?        @db.Date
   patientId       String?
-  patient         Patient?       @relation(fields: [patientId], references: [id])
+  patient         Patient?         @relation(fields: [patientId], references: [id])
   patientName     String?
   admissionTypeId String
-  admissionType   AdmissionType  @relation(fields: [admissionTypeId], references: [id])
+  admissionType   AdmissionType    @relation(fields: [admissionTypeId], references: [id])
   doctorId        String?
-  doctor          Doctor?        @relation(fields: [doctorId], references: [id])
+  doctor          Doctor?          @relation(fields: [doctorId], references: [id])
   packageId       String?
-  package         IpdPackage?    @relation(fields: [packageId], references: [id])
+  package         IpdPackage?      @relation(fields: [packageId], references: [id])
   /// Billed value of the admission (accrual view). Income is recognised from IpdTransaction.
-  grossAmount     Decimal        @db.Decimal(12, 2)
-  discount        Decimal        @default(0) @db.Decimal(12, 2)
-  netAmount       Decimal        @db.Decimal(12, 2)
+  grossAmount     Decimal          @db.Decimal(12, 2)
+  discount        Decimal          @default(0) @db.Decimal(12, 2)
+  netAmount       Decimal          @db.Decimal(12, 2)
   reference       String?
   remarks         String?
   transactions    IpdTransaction[]
@@ -546,6 +550,31 @@ model PharmacyPurchase {
   @@index([importBatchId])
 }
 
+/// A recurring (usually monthly) expenditure item staff can pick by typing a keyword:
+/// "rent" → Rent – Online with its category, vendor, usual amount and payment mode.
+model ExpenseHead {
+  id            String           @id @default(cuid())
+  name          String           @unique
+  /// Extra words that find this head (comma-separated), e.g. "rent,building".
+  keywords      String           @default("")
+  categoryId    String
+  category      ExpenseCategory  @relation("ExpenseHeadCategory", fields: [categoryId], references: [id])
+  subcategoryId String?
+  subcategory   ExpenseCategory? @relation("ExpenseHeadSubcategory", fields: [subcategoryId], references: [id])
+  departmentId  String?
+  department    Department?      @relation(fields: [departmentId], references: [id])
+  vendor        String?
+  /// Payment mode code (CASH, CARD, UPI, BANK …); empty = suggest from the amount.
+  defaultMode   String?
+  typicalAmount Decimal?         @db.Decimal(12, 2)
+  /// Expected every month (shows on the monthly checklist).
+  monthly       Boolean          @default(true)
+  active        Boolean          @default(true)
+  sortOrder     Int              @default(0)
+  createdAt     DateTime         @default(now())
+  expenses      Expense[]
+}
+
 /// A medicine / consumable sold or bought in the pharmacy (from the HMS item reports).
 model PharmacyItem {
   id        String             @id @default(cuid())
@@ -619,6 +648,7 @@ model SupplierPayment {
 
   @@index([date, status])
   @@index([supplier])
+  @@index([invoiceRefs], type: Gin)
   @@index([fingerprint])
   @@index([importBatchId])
 }
@@ -700,6 +730,12 @@ model Expense {
   paymentMode   PaymentMode?     @relation(fields: [paymentModeId], references: [id])
   remarks       String?
   attachments   Attachment[]
+  /// Monthly head this expense was entered against (quick pick), if any.
+  headId        String?
+  head          ExpenseHead?     @relation(fields: [headId], references: [id])
+  /// Set when an approver approves a PENDING expense (status becomes ACTIVE).
+  approvedById  String?
+  approvedAt    DateTime?
 
   status         RecordStatus @default(ACTIVE)
   fingerprint    String
@@ -736,21 +772,21 @@ model Attachment {
 
 /// One row per business date once any closing action has happened. Missing row ⇒ OPEN.
 model DailyAccount {
-  id             String    @id @default(cuid())
-  date           DateTime  @unique @db.Date
-  status         DayStatus @default(OPEN)
-  reviewedById   String?
-  reviewedAt     DateTime?
-  reconciledById String?
-  reconciledAt   DateTime?
-  closedById     String?
-  closedAt       DateTime?
-  reopenCount    Int       @default(0)
-  notes          String?
+  id              String           @id @default(cuid())
+  date            DateTime         @unique @db.Date
+  status          DayStatus        @default(OPEN)
+  reviewedById    String?
+  reviewedAt      DateTime?
+  reconciledById  String?
+  reconciledAt    DateTime?
+  closedById      String?
+  closedAt        DateTime?
+  reopenCount     Int              @default(0)
+  notes           String?
   /// Totals frozen at close time, so later drift can be detected.
   closingSnapshot Json?
-  updatedAt      DateTime  @updatedAt
-  events         DayEvent[]
+  updatedAt       DateTime         @updatedAt
+  events          DayEvent[]
   reconciliations Reconciliation[]
 }
 
@@ -804,32 +840,32 @@ model CorrectionRequest {
 // ─────────────────────────── Import ───────────────────────────
 
 model ImportBatch {
-  id           String        @id @default(cuid())
-  groupId      String?
-  fileName     String
-  fileHash     String
-  sheetName    String?
-  module       String
-  status       ImportStatus  @default(UPLOADED)
-  headers      Json
-  mapping      Json?
-  options      Json?
-  recordsFound Int           @default(0)
-  validRows    Int           @default(0)
-  warningRows  Int           @default(0)
-  invalidRows  Int           @default(0)
-  duplicateRows Int          @default(0)
-  imported     Int           @default(0)
-  rejected     Int           @default(0)
-  totalAmount  Decimal       @default(0) @db.Decimal(14, 2)
-  uploadedById String
-  createdAt    DateTime      @default(now())
-  validatedAt  DateTime?
-  committedAt  DateTime?
-  reversedAt   DateTime?
-  reversedById String?
+  id            String         @id @default(cuid())
+  groupId       String?
+  fileName      String
+  fileHash      String
+  sheetName     String?
+  module        String
+  status        ImportStatus   @default(UPLOADED)
+  headers       Json
+  mapping       Json?
+  options       Json?
+  recordsFound  Int            @default(0)
+  validRows     Int            @default(0)
+  warningRows   Int            @default(0)
+  invalidRows   Int            @default(0)
+  duplicateRows Int            @default(0)
+  imported      Int            @default(0)
+  rejected      Int            @default(0)
+  totalAmount   Decimal        @default(0) @db.Decimal(14, 2)
+  uploadedById  String
+  createdAt     DateTime       @default(now())
+  validatedAt   DateTime?
+  committedAt   DateTime?
+  reversedAt    DateTime?
+  reversedById  String?
   reverseReason String?
-  records      ImportRecord[]
+  records       ImportRecord[]
 
   consultations     Consultation[]
   admissions        IpdAdmission[]

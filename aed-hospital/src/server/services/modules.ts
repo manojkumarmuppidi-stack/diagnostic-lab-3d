@@ -15,6 +15,7 @@ import { round2, toNum } from "@/lib/money";
 import { ipdBalance } from "@/lib/accounting";
 import type { Tx } from "../db";
 import { badRequest } from "../errors";
+import { bulkCache } from "../bulk-cache";
 
 export interface Built {
   data: Record<string, any>;
@@ -55,16 +56,23 @@ async function resolvePatient(tx: Tx, code?: string, name?: string): Promise<{ p
   const cleanName = name?.trim() || null;
   const cleanCode = code?.trim().toUpperCase() || null;
   if (!cleanCode) return { patientId: null, patientName: cleanName };
+  const cache = bulkCache();
+  const hit = cache?.patients.get(cleanCode);
+  if (hit) return { patientId: hit.id, patientName: cleanName ?? hit.name };
   const existing = await tx.patient.findUnique({ where: { patientCode: cleanCode } });
-  if (existing) return { patientId: existing.id, patientName: cleanName ?? existing.name };
-  const created = await tx.patient.create({ data: { patientCode: cleanCode, name: cleanName ?? cleanCode } });
-  return { patientId: created.id, patientName: cleanName ?? created.name };
+  const row = existing ?? (await tx.patient.create({ data: { patientCode: cleanCode, name: cleanName ?? cleanCode } }));
+  cache?.patients.set(cleanCode, { id: row.id, name: row.name });
+  return { patientId: row.id, patientName: cleanName ?? row.name };
 }
 
 async function ensure(model: any, id: string | undefined | null, label: string) {
   if (!id) return null;
+  const cache = bulkCache();
+  const key = `${label}:${id}`;
+  if (cache?.rows.has(key)) return cache.rows.get(key) as any;
   const row = await model.findUnique({ where: { id } });
   if (!row) throw badRequest(`${label} not found`, { field: label });
+  cache?.rows.set(key, row);
   return row;
 }
 
@@ -620,6 +628,7 @@ const expense: Adapter = {
         amount: input.amount,
         paymentModeId: input.paymentModeId,
         remarks: input.remarks ?? null,
+        headId: input.headId ?? null,
       },
     };
   },

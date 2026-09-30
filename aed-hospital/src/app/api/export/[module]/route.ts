@@ -7,6 +7,9 @@ import { rowsToCsv, rowsToXlsx } from "@/server/exporters";
 import { audit } from "@/server/audit";
 import { prisma } from "@/server/db";
 
+/** Vercel function time limit (60 s is allowed on every Vercel plan). */
+export const maxDuration = 60;
+
 export const GET = api<{ module: string }>(async ({ actor, params, url }) => {
   requirePermission(actor, "reports.export");
   if (!isModuleKey(params.module)) throw badRequest("Unknown module");

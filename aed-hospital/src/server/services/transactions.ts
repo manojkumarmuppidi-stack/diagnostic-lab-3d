@@ -6,6 +6,7 @@
  *  - every change is audited in the same DB transaction.
  */
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { randomUUID } from "node:crypto";
 import { fromDbDate, type ISODate } from "@/lib/dates";
 import { MODULES, viewPerm, writePerm, type ModuleKey } from "@/lib/modules";
 import { reasonSchema } from "@/lib/schemas";
@@ -37,6 +38,37 @@ async function findDuplicate(tx: Tx, module: ModuleKey, fingerprint: string, exc
   }) as Promise<{ id: string } | null>;
 }
 
+/**
+ * Validate and build a row for bulk insertion (import commit) without writing it.
+ * Rows that need follow-up writes (IPD admissions with an initial payment) return `after`
+ * and must go through insertRecord instead.
+ */
+export async function prepareRecord(tx: Tx, actor: Actor, module: ModuleKey, raw: unknown, importBatchId: string) {
+  const a = ADAPTERS[module];
+  const input = parseInput(module, raw);
+  const built = await a.build(tx, input);
+  await assertDayWritable(tx, built.date);
+  const id = `imp_${randomUUID().replace(/-/g, "")}`;
+  return {
+    id,
+    module,
+    date: built.date,
+    amount: built.amount,
+    needsSingleInsert: !!built.after,
+    data: { ...built.data, id, fingerprint: built.fingerprint, createdById: actor.id, importBatchId, correctionOfId: null },
+  };
+}
+
+/** Insert prepared rows with one INSERT per module per 500 rows. */
+export async function bulkInsertPrepared(tx: Tx, rows: { module: ModuleKey; data: Record<string, unknown> }[]) {
+  const byModule = new Map<ModuleKey, Record<string, unknown>[]>();
+  for (const r of rows) byModule.set(r.module, [...(byModule.get(r.module) ?? []), r.data]);
+  for (const [module, data] of byModule) {
+    const del = ADAPTERS[module].delegate(tx);
+    for (let i = 0; i < data.length; i += 500) await del.createMany({ data: data.slice(i, i + 500) });
+  }
+}
+
 /** Core insert — assumes permission already checked. Returns the created row id. */
 export async function insertRecord(tx: Tx, actor: Actor, module: ModuleKey, raw: unknown, opts: CreateOptions = {}) {
   const a = ADAPTERS[module];
@@ -52,9 +84,12 @@ export async function insertRecord(tx: Tx, actor: Actor, module: ModuleKey, raw:
       });
     }
   }
+  // Expenses entered by staff wait for an approver; they count nowhere until approved.
+  const pending = module === "expense" && !opts.importBatchId && !can(actor, "expense.approve");
   const created = await a.delegate(tx).create({
     data: {
       ...built.data,
+      ...(pending ? { status: "PENDING" } : {}),
       fingerprint: built.fingerprint,
       createdById: actor.id,
       importBatchId: opts.importBatchId ?? null,
@@ -65,8 +100,8 @@ export async function insertRecord(tx: Tx, actor: Actor, module: ModuleKey, raw:
   if (!opts.quietAudit) {
     await audit(tx, actor, { action: opts.correctionOfId ? "CORRECTION_CREATE" : "CREATE", entityType: a.entityType, entityId: created.id, after: created });
   }
-  if (!opts.importBatchId) await onDayMutated(tx, actor, built.date, `${MODULES[module].singular} added`);
-  return { id: created.id as string, date: built.date, amount: built.amount, fingerprint: built.fingerprint };
+  if (!opts.importBatchId && !pending) await onDayMutated(tx, actor, built.date, `${MODULES[module].singular} added`);
+  return { id: created.id as string, date: built.date, amount: built.amount, fingerprint: built.fingerprint, pending };
 }
 
 export async function createTransaction(actor: Actor, module: ModuleKey, raw: Record<string, unknown>) {

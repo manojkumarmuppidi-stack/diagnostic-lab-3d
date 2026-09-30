@@ -10,6 +10,7 @@
  *  - Bill Item Wise Collection          → Laboratory (one row per test / service line)
  *  - Pharmacy Collection Report (daily) → Pharmacy sales per payment mode + refunds
  *  - Lab Bill Collection                → rejected with guidance (bill totals, no test names)
+ *  - Cash book (Date/Description/Debit/Credit/Balance) → Expenses, categorised from the description
  *
  * Payment modes are not in the OPD or item-wise exports; those rows are recorded as "Other"
  * and flagged in Remarks, so reconciliation never pretends to know the split.
@@ -17,6 +18,8 @@
 import type { ImportType } from "../modules";
 import { norm } from "./text";
 import { classifyLabItem } from "./lab-category";
+import { classifyExpense, vendorFrom } from "./expense-category";
+import { suggestModeCode } from "../expenses";
 
 type Cell = string | number | boolean | null;
 export interface RawSheet {
@@ -31,7 +34,7 @@ export interface ConvertedSheet extends RawSheet {
   note: string;
   source: HmsReport;
 }
-export type HmsReport = "oneglance-opd" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments";
+export type HmsReport = "oneglance-opd" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book";
 
 export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-opd": "OneGlance · Outpatient Collection Report",
@@ -41,6 +44,7 @@ export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-pharmacy-item-sales": "OneGlance · Purchase/Sales Report (medicines sold)",
   "oneglance-pharmacy-item-purchases": "OneGlance · Purchase/Sales Report (purchase invoices)",
   "oneglance-supplier-payments": "OneGlance · Pharmacy Invoice Report (supplier payments)",
+  "cash-book": "Cash book (Date · Description · Debit · Credit · Balance)",
 };
 
 const has = (headers: string[], ...names: string[]) => {
@@ -56,6 +60,7 @@ export function detectHmsReport(headers: string[]): HmsReport | null {
   if (has(headers, "Bill No", "Drug Name", "Qty", "Total", "Sales Amount", "Purchase Amount")) return "oneglance-pharmacy-item-sales";
   if (has(headers, "Invoice No", "Invoice Date", "Stockiest Name", "Drug Name", "Purchase Value")) return "oneglance-pharmacy-item-purchases";
   if (has(headers, "BillNo", "Paid date", "Stockiest Name", "Details", "Paid Amount")) return "oneglance-supplier-payments";
+  if (has(headers, "Description", "Debit", "Credit", "Balance") && (has(headers, "Cheque No.") || has(headers, "Ledger"))) return "cash-book";
   return null;
 }
 
@@ -438,6 +443,111 @@ function convertSupplierPayments(sheet: RawSheet): ConvertedSheet[] {
   return byMonth("oneglance-supplier-payments", sheet.name, "supplier-payments", "Supplier payments", PAYMENT_HEADERS, out, note);
 }
 
+// ─────────────────────────── cash book ───────────────────────────
+
+const EXPENSE_HEADERS = ["Date", "Department", "Category", "Subcategory", "Description", "Vendor", "Bill Number", "Amount", "Payment Mode", "Remarks"];
+const MODE_NAMES = { CASH: "Cash", CARD: "Card", BANK: "Bank Transfer" } as const;
+
+const isoToDay = (s: string) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 86_400_000;
+function isoOf(y: number, m: number, d: number): string | null {
+  const s = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const t = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === s ? s : null;
+}
+
+/**
+ * Hand-typed cash books mix day-first and month-first dates, and Excel silently turns
+ * "03/01/2026" (3 Jan) into 1 Mar. The rows are in date order, so every date that could be read
+ * both ways is resolved by its neighbours: dates with a day above 12 can only be read one way and
+ * act as anchors; each ambiguous date takes the reading closest to the anchors before and after it.
+ * Returns ISO dates ("" for unreadable) and how many were swapped.
+ */
+export function fixLedgerDates(raw: string[]): { dates: string[]; swapped: number } {
+  const cands = raw.map((v) => {
+    const s = String(v ?? "").trim();
+    let y: number, a: number, b: number;
+    let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+    if (m) [y, a, b] = [+m[1], +m[2], +m[3]]; // Excel date: month a, day b
+    else if ((m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(s))) [y, a, b] = [+m[3] < 100 ? 2000 + +m[3] : +m[3], +m[2], +m[1]]; // typed text, day-first
+    else return [] as string[];
+    const first = isoOf(y, a, b);
+    const other = a !== b ? isoOf(y, b, a) : null;
+    return [first, other].filter((x): x is string => !!x);
+  });
+  const anchors = cands.map((c) => (c.length === 1 ? isoToDay(c[0]) : null));
+  const dates: string[] = [];
+  let swapped = 0;
+  let prev: number | null = null;
+  for (let i = 0; i < cands.length; i++) {
+    const c = cands[i];
+    if (c.length === 0) {
+      dates.push("");
+      continue;
+    }
+    let pick = c[0];
+    if (c.length === 2) {
+      let next: number | null = null;
+      for (let j = i + 1; j < cands.length && next === null; j++) next = anchors[j];
+      let lastAnchor: number | null = null;
+      for (let j = i - 1; j >= 0 && lastAnchor === null; j--) lastAnchor = anchors[j];
+      const ref = [prev, lastAnchor, next].filter((x): x is number => x !== null);
+      if (ref.length) {
+        const cost = (iso: string) => ref.reduce((acc, r) => acc + Math.abs(isoToDay(iso) - r), 0);
+        pick = cost(c[1]) < cost(c[0]) ? c[1] : c[0];
+      }
+      if (pick !== c[0]) swapped++;
+    }
+    prev = isoToDay(pick);
+    dates.push(pick);
+  }
+  return { dates, swapped };
+}
+
+/** Cash book: debit lines become expenses; credits (cash received) and blank amounts are skipped. */
+function convertCashBook(sheet: RawSheet): ConvertedSheet[] {
+  const dateCol = sheet.headers.find((h) => /date/i.test(h)) ?? sheet.headers[0];
+  const { dates, swapped } = fixLedgerDates(sheet.rows.map((r) => String(r.values[dateCol] ?? "")));
+  const out: Out[] = [];
+  let credits = 0;
+  let blank = 0;
+  sheet.rows.forEach((r, i) => {
+    const g = getter(r.values);
+    const desc = cleanText(g("Description"));
+    const debit = num(g("Debit"));
+    if (!(debit > 0)) {
+      if (num(g("Credit")) > 0) credits++;
+      else if (desc) blank++;
+      return;
+    }
+    const { category, subcategory } = classifyExpense(desc);
+    const mode = suggestModeCode(debit);
+    const [y, m, d] = (dates[i] || "").split("-");
+    out.push({
+      rowNumber: r.rowNumber,
+      values: {
+        Date: dates[i] ? `${d}-${m}-${y}` : "",
+        Department: null,
+        Category: category,
+        Subcategory: subcategory ?? null,
+        Description: desc || "(no description)",
+        Vendor: vendorFrom(desc) ?? null,
+        "Bill Number": g("Cheque No.") || null,
+        Amount: r2(debit),
+        "Payment Mode": mode ? MODE_NAMES[mode] : "Cash",
+        Remarks: ["Cash book", g("Ledger") ? `ledger ${g("Ledger")}` : "", "payment mode estimated from amount"].filter(Boolean).join(" · "),
+      },
+    });
+  });
+  const total = out.reduce((a, r) => a + Number(r.values.Amount), 0);
+  const note =
+    `${out.length} payments (₹${Math.round(total).toLocaleString("en-IN")}) categorised from the description` +
+    (swapped ? `; ${swapped} dates that Excel had read month-first were corrected from the neighbouring rows` : "") +
+    (credits ? `; ${credits} cash-received lines skipped` : "") +
+    (blank ? `; ${blank} lines without an amount skipped` : "") +
+    `. Payment mode is estimated from the amount (below ₹3,000 cash, above ₹1,00,000 bank, otherwise card). Check "Other" rows before importing.`;
+  return byMonth("cash-book", sheet.name, "expense", "Cash book", EXPENSE_HEADERS, out, note);
+}
+
 export class HmsReportError extends Error {}
 
 /**
@@ -459,6 +569,8 @@ export function convertHmsSheet(sheet: RawSheet): ConvertedSheet[] | null {
       return convertPharmacyItemPurchases(sheet);
     case "oneglance-supplier-payments":
       return convertSupplierPayments(sheet);
+    case "cash-book":
+      return convertCashBook(sheet);
     case "oneglance-lab-bills":
       throw new HmsReportError(
         'This is OneGlance "Lab Bill Collection": bill totals without test names, so importing it would count one test per bill. ' +

@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
   // pdfkit reads its font metric files from disk at runtime, so it must not be bundled.
   serverExternalPackages: ["pdfkit", "exceljs", "xlsx", "bcryptjs"],
   poweredByHeader: false,
+  // pdfkit loads its font metrics (.afm) from disk at runtime; make sure Vercel bundles them.
+  outputFileTracingIncludes: {
+    "/api/reports/[type]": ["./node_modules/pdfkit/js/data/**/*"],
+  },
   experimental: {
     serverActions: { bodySizeLimit: "12mb" },
   },

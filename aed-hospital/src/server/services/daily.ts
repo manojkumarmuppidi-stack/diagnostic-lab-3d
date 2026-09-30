@@ -171,6 +171,8 @@ export async function changeDayStatus(actor: Actor, dateRaw: string, raw: unknow
     const day = await ensureDay(tx, date);
     const to = nextStatus(action, day.status);
     if (action === "close") {
+      const pendingExpenses = await tx.expense.count({ where: { status: "PENDING", date: toDbDate(date) } });
+      if (pendingExpenses) throw badRequest(`${pendingExpenses} expense(s) on this day are waiting for approval. Approve or reject them before closing.`);
       const recon = await tx.reconciliation.findMany({ where: { dailyAccountId: day.id } });
       // The reconciliation must match today's expected amounts (nothing changed since).
       const stale = recon.filter((r) => toNum(r.expected) !== (figures!.collectionsByMode[r.reconGroup] ?? 0));

@@ -1,15 +1,29 @@
 /**
- * File storage for expense bills/receipts. Local-disk adapter; in production point
- * UPLOAD_DIR at a backed-up volume (see BACKUP_RECOVERY.md) or swap this adapter for
- * object storage — callers only use put/get.
+ * File storage for expense bills/receipts.
+ *  - "vercel-blob": PRIVATE Vercel Blob store (used automatically when BLOB_READ_WRITE_TOKEN is set).
+ *    Files are never publicly reachable; the app streams them to signed-in users only.
+ *  - "local": UPLOAD_DIR on disk (own server / Docker with a persistent volume).
+ * Choose explicitly with STORAGE_DRIVER=local|vercel-blob. Callers only use putFile/getFile.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { badRequest } from "./errors";
 
-const ROOT = path.resolve(process.env.UPLOAD_DIR || "./uploads");
-export const MAX_ATTACHMENT_BYTES = Number(process.env.MAX_UPLOAD_MB || 10) * 1024 * 1024;
+/** Vercel functions reject request bodies over 4.5 MB, so keep uploads under 4 MB there. */
+export const ON_VERCEL = !!process.env.VERCEL;
+const DEFAULT_MB = ON_VERCEL ? 4 : 10;
+export const MAX_ATTACHMENT_BYTES = Number(process.env.MAX_UPLOAD_MB || DEFAULT_MB) * 1024 * 1024;
+
+export type StorageDriver = "local" | "vercel-blob";
+
+export function storageDriver(): StorageDriver {
+  const explicit = process.env.STORAGE_DRIVER;
+  if (explicit === "local" || explicit === "vercel-blob") return explicit;
+  return process.env.BLOB_READ_WRITE_TOKEN ? "vercel-blob" : "local";
+}
+
+const BLOB_PREFIX = "blob:";
 
 /** Allowed types, verified by magic bytes (the browser-supplied MIME type is not trusted). */
 const SIGNATURES: { mime: string; ext: string; test: (b: Buffer) => boolean }[] = [
@@ -24,21 +38,56 @@ export function sniff(buf: Buffer) {
   return SIGNATURES.find((s) => s.test(buf)) ?? null;
 }
 
+function localRoot() {
+  return path.resolve(process.env.UPLOAD_DIR || "./uploads");
+}
+
 export async function putFile(buf: Buffer) {
   if (!buf.length) throw badRequest("Empty file");
-  if (buf.length > MAX_ATTACHMENT_BYTES) throw badRequest(`File too large (max ${process.env.MAX_UPLOAD_MB || 10} MB)`);
+  if (buf.length > MAX_ATTACHMENT_BYTES) throw badRequest(`File too large (max ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB)`);
   const kind = sniff(buf);
   if (!kind) throw badRequest("Only JPEG, PNG, WEBP, HEIC images or PDF files are allowed");
   const now = new Date();
-  const key = `${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${randomUUID()}.${kind.ext}`;
-  const full = path.join(ROOT, key);
+  const rel = `attachments/${now.getUTCFullYear()}/${String(now.getUTCMonth() + 1).padStart(2, "0")}/${randomUUID()}.${kind.ext}`;
+  const sha256 = createHash("sha256").update(buf).digest("hex");
+
+  if (storageDriver() === "vercel-blob") {
+    const { put } = await import("@vercel/blob");
+    const res = await put(rel, buf, { access: "private", contentType: kind.mime, addRandomSuffix: false, allowOverwrite: false });
+    return { storageKey: `${BLOB_PREFIX}${res.pathname}`, mimeType: kind.mime, size: buf.length, sha256 };
+  }
+
+  if (ON_VERCEL) {
+    // Vercel's filesystem is read-only and wiped between requests — never silently lose a bill.
+    throw badRequest("File storage is not configured: connect a Vercel Blob store to this project (Storage → Blob).");
+  }
+  const root = localRoot();
+  const full = path.join(root, rel);
   await mkdir(path.dirname(full), { recursive: true });
   await writeFile(full, buf, { flag: "wx" });
-  return { storageKey: key, mimeType: kind.mime, size: buf.length, sha256: createHash("sha256").update(buf).digest("hex") };
+  return { storageKey: rel, mimeType: kind.mime, size: buf.length, sha256 };
+}
+
+async function streamToBuffer(stream: ReadableStream<Uint8Array>): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  const reader = stream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) chunks.push(value);
+  }
+  return Buffer.concat(chunks);
 }
 
 export async function getFile(storageKey: string): Promise<Buffer> {
-  const full = path.resolve(ROOT, storageKey);
-  if (!full.startsWith(ROOT + path.sep)) throw badRequest("Invalid file key");
+  if (storageKey.startsWith(BLOB_PREFIX)) {
+    const { get } = await import("@vercel/blob");
+    const res = await get(storageKey.slice(BLOB_PREFIX.length), { access: "private", useCache: false });
+    if (!res || res.statusCode !== 200) throw badRequest("File not found in storage");
+    return streamToBuffer(res.stream);
+  }
+  const root = localRoot();
+  const full = path.resolve(root, storageKey);
+  if (!full.startsWith(root + path.sep)) throw badRequest("Invalid file key");
   return readFile(full);
 }

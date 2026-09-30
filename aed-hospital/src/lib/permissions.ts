@@ -27,6 +27,7 @@ export const PERMISSIONS = {
   "income.write": { group: "Other Income", description: "Create / correct / void other income" },
   "expense.view": { group: "Expenses", description: "View expenses" },
   "expense.write": { group: "Expenses", description: "Create / correct / void expenses, attach bills" },
+  "expense.approve": { group: "Expenses", description: "Approve or reject expenses entered by staff (entries by approvers count immediately)" },
 
   // Accounting controls
   "accounts.view": { group: "Accounting", description: "View daily accounts & reconciliation" },

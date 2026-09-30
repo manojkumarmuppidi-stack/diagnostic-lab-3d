@@ -165,6 +165,8 @@ export const expenseSchema = z.object({
   amount: zPositiveMoney,
   paymentModeId: zId,
   remarks: zOptText(500),
+  /** Monthly expense head picked in the form (optional). */
+  headId: zOptId,
 });
 
 export const MODULE_SCHEMAS = {

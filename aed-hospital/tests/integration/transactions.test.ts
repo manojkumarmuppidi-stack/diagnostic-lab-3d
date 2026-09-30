@@ -186,8 +186,8 @@ describe("pharmacy & expenses", () => {
     await createTransaction(f.accounts, "pharmacy-sale", { date: D, invoiceNo: "PH1", grossAmount: 10000, discount: 500, paymentModeId: f.ids.CASH });
     await createTransaction(f.accounts, "pharmacy-return", { date: D, invoiceNo: "PH1", amount: 300, paymentModeId: f.ids.CASH });
     await createTransaction(f.accounts, "pharmacy-purchase", { date: D, supplier: "Dist", invoiceNo: "S1", amount: 7000, paymentModeId: f.ids.BANK });
-    await createTransaction(f.accounts, "expense", { date: D, categoryId: f.ids.groceries, subcategoryId: f.ids.veg, description: "Veg", amount: 1200, paymentModeId: f.ids.CASH });
-    await createTransaction(f.accounts, "expense", { date: D, categoryId: f.ids.otherExp, description: "Misc", amount: 100, paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "expense", { date: D, categoryId: f.ids.groceries, subcategoryId: f.ids.veg, description: "Veg", amount: 1200, paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "expense", { date: D, categoryId: f.ids.otherExp, description: "Misc", amount: 100, paymentModeId: f.ids.CASH });
     const r = { from: D, to: D };
     expect((await incomeByStream(r)).PHARMACY).toBe(9200);
     expect(await expenseByKind(r)).toEqual({ HOSPITAL: 1200, PHARMACY_PURCHASE: 7000, OTHER: 100 });

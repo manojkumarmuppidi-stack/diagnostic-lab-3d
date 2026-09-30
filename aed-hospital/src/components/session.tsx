@@ -51,6 +51,7 @@ export type Masters = Record<
   | "investigations"
   | "dietServices"
   | "expenseCategories"
+  | "expenseHeads"
   | "paymentModes",
   MasterItem[]
 >;

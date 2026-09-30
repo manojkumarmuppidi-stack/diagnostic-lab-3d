@@ -63,6 +63,22 @@ const DEFS: Record<string, { label: string; fields: F[]; show: string[] }> = {
     ],
     show: ["name", "parentName", "group"],
   },
+  expenseHeads: {
+    label: "Monthly Expense Heads",
+    fields: [
+      { key: "name", label: "Head (what staff see, e.g. Rent – Online)", type: "text", required: true },
+      { key: "keywords", label: "Keywords to find it (comma-separated, e.g. rent,building)", type: "text" },
+      { key: "categoryId", label: "Category", type: "select", master: "expenseCategories", required: true },
+      { key: "subcategoryId", label: "Subcategory", type: "select", master: "expenseSubcategories" },
+      { key: "departmentId", label: "Department", type: "select", master: "departments" },
+      { key: "vendor", label: "Paid to / vendor", type: "text" },
+      { key: "defaultMode", label: "Payment mode", type: "select", options: [["", "Suggest from amount (<₹3,000 cash · >₹1 lakh online · else card)"], ["CASH", "Cash"], ["CARD", "Card"], ["UPI", "UPI"], ["BANK", "Bank transfer / online"], ["CHEQUE", "Cheque"]] },
+      { key: "typicalAmount", label: "Usual amount (₹, optional — last month's amount is used if empty)", type: "money" },
+      { key: "monthly", label: "Expected every month (shows on the monthly checklist)", type: "bool" },
+      { key: "sortOrder", label: "Sort order", type: "int" },
+    ],
+    show: ["name", "categoryName", "vendor", "defaultMode", "typicalAmount"],
+  },
   paymentModes: {
     label: "Payment Modes",
     fields: [
@@ -88,14 +104,15 @@ export default function MastersPage() {
 
   const open = (row: any | null) => {
     setEdit(row ?? {});
-    setValues(row ? { ...row } : { kind: "DOCTOR", group: "HOSPITAL", reconGroup: "OTHER", category: "General" });
+    setValues(row ? { ...row } : { kind: "DOCTOR", group: "HOSPITAL", reconGroup: "OTHER", category: "General", monthly: true });
     setErrs({});
   };
   const save = async () => {
     const payload: Record<string, unknown> = {};
     for (const f of def.fields) {
       const v = values[f.key];
-      payload[f.key] = f.type === "money" || f.type === "int" ? (v === "" || v === undefined || v === null ? undefined : Number(v)) : v ?? (f.type === "select" ? null : undefined);
+      payload[f.key] =
+        f.type === "money" || f.type === "int" ? (v === "" || v === undefined || v === null ? (f.key === "typicalAmount" ? null : undefined) : Number(v)) : f.type === "bool" ? v !== false : v ?? (f.type === "select" ? null : undefined);
     }
     try {
       if (edit?.id) await apiFetch(`/api/masters/${type}/${edit.id}`, { method: "PATCH", json: payload });
@@ -131,7 +148,7 @@ export default function MastersPage() {
               <thead>
                 <tr>
                   {def.show.map((k) => (
-                    <th key={k} className={["rate", "defaultRate"].includes(k) ? "num" : ""}>
+                    <th key={k} className={["rate", "defaultRate", "typicalAmount"].includes(k) ? "num" : ""}>
                       {def.fields.find((f) => f.key === k)?.label ?? k.replace(/Name$/, "")}
                     </th>
                   ))}
@@ -143,8 +160,16 @@ export default function MastersPage() {
                 {rows.map((r) => (
                   <tr key={r.id} style={!r.active ? { opacity: 0.55 } : undefined}>
                     {def.show.map((k) => (
-                      <td key={k} className={["rate", "defaultRate"].includes(k) ? "num" : ""}>
-                        {["rate", "defaultRate"].includes(k) ? (Number(r[k]) > 0 ? formatINR(r[k]) : <Badge tone="amber">rate not set</Badge>) : String(r[k] ?? "—")}
+                      <td key={k} className={["rate", "defaultRate", "typicalAmount"].includes(k) ? "num" : ""}>
+                        {["rate", "defaultRate"].includes(k) ? (
+                          Number(r[k]) > 0 ? formatINR(r[k]) : <Badge tone="amber">rate not set</Badge>
+                        ) : k === "typicalAmount" ? (
+                          r[k] ? formatINR(r[k]) : "—"
+                        ) : k === "defaultMode" ? (
+                          r[k] || "by amount"
+                        ) : (
+                          String(r[k] ?? "—")
+                        )}
                       </td>
                     ))}
                     <td>{r.active ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}</td>
@@ -167,16 +192,20 @@ export default function MastersPage() {
         <div className="space-y-3">
           {def.fields.map((f) => (
             <Field key={f.key} label={f.label} required={f.required} error={errs[f.key]}>
-              {f.type === "select" ? (
-                <select className="input" value={values[f.key] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}>
-                  <option value="">— None —</option>
+              {f.type === "bool" ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={values[f.key] !== false} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.checked }))} /> Yes
+                </label>
+              ) : f.type === "select" ? (
+                <select className="input" value={values[f.key] ?? ""} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value, ...(f.key === "categoryId" ? { subcategoryId: "" } : {}) }))}>
+                  {!f.options?.some(([k]) => k === "") && <option value="">— None —</option>}
                   {f.options?.map(([k, l]) => (
                     <option key={k} value={k}>
                       {l}
                     </option>
                   ))}
                   {f.master &&
-                    masterOptions(masters, f.master, { includeId: values[f.key] })
+                    masterOptions(masters, f.master, { includeId: values[f.key], parentId: f.master === "expenseSubcategories" ? values.categoryId : undefined })
                       .filter((o) => o.id !== edit?.id)
                       .map((o) => (
                         <option key={o.id} value={o.id}>

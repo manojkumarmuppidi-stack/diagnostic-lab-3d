@@ -98,3 +98,13 @@ Gross Margin %    = Gross Margin ÷ Net Sales × 100          (undefined when Ne
 4. **Reopen** = Admin only, mandatory reason, `DayEvent` + `AuditLog`, and `reopenCount` is incremented.
 5. **Reconciliation** = the expected amount per mode comes from `v_income_line` (receipts net of refunds and returns). `Variance = Actual − Expected`. A non-zero variance needs an explanation. A day can close only if the saved expected amounts still match (no stale reconciliation).
 6. **Audit** = every create, correct, void, approve, import, reversal, closing action, master change, user change, login and export writes an append-only `AuditLog` row with user, time, before/after, reason, IP and user-agent.
+
+## Expense approval
+- An expense entered by a user **without** `expense.approve` (every role except Admin by default) is stored with status `PENDING`. Every figure, view and report counts `ACTIVE` rows only, so a pending expense changes nothing until it is approved.
+- **Approve** → `ACTIVE`, stamped with `approvedById`/`approvedAt`; the day's figures change, so a reconciled day goes back to review and a closed day must be reopened first.
+- **Reject** → `VOIDED` with `voidReason = "Rejected: <reason>"`. The row is kept.
+- The database status guard allows exactly `PENDING → ACTIVE` and `PENDING → VOIDED`; nothing can be moved back to `PENDING`. Amounts stay immutable while pending.
+- A day cannot be closed while it has pending expenses.
+- Expenses entered by an approver and rows imported from Excel are `ACTIVE` immediately.
+- Payment mode default for new expenses (a suggestion; staff can change it): below ₹3,000 Cash, above ₹1,00,000 Bank Transfer, otherwise Card.
+

@@ -140,5 +140,16 @@ async function computeAlerts(
     const n = forced + Number(sameFile[0]?.n ?? 0);
     if (n) alerts.push({ id: "dup-import", severity: "warning", title: "Possible duplicate imports", detail: `${forced} duplicate row(s) force-imported; ${Number(sameFile[0]?.n ?? 0)} file(s) imported more than once.`, href: "/import?tab=history" });
   }
+  if (can(actor, "expense.approve")) {
+    const pendingExp = await prisma.expense.aggregate({ where: { status: "PENDING" }, _count: true, _sum: { amount: true } });
+    if (pendingExp._count)
+      alerts.push({
+        id: "expense-approval",
+        severity: "warning",
+        title: `${pendingExp._count} expense(s) waiting for your approval`,
+        detail: `${formatINR(Number(pendingExp._sum.amount ?? 0))} entered by staff — not counted until approved.`,
+        href: "/expenses?tab=pending",
+      });
+  }
   return alerts;
 }

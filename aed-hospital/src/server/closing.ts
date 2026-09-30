@@ -8,6 +8,7 @@ import { audit } from "./audit";
 import type { Actor } from "./authz";
 import type { Tx } from "./db";
 import { badRequest, dayLocked } from "./errors";
+import { bulkCache } from "./bulk-cache";
 
 export const DAY_TRANSITIONS: Record<string, { from: DayStatus[]; to: DayStatus }> = {
   review: { from: ["OPEN"], to: "REVIEW" },
@@ -41,7 +42,13 @@ export async function getDayStatuses(tx: Tx, dates: ISODate[]): Promise<Map<ISOD
 
 /** Throw 423 if the business date is CLOSED. Applies to every role, Admin included (Admin must reopen). */
 export async function assertDayWritable(tx: Tx, date: ISODate) {
-  if ((await getDayStatus(tx, date)) === "CLOSED") throw dayLocked(date);
+  const cache = bulkCache();
+  let status = cache?.days.get(date);
+  if (!status) {
+    status = await getDayStatus(tx, date);
+    cache?.days.set(date, status);
+  }
+  if (status === "CLOSED") throw dayLocked(date);
 }
 
 /**
