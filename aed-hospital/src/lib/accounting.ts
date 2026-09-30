@@ -15,14 +15,14 @@ export const STREAM_LABELS: Record<IncomeStream, string> = {
   OPD: "OPD",
   IPD: "IPD",
   LAB: "Laboratory",
-  PHARMACY: "Pharmacy",
+  PHARMACY: "Hormonal Pharmacy",
   DIET: "Diet & Nutrition",
   OTHER: "Other Income",
 };
 
 export const EXPENSE_LABELS: Record<ExpenseKind, string> = {
   HOSPITAL: "Hospital Expenses",
-  PHARMACY_PURCHASE: "Pharmacy Purchases",
+  PHARMACY_PURCHASE: "Hormonal Pharmacy Purchases",
   OTHER: "Other Expenses",
 };
 

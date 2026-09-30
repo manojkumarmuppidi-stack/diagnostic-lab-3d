@@ -2,6 +2,15 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.9.0: Hormonal Pharmacy as its own segment
+- The pharmacy is now **Hormonal Pharmacy** everywhere (income stream, purchases, Analytics tab, reports, navigation).
+- New page **Hormonal Pharmacy → accounts** (`/hormonal-pharmacy`), built for phones:
+  - For any month: net sales, purchases, **profit = Sale − Purchase** and **profit %** (of net sales), compared with last month. For the current month the comparison is against the same days of last month.
+  - Month by month for 12 months (chart + table with a 12-month total) and day by day with a running month-so-far profit and profit %.
+  - Where medicine lines are imported, the **margin on medicines actually sold** (ex-GST) is shown beside it, with a note when stock build-up or sell-down makes Sale − Purchase misleading.
+- Dashboard **By segment**: Hospital (without Hormonal Pharmacy) income, expenses, net; Hormonal Pharmacy net sales, purchases, profit and %. The consolidated Financial result is unchanged and equals the two added together.
+- Cash book: staff token payments (salary top-ups, performance bonus) go to Salaries & Wages → **Incentives & bonus**; new head "Staff incentives & bonus".
+
 ## 0.8.0: Expense heads, approval and month-wise expenses
 - **Expense heads** (Masters → Expense heads): recurring items such as rent, electricity, salaries, ESI/PF, TDS, milk, gas, oxygen and water cans. Each head has keywords, category/subcategory, payee, default payment mode, an optional typical amount and a "monthly" flag. The seed adds 36 generic heads with no amounts or names; the Admin fills those in.
 - **One-word quick pick** in the expense form. Typing "rent", "milk" or "esi" shows the matching heads. Picking one fills the category, payee, description ("Milk – Sep 2026"), typical amount and payment mode.

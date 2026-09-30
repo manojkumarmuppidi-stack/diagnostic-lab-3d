@@ -127,7 +127,7 @@ test("switching between tabs never crashes a page (stale data from the previous 
   page.on("pageerror", (e) => crashes.push(e.message));
   await login(page);
   const pages: [string, string[]][] = [
-    ["/analytics", ["Revenue", "OPD", "IPD", "Laboratory", "Pharmacy", "Expenses", "Profitability", "Laboratory", "Revenue"]],
+    ["/analytics", ["Revenue", "OPD", "IPD", "Laboratory", "Hormonal Pharmacy", "Expenses", "Profitability", "Laboratory", "Revenue"]],
     ["/ipd", []],
     ["/pharmacy", []],
     ["/masters", []],
@@ -135,6 +135,7 @@ test("switching between tabs never crashes a page (stale data from the previous 
     ["/users", []],
     ["/import", ["Import history", "Import"]],
     ["/expenses", []],
+    ["/hormonal-pharmacy", []],
   ];
   for (const [path, names] of pages) {
     await page.goto(path);

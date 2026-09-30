@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Info, OctagonAlert } from "lucide-react";
 import { useApi, qs } from "@/lib/client";
-import { EXPENSE_LABELS, INCOME_STREAMS, STREAM_LABELS, type Change, type Counts, type ExpenseByKind, type IncomeByStream } from "@/lib/accounting";
+import { compare, EXPENSE_LABELS, INCOME_STREAMS, pctOf, STREAM_LABELS, type Change, type Counts, type ExpenseByKind, type IncomeByStream } from "@/lib/accounting";
 import { addDays } from "@/lib/dates";
 import { formatINR, formatNumber, formatPct } from "@/lib/money";
 import type { Granularity, ResolvedPeriod } from "@/lib/periods";
@@ -115,6 +115,8 @@ export default function DashboardPage() {
             </div>
           </Section>
 
+          <Segments cur={data.current} prev={data.previous} from={data.period.current.from} to={data.period.current.to} />
+
           <div className="grid gap-5 xl:grid-cols-3">
             <div className="xl:col-span-2">
               <Section title="Income">
@@ -213,7 +215,7 @@ export default function DashboardPage() {
                         ["OPD", "opd", "money"],
                         ["IPD", "ipd", "money"],
                         ["Lab", "lab", "money"],
-                        ["Pharmacy", "pharmacy", "money"],
+                        ["Hormonal Pharmacy", "pharmacy", "money"],
                         ["Patients", "patients", "int"],
                         ["Consultations", "consultations", "int"],
                         ["Lab tests", "labTests", "int"],
@@ -262,3 +264,47 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </section>
   );
 }
+
+/**
+ * The two businesses side by side: the hospital without the Hormonal Pharmacy, and the pharmacy
+ * on its own (Sale − Purchase). Together they add up to the Financial result above.
+ */
+function Segments({ cur, prev, from, to }: { cur: Summary; prev: Summary; from: string; to: string }) {
+  const seg = (x: Summary) => {
+    const hospIncome = INCOME_STREAMS.filter((s) => s !== "PHARMACY").reduce((a, s) => a + x.income[s], 0);
+    const hospExp = x.expense.HOSPITAL + x.expense.OTHER;
+    const phSales = x.income.PHARMACY;
+    const phBuy = x.expense.PHARMACY_PURCHASE;
+    return { hospIncome, hospExp, hospNet: hospIncome - hospExp, phSales, phBuy, phProfit: phSales - phBuy, phPct: pctOf(phSales - phBuy, phSales) };
+  };
+  const a = seg(cur);
+  const b = seg(prev);
+  return (
+    <Section title="By segment">
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="card p-3 sm:p-4">
+          <h3 className="mb-2 text-sm font-semibold">Hospital (without Hormonal Pharmacy)</h3>
+          <div className="grid grid-cols-3 gap-2">
+            <Kpi label="Income" value={a.hospIncome} change={compare(a.hospIncome, b.hospIncome)} href={withRange("/daily-accounts", from, to)} />
+            <Kpi label="Expenses" value={a.hospExp} change={compare(a.hospExp, b.hospExp)} goodWhen="down" href={withRange("/expenses", from, to)} />
+            <Kpi label="Net" value={a.hospNet} change={compare(a.hospNet, b.hospNet)} emphasis />
+          </div>
+        </div>
+        <div className="card p-3 sm:p-4">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold">Hormonal Pharmacy (Sale − Purchase)</h3>
+            <Link href="/hormonal-pharmacy" className="text-xs underline">
+              Monthly accounts
+            </Link>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <Kpi label="Net sales" value={a.phSales} change={compare(a.phSales, b.phSales)} href="/hormonal-pharmacy" />
+            <Kpi label="Purchases" value={a.phBuy} change={compare(a.phBuy, b.phBuy)} goodWhen="down" href={withRange("/pharmacy?tab=purchases", from, to)} />
+            <Kpi label={`Profit${a.phPct === null ? "" : ` · ${a.phPct.toFixed(1)}%`}`} value={a.phProfit} change={compare(a.phProfit, b.phProfit)} emphasis />
+          </div>
+        </div>
+      </div>
+    </Section>
+  );
+}
+

@@ -18,7 +18,7 @@ const TYPES = [
   ["opd", "OPD Report"],
   ["ipd", "IPD Report"],
   ["lab", "Laboratory Report"],
-  ["pharmacy", "Pharmacy Report"],
+  ["pharmacy", "Hormonal Pharmacy Report"],
   ["expense", "Expense Report"],
   ["income-vs-expense", "Income vs Expense Report"],
   ["profitability", "Profitability Report"],

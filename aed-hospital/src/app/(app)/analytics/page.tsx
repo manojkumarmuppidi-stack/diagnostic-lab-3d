@@ -22,7 +22,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "opd", label: "OPD" },
   { key: "ipd", label: "IPD" },
   { key: "lab", label: "Laboratory" },
-  { key: "pharmacy", label: "Pharmacy" },
+  { key: "pharmacy", label: "Hormonal Pharmacy" },
   { key: "expense", label: "Expenses" },
   { key: "profitability", label: "Profitability" },
 ];

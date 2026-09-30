@@ -41,7 +41,7 @@ function Inner() {
 export default function Page() {
   return (
     <Guard perm="pharmacy.view">
-      <PageHeader title="Pharmacy" subtitle="Sales, stock purchases and returns — kept separate from hospital operating expenses" />
+      <PageHeader title="Hormonal Pharmacy — bills" subtitle="Sales, stock purchases and returns. Profit by month: Hormonal Pharmacy → accounts" />
       <Suspense fallback={<Spinner />}>
         <Inner />
       </Suspense>

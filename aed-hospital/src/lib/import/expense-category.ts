@@ -35,7 +35,9 @@ const RULES: [RegExp, ExpenseClass][] = [
   // Named staff AED pays directly (per accounts): OT technicians and security.
   [/\b(anjaneyulu|balaji|ot technicians?|ot tech)\b/, { category: "Salaries & Wages", subcategory: "OT technicians" }],
   [/\b(rathnam|ratnam|security|watchman)\b/, { category: "Salaries & Wages", subcategory: "Security" }],
-  [/\b(salary|salaries|sunday|sundays|duty|ot|ot charges|overtime|bonus|incentive|security|watchman|hostel fee|ot assistant)\b/, { category: "Salaries & Wages", subcategory: "Support staff" }],
+  // AED staff paid small token amounts (salary top-ups, performance bonus) under their own names.
+  [/^sa$|\b(ashra[fy] parveen|krishnaveni|wilson uncle|rahul|saritha|bonus|incentives?|token)\b/, { category: "Salaries & Wages", subcategory: "Incentives & bonus" }],
+  [/\b(salary|salaries|sunday|sundays|duty|ot|ot charges|overtime|security|watchman|hostel fee|ot assistant)\b/, { category: "Salaries & Wages", subcategory: "Support staff" }],
   [/\b(rent)\b/, { category: "Rent" }],
   [/\b(gas|cylinders?)\b/, { category: "Kitchen", subcategory: "Gas" }],
   [/\b(water cans?|bisleri|water bottles?|drinking water)\b/, { category: "Water", subcategory: "Drinking water cans" }],

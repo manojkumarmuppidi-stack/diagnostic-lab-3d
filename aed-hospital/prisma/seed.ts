@@ -62,7 +62,7 @@ const EXPENSE_CATEGORIES: [string, "HOSPITAL" | "OTHER", string[]][] = [
   ["Marketing", "HOSPITAL", ["Print ads", "Digital"]],
   ["Medical supplies", "HOSPITAL", ["Consumables", "Lab reagents"]],
   // Not in the original brief, but usually the largest hospital costs — without them the net result is overstated.
-  ["Salaries & Wages", "HOSPITAL", ["Doctors", "Nursing", "Support staff", "OT technicians", "Security"]],
+  ["Salaries & Wages", "HOSPITAL", ["Doctors", "Nursing", "Support staff", "OT technicians", "Security", "Incentives & bonus"]],
   ["Rent", "HOSPITAL", []],
   ["Doctor & consultant fees", "HOSPITAL", []],
   ["Referral fees", "HOSPITAL", []],
@@ -91,6 +91,7 @@ const EXPENSE_HEADS: [string, string, string | null, string, string | null, bool
   ["OT technicians", "Salaries & Wages", "OT technicians", "ot,technician,ot tech,salary", null, true],
   ["Security", "Salaries & Wages", "Security", "security,watchman,guard,salary", null, true],
   ["Housekeeping staff", "Salaries & Wages", "Support staff", "housekeeping,cleaning staff,salary", null, true],
+  ["Staff incentives & bonus", "Salaries & Wages", "Incentives & bonus", "bonus,incentive,token,performance", "CASH", false],
   ["Doctor fees", "Doctor & consultant fees", null, "doctor,consultant,visiting,dr", null, true],
   ["OP referral – Cash", "Referral fees", null, "referral,op referral", "CASH", true],
   ["OP referral – Online", "Referral fees", null, "referral,op referral", "BANK", true],

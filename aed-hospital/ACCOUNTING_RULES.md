@@ -108,3 +108,8 @@ Gross Margin %    = Gross Margin ÷ Net Sales × 100          (undefined when Ne
 - Expenses entered by an approver and rows imported from Excel are `ACTIVE` immediately.
 - Payment mode default for new expenses (a suggestion; staff can change it): below ₹3,000 Cash, above ₹1,00,000 Bank Transfer, otherwise Card.
 
+## Segments: Hospital and Hormonal Pharmacy
+- **Hormonal Pharmacy** = pharmacy net sales (after discount and returns) and pharmacy purchases (supplier invoices). Profit = Net sales − Purchases; Profit % = Profit ÷ Net sales. This is AED's monthly measure; it moves with stock build-up and sell-down, so the margin on medicines sold (taxable value − cost, ex-GST, from medicine lines) is shown beside it.
+- **Hospital (without Hormonal Pharmacy)** = all other income streams − hospital and other expenses.
+- The two segments add up to the consolidated Net Operating Result.
+

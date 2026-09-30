@@ -60,7 +60,7 @@ export const REPORT_TYPES = [
   { key: "opd", label: "OPD Report" },
   { key: "ipd", label: "IPD Report" },
   { key: "lab", label: "Laboratory Report" },
-  { key: "pharmacy", label: "Pharmacy Report" },
+  { key: "pharmacy", label: "Hormonal Pharmacy Report" },
   { key: "expense", label: "Expense Report" },
   { key: "income-vs-expense", label: "Income vs Expense Report" },
   { key: "profitability", label: "Profitability Report" },

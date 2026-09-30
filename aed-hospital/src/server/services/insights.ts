@@ -199,7 +199,7 @@ async function pharmacy(cur: Range, prev: Range, prevLabel: string): Promise<Sec
   const comparisons: Comparison[] = [
     {
       id: "pharmacy-lines",
-      title: "Pharmacy sales, returns & purchases",
+      title: "Hormonal Pharmacy sales, returns & purchases",
       noun: "line",
       unit: "money",
       goodWhen: "none",
@@ -216,7 +216,7 @@ async function pharmacy(cur: Range, prev: Range, prevLabel: string): Promise<Sec
       { id: "pharmacy-medicine-units", title: "Units sold by medicine", noun: "medicine", unit: "int", rows: top(rowsFrom(ia.medicines, ib.medicines, (x) => x.id, (x) => x.name, (x) => x.units), 16) },
     );
   }
-  return finish("pharmacy", "Pharmacy", kpis, comparisons, prevLabel);
+  return finish("pharmacy", "Hormonal Pharmacy", kpis, comparisons, prevLabel);
 }
 
 async function dietByService(r: Range) {

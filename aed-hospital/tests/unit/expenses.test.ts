@@ -46,6 +46,9 @@ describe("expense classification from descriptions", () => {
     ["Patient Refund", "Patient refunds", undefined],
     ["OP referral", "Referral fees", undefined],
     ["JJ Wellness", "MOU partners", "Revenue share"],
+    ["Saritha", "Salaries & Wages", "Incentives & bonus"],
+    ["SA", "Salaries & Wages", "Incentives & bonus"],
+    ["Performance bonus", "Salaries & Wages", "Incentives & bonus"],
     ["Something unheard of", "Other", undefined],
   ])("%s → %s / %s", (desc, category, sub) => {
     const c = classifyExpense(desc);
