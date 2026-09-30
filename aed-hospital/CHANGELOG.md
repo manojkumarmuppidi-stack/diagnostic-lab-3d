@@ -18,7 +18,7 @@ All notable changes to the AED Hospital Financial, Accounting & Operational Anal
   - Dates that Excel had read month-first are corrected from the neighbouring rows.
   - The payment mode is estimated from the amount.
   - Verified on AED's Jan–Aug 2026 cash book: 1,452 payments, ₹35.36 L, 82 dates corrected.
-- New categories: Doctor & consultant fees, Referral fees, Outsourced lab tests, Taxes & compliance, Staff welfare, Equipment (capital), Patient refunds. New subcategories: OT technicians, Security, Uniforms, Bio-medical waste.
+- New categories: MOU partners (outside parties paid under an MOU, e.g. JJ Wellness), Doctor & consultant fees, Referral fees, Outsourced lab tests, Taxes & compliance, Staff welfare, Equipment (capital), Patient refunds. New subcategories: OT technicians, Security, Uniforms, Bio-medical waste.
 
 ## 0.7.0: One-page daily summary PDF
 - New **Daily summary** page (`/daily-summary?date=…`), opened from the Dashboard button **Day summary PDF**. It is one A4 portrait page on white paper, whatever the screen theme. It shows:

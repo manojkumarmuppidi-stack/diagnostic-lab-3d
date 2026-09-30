@@ -66,6 +66,8 @@ const EXPENSE_CATEGORIES: [string, "HOSPITAL" | "OTHER", string[]][] = [
   ["Rent", "HOSPITAL", []],
   ["Doctor & consultant fees", "HOSPITAL", []],
   ["Referral fees", "HOSPITAL", []],
+  // Outside parties paid under an MOU (e.g. a wellness partner): operating cost, kept apart from salaries and referrals.
+  ["MOU partners", "HOSPITAL", []],
   ["Outsourced lab tests", "HOSPITAL", []],
   ["Taxes & compliance", "HOSPITAL", []],
   ["Staff welfare", "OTHER", []],
@@ -93,6 +95,7 @@ const EXPENSE_HEADS: [string, string, string | null, string, string | null, bool
   ["OP referral – Cash", "Referral fees", null, "referral,op referral", "CASH", true],
   ["OP referral – Online", "Referral fees", null, "referral,op referral", "BANK", true],
   ["IP referral", "Referral fees", null, "referral,ip referral", null, true],
+  ["MOU partner payments", "MOU partners", null, "mou,partner,wellness", null, false],
   ["Milk", "Groceries", "Milk & Dairy", "milk,curd,dairy", "CASH", true],
   ["Newspaper", "Administrative", null, "newspaper,news", "CASH", true],
   ["Gas cylinders", "Kitchen", "Gas", "gas,cylinder,lpg", null, true],

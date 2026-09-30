@@ -45,6 +45,7 @@ describe("expense classification from descriptions", () => {
     ["Water Bottles", "Water", "Drinking water cans"],
     ["Patient Refund", "Patient refunds", undefined],
     ["OP referral", "Referral fees", undefined],
+    ["JJ Wellness", "MOU partners", undefined],
     ["Something unheard of", "Other", undefined],
   ])("%s → %s / %s", (desc, category, sub) => {
     const c = classifyExpense(desc);
