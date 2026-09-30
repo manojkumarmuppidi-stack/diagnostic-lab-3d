@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.6.1: Fix Analytics crash when switching tabs
+- Switching from one Analytics tab to another rendered the new tab with the previous tab's data for a moment and crashed ("Application error: a client-side exception"). The API now tags each response with its `kind`, and the page only renders data for the tab that is open.
+- New E2E test switches every tab on every tabbed page and fails on any client-side exception.
+
 ## 0.6.0: Supplier payments, open invoices and product search
 - New `SupplierPayment` table (migration `20261001010000_supplier_payments`, DB-guarded). Payments are **not** expenses, because the purchase invoices already are.
 - The OneGlance **Pharmacy Invoice Report** is recognised. The cheque/UTR and the invoice numbers are read from "Details", tolerating typos like "INVOICDE NO".

@@ -92,5 +92,6 @@ export const GET = api<{ kind: string }>(async ({ actor, params, url }) => {
     default:
       throw badRequest("Unknown analytics kind");
   }
-  return { period, granularity: g, data };
+  // `kind` lets the page ignore a response that belongs to the previous tab while the next one loads.
+  return { kind: params.kind, period, granularity: g, data };
 });

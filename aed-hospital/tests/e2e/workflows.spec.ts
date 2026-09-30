@@ -93,3 +93,32 @@ test("board meeting pack: slides, present mode and keyboard navigation", async (
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Present", exact: true })).toBeVisible();
 });
+
+test("switching between tabs never crashes a page (stale data from the previous tab)", async ({ page }) => {
+  const crashes: string[] = [];
+  page.on("pageerror", (e) => crashes.push(e.message));
+  await login(page);
+  const pages: [string, string[]][] = [
+    ["/analytics", ["Revenue", "OPD", "IPD", "Laboratory", "Pharmacy", "Expenses", "Profitability", "Laboratory", "Revenue"]],
+    ["/ipd", []],
+    ["/pharmacy", []],
+    ["/masters", []],
+    ["/accounting", []],
+    ["/users", []],
+    ["/import", ["Import history", "Import"]],
+  ];
+  for (const [path, names] of pages) {
+    await page.goto(path);
+    const tabs = page.getByRole("tab");
+    await expect(tabs.first()).toBeVisible();
+    const list = names.length ? names : await tabs.allInnerTexts();
+    for (const name of list) {
+      await page.getByRole("tab", { name: name.trim(), exact: true }).first().click();
+      await page.waitForTimeout(150);
+      await expect(page.getByText("Application error")).toHaveCount(0);
+    }
+    await page.waitForTimeout(800);
+    await expect(page.getByText("Application error")).toHaveCount(0);
+  }
+  expect(crashes).toEqual([]);
+});

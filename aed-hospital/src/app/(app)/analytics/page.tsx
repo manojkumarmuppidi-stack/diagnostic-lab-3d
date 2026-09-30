@@ -48,7 +48,9 @@ function Inner() {
   }));
   const { masters } = useMasters();
   const url = period.preset === "custom" && (!period.from || !period.to) ? null : `/api/analytics/${tab}${qs({ ...periodQuery(period), granularity, ...filters, investigationId: tab === "lab" ? filters.investigationId : undefined, medicine: tab === "pharmacy" ? filters.medicine : undefined })}`;
-  const { data, error, loading, reload } = useApi<{ period: any; granularity: Granularity; data: any }>(url);
+  const { data: raw, error, loading, reload } = useApi<{ kind: string; period: any; granularity: Granularity; data: any }>(url);
+  // useApi keeps the last response while the next loads; never render one tab with another tab's data.
+  const data = raw && raw.kind === tab ? raw : null;
   const g = data?.granularity ?? "day";
   const from = data?.period.current.from;
   const to = data?.period.current.to;
@@ -114,7 +116,7 @@ function Inner() {
           )}
         </div>
         <ErrorState error={error} onRetry={reload} />
-        {loading && !data && <Spinner />}
+        {!data && !error && <Spinner />}
         {data && (
           <div style={{ opacity: loading ? 0.6 : 1 }} className="space-y-4">
             <ModuleInsights
