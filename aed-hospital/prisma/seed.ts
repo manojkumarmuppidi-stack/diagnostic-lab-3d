@@ -17,7 +17,7 @@ const prisma = new PrismaClient();
 const DEMO = process.env.SEED_DEMO_DATA === "true";
 
 const SPECIALTIES = ["Diabetes", "Thyroid", "Obesity", "Hormones", "General"];
-const DEPARTMENTS = ["OPD", "IPD", "Laboratory", "Radiology", "Cardiology", "Pharmacy", "Diet & Nutrition", "Kitchen", "Housekeeping", "Administration", "Maintenance"];
+const DEPARTMENTS = ["OPD", "IPD", "Laboratory", "Radiology", "Cardiology", "Pharmacy", "Diet & Nutrition", "Kitchen", "Housekeeping", "Administration", "Maintenance", "Wellness"];
 const CONSULT_TYPES: [string, number][] = [["Consultation", 800], ["Follow-up", 500], ["Review with Reports", 300], ["Tele-consultation", 500]];
 const ADMISSION_TYPES = ["Long Admission", "Short Admission", "Sugar Control Plan", "Other"];
 const PACKAGES: [string, string, number][] = [
@@ -66,8 +66,8 @@ const EXPENSE_CATEGORIES: [string, "HOSPITAL" | "OTHER", string[]][] = [
   ["Rent", "HOSPITAL", []],
   ["Doctor & consultant fees", "HOSPITAL", []],
   ["Referral fees", "HOSPITAL", []],
-  // Outside parties paid under an MOU (e.g. a wellness partner): operating cost, kept apart from salaries and referrals.
-  ["MOU partners", "HOSPITAL", []],
+  // Outside parties paid under an MOU, e.g. the wellness partner's share of wellness-patient revenue.
+  ["MOU partners", "HOSPITAL", ["Revenue share"]],
   ["Outsourced lab tests", "HOSPITAL", []],
   ["Taxes & compliance", "HOSPITAL", []],
   ["Staff welfare", "OTHER", []],
@@ -79,9 +79,9 @@ const EXPENSE_CATEGORIES: [string, "HOSPITAL" | "OTHER", string[]][] = [
 /**
  * Recurring monthly expense heads (the "one word" quick pick). Generic only: no amounts or
  * people's names — an Admin adds typical amounts and payees under Masters → Expense heads.
- * [name, category, subcategory, keywords, default mode (null = suggest from amount), monthly]
+ * [name, category, subcategory, keywords, default mode (null = suggest from amount), monthly, department]
  */
-const EXPENSE_HEADS: [string, string, string | null, string, string | null, boolean][] = [
+const EXPENSE_HEADS: [string, string, string | null, string, string | null, boolean, string?][] = [
   ["Rent – Cash", "Rent", null, "rent,building rent", "CASH", true],
   ["Rent – Online", "Rent", null, "rent,building rent,neft", "BANK", true],
   ["Building maintenance", "Maintenance", null, "maintenance,society,building", null, true],
@@ -95,7 +95,9 @@ const EXPENSE_HEADS: [string, string, string | null, string, string | null, bool
   ["OP referral – Cash", "Referral fees", null, "referral,op referral", "CASH", true],
   ["OP referral – Online", "Referral fees", null, "referral,op referral", "BANK", true],
   ["IP referral", "Referral fees", null, "referral,ip referral", null, true],
-  ["MOU partner payments", "MOU partners", null, "mou,partner,wellness", null, false],
+  // Wellness programme: its two costs, both tagged to the Wellness department so they can be read against wellness income.
+  ["Wellness – revenue share", "MOU partners", "Revenue share", "wellness,jj wellness,revenue share,mou,partner", null, true, "Wellness"],
+  ["Wellness – staff salaries", "Salaries & Wages", "Support staff", "wellness,salary,salaries", null, true, "Wellness"],
   ["Milk", "Groceries", "Milk & Dairy", "milk,curd,dairy", "CASH", true],
   ["Newspaper", "Administrative", null, "newspaper,news", "CASH", true],
   ["Gas cylinders", "Kitchen", "Gas", "gas,cylinder,lpg", null, true],
@@ -184,11 +186,27 @@ async function seedMasters() {
     await prisma.paymentMode.upsert({ where: { code }, create: { code, name, reconGroup, sortOrder: i }, update: {} });
   }
   // Heads are created once; later Admin edits (amounts, payees, keywords) are never overwritten.
-  for (const [i, [name, catName, subName, keywords, defaultMode, monthly]] of EXPENSE_HEADS.entries()) {
-    if (await prisma.expenseHead.findUnique({ where: { name } })) continue;
+  // 0.8.0 briefly seeded "MOU partner payments"; it is the wellness revenue share, so rename it in place.
+  const oldMou = await prisma.expenseHead.findUnique({ where: { name: "MOU partner payments" } });
+  if (oldMou && !(await prisma.expenseHead.findUnique({ where: { name: "Wellness – revenue share" } }))) {
+    await prisma.expenseHead.update({ where: { id: oldMou.id }, data: { name: "Wellness – revenue share" } });
+  }
+  for (const [i, [name, catName, subName, keywords, defaultMode, monthly, deptName]] of EXPENSE_HEADS.entries()) {
+    const existing = await prisma.expenseHead.findUnique({ where: { name } });
     const cat = await prisma.expenseCategory.findFirstOrThrow({ where: { name: catName, parentId: null } });
     const sub = subName ? await prisma.expenseCategory.findFirst({ where: { name: subName, parentId: cat.id } }) : null;
-    await prisma.expenseHead.create({ data: { name, keywords, categoryId: cat.id, subcategoryId: sub?.id ?? null, defaultMode, monthly, sortOrder: i * 10 } });
+    const dept = deptName ? await prisma.department.findUnique({ where: { name: deptName } }) : null;
+    if (existing) {
+      // Fill structure added later (subcategory, department) without overwriting Admin edits.
+      if ((sub && !existing.subcategoryId && existing.categoryId === cat.id) || (dept && !existing.departmentId)) {
+        await prisma.expenseHead.update({
+          where: { id: existing.id },
+          data: { ...(sub && !existing.subcategoryId && existing.categoryId === cat.id ? { subcategoryId: sub.id } : {}), ...(dept && !existing.departmentId ? { departmentId: dept.id, monthly } : {}) },
+        });
+      }
+      continue;
+    }
+    await prisma.expenseHead.create({ data: { name, keywords, categoryId: cat.id, subcategoryId: sub?.id ?? null, departmentId: dept?.id ?? null, defaultMode, monthly, sortOrder: i * 10 } });
   }
   if (!(await prisma.setting.findUnique({ where: { key: "app" } }))) {
     await prisma.setting.create({ data: { key: "app", value: DEFAULT_SETTINGS } });

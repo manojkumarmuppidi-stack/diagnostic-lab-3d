@@ -8,19 +8,29 @@ import { norm } from "./text";
 export interface ExpenseClass {
   category: string;
   subcategory?: string;
+  /** Cost centre, when the description tells us (wellness partner payouts → Wellness). */
+  department?: string;
+  /**
+   * A payment to a pharmacy supplier whose purchase invoices come from OneGlance. Counting it as
+   * an expense would count the stock twice, so the cash book imports it as a supplier payment.
+   */
+  supplierPayment?: boolean;
 }
 
 const RULES: [RegExp, ExpenseClass][] = [
+  // Surgicals for IPD, invoiced in the OneGlance purchase report.
+  [/\bvijaya pharma\b/, { category: "Pharmacy purchases (stock)", supplierPayment: true }],
   [/\b(patient refund|refund|test cancel\w*|scan cancel\w*|cancelled)\b/, { category: "Patient refunds" }],
   [/\b(out ?side samples?|outside test|lalpath|lal path|agilus|pft|pt inr)\b/, { category: "Outsourced lab tests" }],
   [/\bstock\b|diagnostics|bio solutions|nexogenix|reagent/, { category: "Medical supplies", subcategory: "Lab reagents" }],
   [/\b(bio ?waste|biomedical|garbage waste)\b/, { category: "Housekeeping", subcategory: "Bio-medical waste" }],
-  [/\b(vijaya pharma|pharma|nitrile|gauze|guaze|absorbent|bed sheets?|pulse ox\w*|bp apparatus|thermometer)\b/, { category: "Medical supplies", subcategory: "Consumables" }],
+  [/\b(pharma|nitrile|gauze|guaze|absorbent|bed sheets?|pulse ox\w*|bp apparatus|thermometer)\b/, { category: "Medical supplies", subcategory: "Consumables" }],
   [/\b(medicines?|accu ?che?c?k|strips?|lancets?|oxygen|nitrous|o2|syringes?|gloves|cotton|electrodes|gel|urinary sensor|heat blanket)\b/, { category: "Medical supplies", subcategory: "Consumables" }],
   [/\belec?t?ri\w* bills?\b|\belectricity\b|\belecticity\b|\bcurrent bill\b/, { category: "Electricity" }],
   [/\bwater bill\b/, { category: "Water", subcategory: "Tanker" }],
   [/\breferr?al\b|\bref fee\b/, { category: "Referral fees" }],
-  [/\b(jj wellness|mou)\b/, { category: "MOU partners" }],
+  // JJ Wellness: outside party under an MOU, paid a share of wellness-patient revenue.
+  [/\b(jj wellness|mou|revenue share)\b/, { category: "MOU partners", subcategory: "Revenue share", department: "Wellness" }],
   [/\bdr\b|doctor|cx charges|consultant/, { category: "Doctor & consultant fees" }],
   // Named staff AED pays directly (per accounts): OT technicians and security.
   [/\b(anjaneyulu|balaji|ot technicians?|ot tech)\b/, { category: "Salaries & Wages", subcategory: "OT technicians" }],

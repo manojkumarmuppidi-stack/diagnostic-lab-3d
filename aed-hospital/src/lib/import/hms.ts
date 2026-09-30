@@ -503,11 +503,15 @@ export function fixLedgerDates(raw: string[]): { dates: string[]; swapped: numbe
   return { dates, swapped };
 }
 
-/** Cash book: debit lines become expenses; credits (cash received) and blank amounts are skipped. */
+/**
+ * Cash book: debit lines become expenses; credits (cash received) and blank amounts are skipped.
+ * Payments to pharmacy suppliers become supplier payments, since their invoices are already expenses.
+ */
 function convertCashBook(sheet: RawSheet): ConvertedSheet[] {
   const dateCol = sheet.headers.find((h) => /date/i.test(h)) ?? sheet.headers[0];
   const { dates, swapped } = fixLedgerDates(sheet.rows.map((r) => String(r.values[dateCol] ?? "")));
   const out: Out[] = [];
+  const supplier: Out[] = [];
   let credits = 0;
   let blank = 0;
   sheet.rows.forEach((r, i) => {
@@ -519,14 +523,18 @@ function convertCashBook(sheet: RawSheet): ConvertedSheet[] {
       else if (desc) blank++;
       return;
     }
-    const { category, subcategory } = classifyExpense(desc);
+    const { category, subcategory, department, supplierPayment } = classifyExpense(desc);
     const mode = suggestModeCode(debit);
     const [y, m, d] = (dates[i] || "").split("-");
+    if (supplierPayment) {
+      supplier.push({ rowNumber: r.rowNumber, values: { Date: dates[i] ? `${d}-${m}-${y}` : "", Supplier: vendorFrom(desc) ?? desc, Details: `Cash book: ${desc}`, "Amount paid": r2(debit) } });
+      return;
+    }
     out.push({
       rowNumber: r.rowNumber,
       values: {
         Date: dates[i] ? `${d}-${m}-${y}` : "",
-        Department: null,
+        Department: department ?? null,
         Category: category,
         Subcategory: subcategory ?? null,
         Description: desc || "(no description)",
@@ -545,7 +553,13 @@ function convertCashBook(sheet: RawSheet): ConvertedSheet[] {
     (credits ? `; ${credits} cash-received lines skipped` : "") +
     (blank ? `; ${blank} lines without an amount skipped` : "") +
     `. Payment mode is estimated from the amount (below ₹3,000 cash, above ₹1,00,000 bank, otherwise card). Check "Other" rows before importing.`;
-  return byMonth("cash-book", sheet.name, "expense", "Cash book", EXPENSE_HEADERS, out, note);
+  const expenses = byMonth("cash-book", sheet.name, "expense", "Cash book", EXPENSE_HEADERS, out, note);
+  if (!supplier.length) return expenses;
+  const paid = supplier.reduce((a, r) => a + Number(r.values["Amount paid"]), 0);
+  const supplierNote =
+    `${supplier.length} payments to pharmacy suppliers (₹${Math.round(paid).toLocaleString("en-IN")}). Their purchase invoices are already expenses (OneGlance purchase report), ` +
+    `so these are recorded as supplier payments, not expenses. They carry no invoice numbers, so they add to the supplier's "paid" total but do not close specific invoices.`;
+  return [...expenses, ...byMonth("cash-book", sheet.name, "supplier-payments", "Cash book supplier payments", PAYMENT_HEADERS, supplier, supplierNote)];
 }
 
 export class HmsReportError extends Error {}

@@ -18,7 +18,9 @@ All notable changes to the AED Hospital Financial, Accounting & Operational Anal
   - Dates that Excel had read month-first are corrected from the neighbouring rows.
   - The payment mode is estimated from the amount.
   - Verified on AED's Jan–Aug 2026 cash book: 1,452 payments, ₹35.36 L, 82 dates corrected.
-- New categories: MOU partners (outside parties paid under an MOU, e.g. JJ Wellness), Doctor & consultant fees, Referral fees, Outsourced lab tests, Taxes & compliance, Staff welfare, Equipment (capital), Patient refunds. New subcategories: OT technicians, Security, Uniforms, Bio-medical waste.
+- **Wellness programme costs**: new department "Wellness" and two monthly heads tagged to it, "Wellness – revenue share" (JJ Wellness, paid a share of wellness-patient revenue under an MOU) and "Wellness – staff salaries". Analytics → Expenses → by department shows them together.
+- **No double counting of pharmacy stock**: cash-book payments to a pharmacy supplier whose invoices come from OneGlance (Vijaya Pharma — surgicals, mostly IPD) import as supplier payments, not expenses (₹29,761 in the Jan–Aug cash book).
+- New categories: MOU partners (with subcategory Revenue share), Doctor & consultant fees, Referral fees, Outsourced lab tests, Taxes & compliance, Staff welfare, Equipment (capital), Patient refunds. New subcategories: OT technicians, Security, Uniforms, Bio-medical waste.
 
 ## 0.7.0: One-page daily summary PDF
 - New **Daily summary** page (`/daily-summary?date=…`), opened from the Dashboard button **Day summary PDF**. It is one A4 portrait page on white paper, whatever the screen theme. It shows:

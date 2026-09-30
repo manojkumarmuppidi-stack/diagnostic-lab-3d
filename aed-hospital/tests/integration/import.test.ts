@@ -271,3 +271,30 @@ describe("supplier payments", () => {
     await expect(prisma.supplierPayment.deleteMany({})).rejects.toThrow();
   });
 });
+
+describe("cash book", () => {
+  it("imports payments as expenses (wellness share to Wellness) and pharmacy-supplier payments as supplier payments", async () => {
+    const buf = await workbook({
+      Sheet1: [
+        [" ", "CHEQUE NO.", "DESCRIPTION", "LEDGER", "Debit", "Credit", "Balance"],
+        [new Date(Date.UTC(2026, 5, 20)), null, "Vegetables", null, 400, null, null],
+        [new Date(Date.UTC(2026, 5, 22)), null, "JJ Wellness", null, 16400, null, null],
+        [new Date(Date.UTC(2026, 5, 23)), null, "Stock (Vijaya Pharma)", null, 12443, null, null],
+        [new Date(Date.UTC(2026, 5, 24)), null, "Cash from bank", null, null, 50000, null],
+      ],
+    });
+    const up = await uploadFile(f.admin, "cash_1.xlsx", buf);
+    expect(up.batches.map((b) => b.type)).toEqual(["expense", "supplier-payments"]);
+    for (const b of up.batches) {
+      await validateBatch(f.admin, b.id, { type: b.type, mapping: b.suggestion.mapping });
+      await commitBatch(f.admin, b.id, { approveWarnings: true });
+    }
+    const exp = await prisma.expense.findMany({ include: { category: true, subcategory: true, department: true, paymentMode: true }, orderBy: { amount: "asc" } });
+    expect(exp.map((e) => [e.category.name, e.subcategory?.name ?? null, e.department?.name ?? null, Number(e.amount), e.paymentMode?.code, e.status])).toEqual([
+      ["Groceries", "Vegetables", null, 400, "CASH", "ACTIVE"],
+      ["MOU partners", "Revenue share", "Wellness", 16400, "CARD", "ACTIVE"],
+    ]);
+    const sp = await prisma.supplierPayment.findMany();
+    expect(sp.map((p) => [p.supplier, Number(p.amount)])).toEqual([["Vijaya Pharma", 12443]]);
+  });
+});
