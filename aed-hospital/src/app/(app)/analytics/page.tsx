@@ -1,6 +1,6 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { qs, useApi } from "@/lib/client";
 import { INCOME_STREAMS, STREAM_LABELS, EXPENSE_LABELS, compare } from "@/lib/accounting";
@@ -41,9 +41,9 @@ function Inner() {
   const tab = (sp.get("tab") as Tab) || "revenue";
   const [period, setPeriod] = useState<PeriodValue>({ preset: "this_month" });
   const [granularity, setGranularity] = useState<"" | Granularity>("");
-  const [filters, setFilters] = useState<{ doctorId?: string; specialtyId?: string; departmentId?: string; investigationId?: string }>({});
+  const [filters, setFilters] = useState<{ doctorId?: string; specialtyId?: string; departmentId?: string; investigationId?: string; medicine?: string }>({});
   const { masters } = useMasters();
-  const url = period.preset === "custom" && (!period.from || !period.to) ? null : `/api/analytics/${tab}${qs({ ...periodQuery(period), granularity, ...filters, investigationId: tab === "lab" ? filters.investigationId : undefined })}`;
+  const url = period.preset === "custom" && (!period.from || !period.to) ? null : `/api/analytics/${tab}${qs({ ...periodQuery(period), granularity, ...filters, investigationId: tab === "lab" ? filters.investigationId : undefined, medicine: tab === "pharmacy" ? filters.medicine : undefined })}`;
   const { data, error, loading, reload } = useApi<{ period: any; granularity: Granularity; data: any }>(url);
   const g = data?.granularity ?? "day";
   const from = data?.period.current.from;
@@ -123,7 +123,7 @@ function Inner() {
             {tab === "opd" && <Opd d={data.data} g={g} drill={drill} />}
             {tab === "ipd" && <Ipd d={data.data} g={g} drill={drill} />}
             {tab === "lab" && <Lab d={data.data} g={g} drill={drill} selectedId={filters.investigationId} onSelect={(id) => setFilters((f) => ({ ...f, investigationId: id }))} />}
-            {tab === "pharmacy" && <Pharmacy d={data.data} g={g} drill={drill} />}
+            {tab === "pharmacy" && <Pharmacy d={data.data} g={g} drill={drill} medicine={filters.medicine} onMedicine={(m) => setFilters((f) => (f.medicine === m ? f : { ...f, medicine: m }))} />}
             {tab === "expense" && <Expense d={data.data} g={g} drill={drill} />}
             {tab === "profitability" && <Profitability d={data.data} g={g} drill={drill} />}
           </div>
@@ -388,28 +388,193 @@ function Ipd({ d, g, drill }: P) {
   );
 }
 
-function Pharmacy({ d, g, drill }: P) {
+function Pharmacy({ d, g, drill, medicine, onMedicine }: P & { medicine?: string; onMedicine: (q?: string) => void }) {
   const t = d.totals;
+  const it = d.items;
+  const per = g === "day" ? "day" : g;
   return (
     <>
       <div className={grid6}>
-        <Kpi label="Total sales" value={t.totalSales} hint="Gross sales − discount" />
+        <Kpi label="Total sales" value={t.totalSales} hint="Gross sales − discount (collections)" />
         <Kpi label="Returns" value={t.returns} goodWhen="down" />
         <Kpi label="Net sales" value={t.netSales} />
         <Kpi label="Purchases" value={t.purchases} href={undefined} />
-        <Kpi label="Gross margin" value={t.grossMargin} />
-        <Kpi label="Gross margin %" value={t.grossMarginPct} format="pct" />
+        {it?.hasData ? (
+          <>
+            <Kpi label="Margin on medicines sold" value={it.totals.margin} change={it.previousTotals ? compare(it.totals.margin, it.previousTotals.margin) : undefined} hint="Sale value − purchase cost of the units sold, both excluding GST" />
+            <Kpi label="Margin %" value={it.totals.marginPct} format="pct" />
+          </>
+        ) : (
+          <>
+            <Kpi label="Gross margin" value={t.grossMargin} />
+            <Kpi label="Gross margin %" value={t.grossMarginPct} format="pct" />
+          </>
+        )}
       </div>
+      {it?.hasData && (
+        <div className={grid6}>
+          <Kpi label="Pharmacy bills" value={it.totals.bills} format="int" change={it.previousTotals ? compare(it.totals.bills, it.previousTotals.bills) : undefined} />
+          <Kpi label="Avg bill value" value={it.totals.avgBill} change={it.previousTotals ? compare(it.totals.avgBill ?? 0, it.previousTotals.avgBill ?? 0) : undefined} />
+          <Kpi label="Units sold" value={it.totals.units} format="int" change={it.previousTotals ? compare(it.totals.units, it.previousTotals.units) : undefined} />
+          <Kpi label="Medicines sold" value={it.totals.medicines} format="int" hint="Distinct products with at least one sale" />
+        </div>
+      )}
       <ChartCard title={`Net sales vs purchases (${g}ly)`} subtitle="Same unit (₹), one axis" table={{ columns: [{ key: "bucket", label: "Period" }, { key: "netSales", label: "Net sales", format: "money" }, { key: "purchases", label: "Purchases", format: "money" }, { key: "returns", label: "Returns", format: "money" }], rows: d.trend }} height={300}>
         <BarsChart data={d.trend} xKey="bucket" granularity={g} series={[{ key: "netSales", label: "Net sales", color: SLOT(3) }, { key: "purchases", label: "Purchases", color: SLOT(6) }]} onBarClick={(r) => drill("/pharmacy", String(r.bucket))} />
       </ChartCard>
+      {it?.hasData ? (
+        <MedicineSection it={it} g={g} per={per} medicine={medicine} onMedicine={onMedicine} m={d.medicine} />
+      ) : (
+        <Card title="Medicine-wise sales">
+          <p className="text-sm text-2">
+            No medicine-level data for this period. Import OneGlance <b>Purchase/Sales Report</b> (sales view, one row per medicine) in Excel Import to see units sold per medicine, bills and true margin.
+          </p>
+        </Card>
+      )}
       <Card title="How pharmacy is accounted">
         <ul className="list-disc space-y-1 pl-5 text-sm text-2">
-          <li>Net sales (after discount and returns) are counted once in hospital income.</li>
+          <li>Net sales (after discount and returns) are counted once in hospital income — from collections.</li>
           <li>Stock purchases are counted once in expenditure — never also as a “cost” of sales.</li>
-          <li>Gross margin = Net sales − Purchases. With no stock valuation, purchases stand in for cost of goods sold, so margin is only reliable over periods where stock levels are stable (e.g. a full month or quarter).</li>
+          <li>Medicine-wise figures (units, bills, margin) come from the HMS medicine lines. They explain the sales; they are not added to income a second time. Margin there = sale value − purchase cost of the units sold, both excluding GST.</li>
+          <li>Without medicine lines, gross margin = Net sales − Purchases (purchases stand in for cost of goods sold).</li>
         </ul>
       </Card>
+    </>
+  );
+}
+
+function MedicineSection({ it, g, per, medicine, onMedicine, m }: { it: any; g: Granularity; per: string; medicine?: string; onMedicine: (q?: string) => void; m: any }) {
+  const [q, setQ] = useState(medicine ?? "");
+  const [sort, setSort] = useState<"revenue" | "units" | "margin" | "change">("revenue");
+  // Ask the server for the combined trend once typing pauses (e.g. "janumet" → every Janumet strength).
+  useEffect(() => {
+    const h = setTimeout(() => onMedicine(q.trim().length >= 2 ? q.trim() : undefined), 450);
+    return () => clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const xs = (it.medicines as any[]).filter((x) => !needle || x.name.toLowerCase().includes(needle));
+    if (sort === "units") xs.sort((a, b) => b.units - a.units);
+    else if (sort === "margin") xs.sort((a, b) => b.margin - a.margin);
+    else if (sort === "change") xs.sort((a, b) => Math.abs(b.revenue - b.prevRevenue) - Math.abs(a.revenue - a.prevRevenue));
+    else xs.sort((a, b) => b.revenue - a.revenue);
+    return xs;
+  }, [it, q, sort]);
+  const top = useMemo(() => [...(it.medicines as any[])].sort((a, b) => b.revenue - a.revenue).slice(0, 15), [it]);
+  return (
+    <>
+      <Card
+        title="Medicine-wise sales"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="input !w-52 !py-1 text-sm" placeholder="Find a medicine, e.g. Janumet" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a medicine" />
+            <select className="input !w-auto !py-1 text-xs" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort medicines">
+              <option value="revenue">Highest sales value</option>
+              <option value="units">Most units</option>
+              <option value="margin">Highest margin</option>
+              <option value="change">Biggest change</option>
+            </select>
+          </div>
+        }
+      >
+        <p className="mb-2 text-xs muted">
+          {formatNumber(rows.length)} medicines · units are tablets / capsules / pens / vials as billed · this period vs the previous period of the same length.
+        </p>
+        <div className="max-h-[440px] overflow-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Medicine</th>
+                <th className="num">Units</th>
+                <th className="num">Previous</th>
+                <th className="num">Bills</th>
+                <th className="num">Sales value</th>
+                <th className="num">Margin</th>
+                <th className="num">Margin %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(0, 400).map((x: any) => {
+                const diff = x.units - x.prevUnits;
+                return (
+                  <tr key={x.id} className="cursor-pointer" onClick={() => setQ(x.name)}>
+                    <td>
+                      {x.name} <span className="text-xs muted">{x.form}</span>
+                    </td>
+                    <td className="num">{formatNumber(x.units)}</td>
+                    <td className="num muted">
+                      {formatNumber(x.prevUnits)}
+                      {diff !== 0 && (
+                        <span className="text-xs" style={{ color: diff > 0 ? "var(--status-good)" : "var(--status-critical)" }}>
+                          {" "}
+                          ({diff > 0 ? "+" : ""}
+                          {formatNumber(diff)})
+                        </span>
+                      )}
+                    </td>
+                    <td className="num">{formatNumber(x.bills)}</td>
+                    <td className="num">{formatINR(x.revenue)}</td>
+                    <td className="num" style={{ color: x.margin < 0 ? "var(--status-critical)" : undefined }}>
+                      {formatINR(x.margin)}
+                    </td>
+                    <td className="num">{x.marginPct === null ? "—" : `${x.marginPct.toFixed(1)}%`}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {rows.length > 400 && <p className="p-2 text-xs muted">Showing the first 400 — search to narrow down.</p>}
+        </div>
+      </Card>
+
+      {m && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card title={`“${m.q}” — all matching medicines`} actions={<button className="btn btn-sm btn-secondary" onClick={() => setQ("")}>Clear</button>}>
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-xs muted">Units sold</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{formatNumber(m.units)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs muted">Sales value</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{formatINR(m.revenue)}</dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-xs muted">Average per {per}</dt>
+                <dd className="text-lg font-semibold tabular-nums">{m.avgPerBucket === null ? "—" : m.avgPerBucket.toFixed(1)} units</dd>
+              </div>
+            </dl>
+            {m.variants.length > 0 && (
+              <table className="table mt-3 text-sm">
+                <tbody>
+                  {m.variants.slice(0, 12).map((v: any) => (
+                    <tr key={v.name}>
+                      <td>{v.name}</td>
+                      <td className="num">{formatNumber(v.units)}</td>
+                      <td className="num muted">{formatINR(v.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
+          <div className="lg:col-span-2">
+            <ChartCard title={`“${m.q}” units per ${per}`} table={{ columns: [{ key: "bucket", label: "Period" }, { key: "units", label: "Units", format: "int" }, { key: "revenue", label: "Sales value", format: "money" }], rows: m.trend }}>
+              <BarsChart data={m.trend} xKey="bucket" format="int" granularity={g} series={[{ key: "units", label: "Units", color: SLOT(3) }]} />
+            </ChartCard>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChartCard title="Top 15 medicines by sales value" subtitle="Click a bar to see that medicine over time" height={Math.max(260, top.length * 26)}>
+          <BarsChart data={top} xKey="name" horizontal series={[{ key: "revenue", label: "Sales value", color: SLOT(3) }]} onBarClick={(r) => setQ(String(r.name))} />
+        </ChartCard>
+        <ChartCard title="Purchases by supplier" table={{ columns: [{ key: "supplier", label: "Supplier" }, { key: "invoices", label: "Invoices", format: "int" }, { key: "amount", label: "Amount", format: "money" }], rows: it.suppliers }} height={Math.max(260, it.suppliers.length * 26)}>
+          <BarsChart data={it.suppliers} xKey="supplier" horizontal series={[{ key: "amount", label: "Purchases", color: SLOT(6) }]} />
+        </ChartCard>
+      </div>
     </>
   );
 }

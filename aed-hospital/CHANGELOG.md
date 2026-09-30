@@ -2,6 +2,18 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.5.0: Medicine-wise pharmacy analytics
+- New `PharmacyItem` / `PharmacyItemLine` tables (migration `20261001000000_pharmacy_items`) with the same DB guards (no deletes, immutable values, final reversal). Medicine lines are analytics only: pharmacy income stays collections and purchase expense stays invoices, so nothing is counted twice.
+- The OneGlance **Purchase/Sales Report** is recognised in both views. **Sales view** becomes medicine lines: units, bill, value incl. GST, taxable value and cost. **Purchase view** becomes one pharmacy purchase (expense) per supplier invoice, plus medicine purchase lines (supplier, manufacturer, batch, expiry, free units). New import type "Pharmacy medicine lines" with its own template for other sources.
+- Analytics → Pharmacy:
+  - Real bill count and average bill value.
+  - Margin on medicines sold (sale value − cost, ex-GST).
+  - A searchable medicine table with units, previous period, bills, value and margin.
+  - Search such as "janumet" totals all strengths and shows units per day/week/month.
+  - Top medicines and purchases by supplier.
+- Board Meeting: the pharmacy section uses real bills and margin, plus slides for top medicines by sales value and by units.
+- Verified on AED's Apr–Sep 2026 export: 49,239 lines in 14,681 bills. Monthly totals match the Pharmacy Collection Report's billed amount (e.g. Jun ₹46,80,663 vs ₹46,80,669).
+
 ## 0.4.1: Test-wise lab counts
 - Analytics → Laboratory → **Test-wise counts**: every test performed in the period with this period vs previous, change, revenue and average. It has a search box ("ECG") and sort by volume, revenue, biggest change or least performed. Tests done last period but not this one are listed with 0.
 - Click a test to see it day by day, week by week or month by month (follows "Group by"). The panel shows total, revenue, average per week and the busiest week, and links to the transactions.

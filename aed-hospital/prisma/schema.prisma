@@ -6,8 +6,11 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Runtime connection. On Vercel/serverless use the POOLED URL with ?pgbouncer=true.
+  url       = env("DATABASE_URL")
+  // Direct (non-pooled) connection used only by `prisma migrate`. Locally it can equal DATABASE_URL.
+  directUrl = env("DIRECT_URL")
 }
 
 // ─────────────────────────────── Enums ───────────────────────────────
@@ -543,6 +546,57 @@ model PharmacyPurchase {
   @@index([importBatchId])
 }
 
+/// A medicine / consumable sold or bought in the pharmacy (from the HMS item reports).
+model PharmacyItem {
+  id        String             @id @default(cuid())
+  name      String             @unique
+  /// Dosage form from the name prefix: TAB, CAP, INJ, SYR, PWD … or OTHER.
+  form      String
+  createdAt DateTime           @default(now())
+  lines     PharmacyItemLine[]
+}
+
+enum PharmacyLineKind {
+  SALE
+  PURCHASE
+}
+
+/// Medicine-level detail for analytics (units sold, margin, purchases by supplier).
+/// NOT an accounting record: pharmacy income stays PharmacySale collections and
+/// purchase expense stays PharmacyPurchase invoices, so nothing is counted twice.
+model PharmacyItemLine {
+  id           String           @id @default(cuid())
+  kind         PharmacyLineKind
+  date         DateTime         @db.Date
+  docNo        String? /// bill no (sale) or supplier invoice no (purchase)
+  itemId       String
+  item         PharmacyItem     @relation(fields: [itemId], references: [id])
+  batchNo      String?
+  expiry       String?
+  supplier     String?
+  manufacturer String?
+  qty          Int
+  freeQty      Int              @default(0)
+  /// Line value including GST (sale: billed after discount; purchase: invoice value).
+  amount       Decimal          @db.Decimal(12, 2)
+  taxable      Decimal?         @db.Decimal(12, 2)
+  tax          Decimal?         @db.Decimal(12, 2)
+  /// Sale lines: purchase cost of the units sold, excluding GST.
+  cost         Decimal?         @db.Decimal(12, 2)
+
+  status        RecordStatus @default(ACTIVE)
+  fingerprint   String
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id])
+  createdById   String
+  createdAt     DateTime     @default(now())
+
+  @@index([kind, date, status])
+  @@index([itemId, kind, date])
+  @@index([fingerprint])
+  @@index([importBatchId])
+}
+
 model DietTransaction {
   id            String       @id @default(cuid())
   date          DateTime     @db.Date
@@ -761,6 +815,7 @@ model ImportBatch {
   dietTransactions  DietTransaction[]
   otherIncomes      OtherIncome[]
   expenses          Expense[]
+  pharmacyItemLines PharmacyItemLine[]
 
   @@index([createdAt])
   @@index([fileHash])

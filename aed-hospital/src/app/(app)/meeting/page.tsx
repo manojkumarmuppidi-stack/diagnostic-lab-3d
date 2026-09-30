@@ -10,7 +10,6 @@ import { ChevronLeft, ChevronRight, Expand, Minimize, Printer, Sparkles } from "
 import { qs, useApi } from "@/lib/client";
 import { INCOME_STREAMS, STREAM_LABELS } from "@/lib/accounting";
 import { formatDateTime } from "@/lib/dates";
-import { formatNumber } from "@/lib/money";
 import { fmtValue, insightsFromComparison, rankInsights, type Comparison, type Insight, type KpiCompare } from "@/lib/insights";
 import type { ResolvedPeriod } from "@/lib/periods";
 import { Guard } from "@/components/Guard";
@@ -51,21 +50,21 @@ const PRIMARY: Record<string, [string, string]> = {
   expense: ["expense-category", "expense-category"],
 };
 
-/** Test-by-test volumes: "how many ECGs, HbA1c, TFTs this month, and per week". */
-function LabVolumeSlide({ n, total, c, period, curLabel, prevLabel }: { n: number; total: number; c: Comparison; period: { current: { from: string; to: string } }; curLabel: string; prevLabel: string }) {
+/** Item-by-item table slide: tests performed, medicines sold … this period, previous, change, per week. */
+function TopItemsSlide({ n, total, c, period, curLabel, prevLabel, title, itemLabel }: { n: number; total: number; c: Comparison; period: { current: { from: string; to: string } }; curLabel: string; prevLabel: string; title: string; itemLabel: string }) {
   const days = Math.max(1, Math.round((Date.parse(period.current.to) - Date.parse(period.current.from)) / 86_400_000) + 1);
   const weeks = days / 7;
   const half = Math.ceil(c.rows.length / 2);
   const cols = [c.rows.slice(0, half), c.rows.slice(half)].filter((x) => x.length);
   return (
-    <Slide n={n} total={total} kicker="Department review" title="Laboratory — tests performed, test by test" subtitle={`${curLabel} vs ${prevLabel}${days >= 7 ? " · per-week average over the period" : ""}`}>
+    <Slide n={n} total={total} kicker="Department review" title={title} subtitle={`${curLabel} vs ${prevLabel}${days >= 7 ? " · per-week average over the period" : ""}`}>
       <div className={`grid gap-4 ${cols.length > 1 ? "lg:grid-cols-2" : ""}`}>
         {cols.map((rows, ci) => (
           <div key={ci} className="panel-present rounded-2xl border p-3">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-2">
-                  <th className="py-1.5">Test</th>
+                  <th className="py-1.5">{itemLabel}</th>
                   <th className="py-1.5 text-right">{curLabel}</th>
                   <th className="py-1.5 text-right">{prevLabel}</th>
                   <th className="py-1.5 text-right">Change</th>
@@ -81,14 +80,14 @@ function LabVolumeSlide({ n, total, c, period, curLabel, prevLabel }: { n: numbe
                         <span className="text-xs text-2">{ci * half + i + 1}. </span>
                         {r.name}
                       </td>
-                      <td className="py-1.5 text-right font-semibold tabular-nums">{formatNumber(r.current)}</td>
-                      <td className="py-1.5 text-right tabular-nums text-2">{formatNumber(r.previous)}</td>
+                      <td className="py-1.5 text-right font-semibold tabular-nums">{fmtValue(r.current, c.unit)}</td>
+                      <td className="py-1.5 text-right tabular-nums text-2">{fmtValue(r.previous, c.unit)}</td>
                       <td className="py-1.5 text-right tabular-nums" style={{ color: diff > 0 ? "var(--status-good)" : diff < 0 ? "var(--status-critical)" : undefined }}>
-                        {diff > 0 ? "+" : ""}
-                        {formatNumber(diff)}
+                        {diff > 0 ? "+" : diff < 0 ? "−" : ""}
+                        {fmtValue(Math.abs(diff), c.unit)}
                         {r.previous > 0 && <span className="text-xs"> ({diff >= 0 ? "+" : ""}{Math.round((diff / r.previous) * 100)}%)</span>}
                       </td>
-                      {days >= 7 && <td className="py-1.5 text-right tabular-nums">{(r.current / weeks).toFixed(1)}</td>}
+                      {days >= 7 && <td className="py-1.5 text-right tabular-nums">{c.unit === "money" ? fmtValue(r.current / weeks, "money") : (r.current / weeks).toFixed(1)}</td>}
                     </tr>
                   );
                 })}
@@ -388,7 +387,11 @@ function buildSlides(p: Pack): SlideFn[] {
       </Slide>
     ));
     const volume = s.key === "lab" ? cmp(s, "lab-volume") : undefined;
-    if (volume && volume.rows.length) slides.push((n, t) => <LabVolumeSlide n={n} total={t} c={volume as Comparison} period={p.period} curLabel={cur} prevLabel={prev} />);
+    if (volume && volume.rows.length) slides.push((n, t) => <TopItemsSlide n={n} total={t} c={volume as Comparison} period={p.period} curLabel={cur} prevLabel={prev} title="Laboratory — tests performed, test by test" itemLabel="Test" />);
+    const meds = s.key === "pharmacy" ? cmp(s, "pharmacy-medicine-revenue") : undefined;
+    const medUnits = s.key === "pharmacy" ? cmp(s, "pharmacy-medicine-units") : undefined;
+    if (meds && meds.rows.length) slides.push((n, t) => <TopItemsSlide n={n} total={t} c={meds as Comparison} period={p.period} curLabel={cur} prevLabel={prev} title="Pharmacy — top medicines by sales value" itemLabel="Medicine" />);
+    if (medUnits && medUnits.rows.length) slides.push((n, t) => <TopItemsSlide n={n} total={t} c={medUnits as Comparison} period={p.period} curLabel={cur} prevLabel={prev} title="Pharmacy — top medicines by units sold" itemLabel="Medicine" />);
   }
 
   // Last: findings & method

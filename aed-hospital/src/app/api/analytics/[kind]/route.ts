@@ -11,6 +11,8 @@ import {
   labTestTrend,
   opdAnalytics,
   pharmacyAnalytics,
+  pharmacyItemAnalytics,
+  pharmacyMedicineTrend,
   profitabilityAnalytics,
   revenueAnalytics,
 } from "@/server/services/analytics";
@@ -55,9 +57,29 @@ export const GET = api<{ kind: string }>(async ({ actor, params, url }) => {
       };
       break;
     }
-    case "pharmacy":
-      data = await pharmacyAnalytics(r, g);
+    case "pharmacy": {
+      const [base, items, prevItems, medicine] = await Promise.all([
+        pharmacyAnalytics(r, g),
+        pharmacyItemAnalytics(r),
+        pharmacyItemAnalytics(period.previous),
+        q.medicine && q.medicine.trim().length >= 2 ? pharmacyMedicineTrend(r, g, q.medicine.slice(0, 60)) : Promise.resolve(null),
+      ]);
+      const prevById = new Map(prevItems.medicines.map((m) => [m.id, m]));
+      const seen = new Set(items.medicines.map((m) => m.id));
+      data = {
+        ...base,
+        items: {
+          ...items,
+          previousTotals: prevItems.totals,
+          medicines: [
+            ...items.medicines.map((m) => ({ ...m, prevUnits: prevById.get(m.id)?.units ?? 0, prevRevenue: prevById.get(m.id)?.revenue ?? 0 })),
+            ...prevItems.medicines.filter((m) => !seen.has(m.id)).map((m) => ({ ...m, units: 0, bills: 0, revenue: 0, margin: 0, marginPct: null, prevUnits: m.units, prevRevenue: m.revenue })),
+          ],
+        },
+        medicine,
+      };
       break;
+    }
     case "expense":
       data = await expenseAnalytics(r, g, f);
       break;

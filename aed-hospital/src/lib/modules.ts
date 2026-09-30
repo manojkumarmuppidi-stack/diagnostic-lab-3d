@@ -420,6 +420,7 @@ export const IMPORT_TYPES = [
   { key: "expense", label: "Expenses" },
   { key: "combined-income", label: "Combined Income (Stream column)" },
   { key: "combined-expense", label: "Combined Expenditure (Type column)" },
+  { key: "pharmacy-items", label: "Pharmacy medicine lines (sold / purchased)" },
 ] as const;
 export type ImportType = (typeof IMPORT_TYPES)[number]["key"];
 
@@ -470,13 +471,41 @@ export const COMBINED_EXPENSE_SAMPLE = [
   ["Pharmacy Purchase", "01-09-2026", "", "", "", "Stock purchase", "Demo Pharma Distributors", "DPD/2026/009", 38000, "Bank Transfer", ""],
 ];
 
+/**
+ * Medicine-level lines for pharmacy analytics (units sold, margin, purchases by supplier).
+ * Not accounting records — see PharmacyItemLine in the schema.
+ */
+export const PHARMACY_ITEM_FIELDS: FieldDef[] = [
+  { key: "kind", label: "Sale / Purchase", type: "text", required: true, aliases: ["type", "kind", "sale purchase", "transaction type"], help: "SALE or PURCHASE" },
+  dateField,
+  { key: "docNo", label: "Bill / Invoice No.", type: "text", aliases: ["bill no", "bill number", "invoice", "invoice no", "inv no"] },
+  { key: "item", label: "Medicine", type: "text", required: true, aliases: ["drug", "drug name", "medicine", "item", "item name", "product", "product name"] },
+  { key: "batchNo", label: "Batch", type: "text", aliases: ["batch", "batch no"] },
+  { key: "expiry", label: "Expiry", type: "text", aliases: ["expiry", "expiry by", "exp", "expiry date"] },
+  { key: "supplier", label: "Supplier", type: "text", aliases: ["supplier", "stockist", "stockiest name", "distributor", "vendor"] },
+  { key: "manufacturer", label: "Manufacturer", type: "text", aliases: ["manufacturer", "mfg", "mfg name", "company"] },
+  { key: "qty", label: "Quantity (units)", type: "int", required: true, aliases: ["qty", "quantity", "units"] },
+  { key: "freeQty", label: "Free units", type: "int", aliases: ["free qty", "free", "free units"] },
+  { key: "amount", label: "Amount incl. GST", type: "money", required: true, aliases: ["total", "amount", "net amount", "value"] },
+  { key: "taxable", label: "Taxable amount", type: "money", aliases: ["taxable", "sales amount", "net value", "taxable value"] },
+  { key: "tax", label: "GST", type: "money", aliases: ["tax", "gst", "sales tax", "tax amount"] },
+  { key: "cost", label: "Cost of units sold (ex-GST)", type: "money", aliases: ["cost", "purchase amount", "cost amount"] },
+];
+export const PHARMACY_ITEM_TEMPLATE = ["Type", "Date", "Bill / Invoice No.", "Medicine", "Batch", "Expiry", "Supplier", "Manufacturer", "Quantity", "Free Qty", "Amount", "Taxable", "GST", "Cost"];
+export const PHARMACY_ITEM_SAMPLE = [
+  ["Sale", "01-09-2026", "PH-DEMO-1", "TAB DEMO 500MG", "B123", "", "", "", 30, 0, 315, 300, 15, 190],
+  ["Purchase", "01-09-2026", "INV-DEMO-9", "TAB DEMO 500MG", "B123", "Dec-2027", "Demo Distributors", "Demo Pharma", 300, 30, 2100, 2000, 100, ""],
+];
+
 export function importFieldsFor(type: ImportType): FieldDef[] {
+  if (type === "pharmacy-items") return PHARMACY_ITEM_FIELDS;
   if (type === "combined-income") return COMBINED_INCOME_FIELDS;
   if (type === "combined-expense") return COMBINED_EXPENSE_FIELDS;
   return MODULES[type].fields.filter((f) => !f.formOnly);
 }
 
 export function templateFor(type: ImportType): { headers: string[]; sample: (string | number)[][] } {
+  if (type === "pharmacy-items") return { headers: PHARMACY_ITEM_TEMPLATE, sample: PHARMACY_ITEM_SAMPLE };
   if (type === "combined-income") return { headers: COMBINED_INCOME_TEMPLATE, sample: COMBINED_INCOME_SAMPLE };
   if (type === "combined-expense") return { headers: COMBINED_EXPENSE_TEMPLATE, sample: COMBINED_EXPENSE_SAMPLE };
   const m = MODULES[type];

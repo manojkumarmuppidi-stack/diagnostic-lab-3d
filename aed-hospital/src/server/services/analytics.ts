@@ -441,6 +441,85 @@ export async function pharmacyAnalytics(r: Range, g: Granularity) {
   };
 }
 
+/**
+ * Medicine-level figures from PharmacyItemLine (SALE lines): units, bills, value, cost and margin.
+ * Margin = taxable value − cost, both excluding GST. Value includes GST (what the patient paid on the bill).
+ */
+export async function pharmacyItemAnalytics(r: Range) {
+  const base = Prisma.sql`l.kind = 'SALE' AND l.status = 'ACTIVE' AND l.date BETWEEN ${D(r.from)} AND ${D(r.to)}`;
+  const [byItem, totals, byForm, suppliers] = await Promise.all([
+    prisma.$queryRaw<{ id: string; name: string; form: string; units: bigint; bills: bigint; amount: Prisma.Decimal; taxable: Prisma.Decimal; cost: Prisma.Decimal }[]>`
+      SELECT i.id, i.name, i.form, SUM(l.qty) AS units, COUNT(DISTINCT split_part(l."docNo", '/', 1)) AS bills,
+             SUM(l.amount) AS amount, COALESCE(SUM(l.taxable), 0) AS taxable, COALESCE(SUM(l.cost), 0) AS cost
+        FROM "PharmacyItemLine" l JOIN "PharmacyItem" i ON i.id = l."itemId"
+       WHERE ${base} GROUP BY i.id, i.name, i.form`,
+    prisma.$queryRaw<{ lines: bigint; bills: bigint; units: bigint; amount: Prisma.Decimal; taxable: Prisma.Decimal; cost: Prisma.Decimal }[]>`
+      SELECT COUNT(*) AS lines, COUNT(DISTINCT split_part(l."docNo", '/', 1)) AS bills, COALESCE(SUM(l.qty), 0) AS units,
+             COALESCE(SUM(l.amount), 0) AS amount, COALESCE(SUM(l.taxable), 0) AS taxable, COALESCE(SUM(l.cost), 0) AS cost
+        FROM "PharmacyItemLine" l WHERE ${base}`,
+    prisma.$queryRaw<{ form: string; units: bigint; amount: Prisma.Decimal }[]>`
+      SELECT i.form, SUM(l.qty) AS units, SUM(l.amount) AS amount
+        FROM "PharmacyItemLine" l JOIN "PharmacyItem" i ON i.id = l."itemId" WHERE ${base} GROUP BY 1 ORDER BY 3 DESC`,
+    prisma.$queryRaw<{ supplier: string; invoices: bigint; amount: Prisma.Decimal }[]>`
+      SELECT supplier, COUNT(*) AS invoices, SUM(amount) AS amount FROM "PharmacyPurchase"
+       WHERE status = 'ACTIVE' AND date BETWEEN ${D(r.from)} AND ${D(r.to)} GROUP BY 1 ORDER BY 3 DESC LIMIT 15`,
+  ]);
+  const t = totals[0];
+  const taxable = toNum(t?.taxable);
+  const cost = toNum(t?.cost);
+  const medicines = byItem.map((x) => {
+    const tx = toNum(x.taxable);
+    const c = toNum(x.cost);
+    return { id: x.id, name: x.name, form: x.form, units: Number(x.units), bills: Number(x.bills), revenue: toNum(x.amount), margin: round2(tx - c), marginPct: safeDiv((tx - c) * 100, tx) };
+  });
+  return {
+    hasData: Number(t?.lines ?? 0) > 0,
+    totals: {
+      bills: Number(t?.bills ?? 0),
+      units: Number(t?.units ?? 0),
+      revenue: toNum(t?.amount),
+      margin: round2(taxable - cost),
+      marginPct: safeDiv((taxable - cost) * 100, taxable),
+      avgBill: safeDiv(toNum(t?.amount), Number(t?.bills ?? 0)),
+      medicines: medicines.length,
+    },
+    medicines,
+    byForm: byForm.map((f) => ({ form: f.form, units: Number(f.units), revenue: toNum(f.amount) })),
+    suppliers: suppliers.map((x) => ({ supplier: x.supplier, invoices: Number(x.invoices), amount: toNum(x.amount) })),
+  };
+}
+
+/** Units of every medicine whose name contains `q` (e.g. "janumet" → all Janumet strengths), per bucket. */
+export async function pharmacyMedicineTrend(r: Range, g: Granularity, q: string) {
+  const like = `%${q.trim().replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+  const [rows, variants] = await Promise.all([
+    prisma.$queryRaw<{ bucket: Date; units: bigint; amount: Prisma.Decimal }[]>`
+      SELECT ${bucketExpr(g)} AS bucket, SUM(l.qty) AS units, SUM(l.amount) AS amount
+        FROM "PharmacyItemLine" l JOIN "PharmacyItem" i ON i.id = l."itemId"
+       WHERE l.kind = 'SALE' AND l.status = 'ACTIVE' AND l.date BETWEEN ${D(r.from)} AND ${D(r.to)} AND i.name ILIKE ${like}
+       GROUP BY 1 ORDER BY 1`,
+    prisma.$queryRaw<{ name: string; units: bigint; amount: Prisma.Decimal; bills: bigint }[]>`
+      SELECT i.name, SUM(l.qty) AS units, SUM(l.amount) AS amount, COUNT(DISTINCT split_part(l."docNo", '/', 1)) AS bills
+        FROM "PharmacyItemLine" l JOIN "PharmacyItem" i ON i.id = l."itemId"
+       WHERE l.kind = 'SALE' AND l.status = 'ACTIVE' AND l.date BETWEEN ${D(r.from)} AND ${D(r.to)} AND i.name ILIKE ${like}
+       GROUP BY 1 ORDER BY 2 DESC`,
+  ]);
+  const trend = new Map(bucketsFor(r, g).map((b) => [b, { bucket: b, units: 0, revenue: 0 }]));
+  for (const t of rows) {
+    const m = trend.get(iso(t.bucket));
+    if (m) Object.assign(m, { units: Number(t.units), revenue: toNum(t.amount) });
+  }
+  const series = [...trend.values()];
+  return {
+    q,
+    units: series.reduce((a, x) => a + x.units, 0),
+    revenue: round2(series.reduce((a, x) => a + x.revenue, 0)),
+    avgPerBucket: safeDiv(series.reduce((a, x) => a + x.units, 0), series.length),
+    variants: variants.map((v) => ({ name: v.name, units: Number(v.units), revenue: toNum(v.amount), bills: Number(v.bills) })),
+    trend: series,
+  };
+}
+
 export async function expenseAnalytics(r: Range, g: Granularity, f: { departmentId?: string; categoryId?: string } = {}) {
   const ef = Prisma.sql`${f.departmentId ? Prisma.sql`AND e."departmentId" = ${f.departmentId}` : Prisma.empty} ${f.categoryId ? Prisma.sql`AND e."categoryId" = ${f.categoryId}` : Prisma.empty}`;
   const [byKind, byCategory, byDepartment, byMonth, series, largest] = await Promise.all([

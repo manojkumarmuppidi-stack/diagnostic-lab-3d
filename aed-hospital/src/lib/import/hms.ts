@@ -31,13 +31,15 @@ export interface ConvertedSheet extends RawSheet {
   note: string;
   source: HmsReport;
 }
-export type HmsReport = "oneglance-opd" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills";
+export type HmsReport = "oneglance-opd" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases";
 
 export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-opd": "OneGlance · Outpatient Collection Report",
   "oneglance-lab-items": "OneGlance · Bill Item Wise Collection",
   "oneglance-pharmacy-daily": "OneGlance · Pharmacy Collection Report (daily totals)",
   "oneglance-lab-bills": "OneGlance · Lab Bill Collection",
+  "oneglance-pharmacy-item-sales": "OneGlance · Purchase/Sales Report (medicines sold)",
+  "oneglance-pharmacy-item-purchases": "OneGlance · Purchase/Sales Report (purchase invoices)",
 };
 
 const has = (headers: string[], ...names: string[]) => {
@@ -50,6 +52,8 @@ export function detectHmsReport(headers: string[]): HmsReport | null {
   if (has(headers, "Bill NO", "Particulars", "Accountgroup", "Itemdiscount", "NetAmount")) return "oneglance-lab-items";
   if (has(headers, "Bill Date", "Net Revenue", "Pending Collected", "paidvalue", "Cash")) return "oneglance-pharmacy-daily";
   if (has(headers, "BillNo", "RefLab", "RefferedBY", "PaidAmount", "Cash")) return "oneglance-lab-bills";
+  if (has(headers, "Bill No", "Drug Name", "Qty", "Total", "Sales Amount", "Purchase Amount")) return "oneglance-pharmacy-item-sales";
+  if (has(headers, "Invoice No", "Invoice Date", "Stockiest Name", "Drug Name", "Purchase Value")) return "oneglance-pharmacy-item-purchases";
   return null;
 }
 
@@ -321,6 +325,102 @@ function convertPharmacyDaily(sheet: RawSheet): ConvertedSheet[] {
   return byMonth("oneglance-pharmacy-daily", sheet.name, "pharmacy-sale", "Pharmacy", PHARMACY_HEADERS, out, note);
 }
 
+const ITEM_HEADERS = ["Type", "Date", "Bill / Invoice No.", "Medicine", "Batch", "Expiry", "Supplier", "Manufacturer", "Quantity", "Free Qty", "Amount", "Taxable", "GST", "Cost"];
+
+/** Purchase/Sales Report, sales view: one line per medicine per bill → medicine lines (analytics only). */
+function convertPharmacyItemSales(sheet: RawSheet): ConvertedSheet[] {
+  const out: Out[] = [];
+  const lineCount = new Map<string, number>();
+  const bills = new Set<string>();
+  for (const r of sheet.rows) {
+    const g = getter(r.values);
+    const bill = g("Bill No");
+    bills.add(bill);
+    const key = `${bill}|${norm(g("Drug Name"))}|${g("Batch No")}|${g("Qty")}|${g("Total")}`;
+    const nth = (lineCount.get(key) ?? 0) + 1;
+    lineCount.set(key, nth);
+    out.push({
+      rowNumber: r.rowNumber,
+      values: {
+        Type: "Sale",
+        Date: g("Bill Date"),
+        "Bill / Invoice No.": `${bill}${nth > 1 ? `/${nth}` : ""}`,
+        Medicine: cleanText(g("Drug Name")),
+        Batch: g("Batch No"),
+        Quantity: num(g("Qty")),
+        Amount: num(g("Total")),
+        Taxable: num(g("Sales Amount")),
+        GST: num(g("Sales Tax")),
+        Cost: num(g("Purchase Amount")),
+      },
+    });
+  }
+  const note =
+    `${out.length.toLocaleString("en-IN")} medicine lines from ${bills.size.toLocaleString("en-IN")} pharmacy bills — units sold, value and cost per medicine. ` +
+    `These power medicine-wise analytics (e.g. Janumet, Fiasp units) and true pharmacy margin; they are NOT added to income again ` +
+    `(pharmacy income stays the collections from the Pharmacy Collection Report).`;
+  return byMonth("oneglance-pharmacy-item-sales", sheet.name, "pharmacy-items", "Medicines sold", ITEM_HEADERS, out, note);
+}
+
+const PURCHASE_HEADERS = ["Date", "Supplier", "Invoice", "Purchase Amount", "Payment Mode", "Remarks"];
+
+/**
+ * Purchase/Sales Report, purchase view: one line per medicine per supplier invoice →
+ * (1) medicine purchase lines (analytics) and (2) one pharmacy purchase (expense) per invoice.
+ */
+function convertPharmacyItemPurchases(sheet: RawSheet): ConvertedSheet[] {
+  const lines: Out[] = [];
+  const invoices = new Map<string, { rowNumber: number; date: string; supplier: string; invoice: string; amount: number; lines: number }>();
+  const lineCount = new Map<string, number>();
+  for (const r of sheet.rows) {
+    const g = getter(r.values);
+    const supplier = cleanText(g("Stockiest Name"));
+    const invoice = cleanText(g("Invoice No"));
+    const date = g("Invoice Date");
+    const value = num(g("Purchase Value"));
+    const key = `${invoice}|${supplier}|${norm(g("Drug Name"))}|${g("Batch No")}|${g("Purchase Qty")}|${value}`;
+    const nth = (lineCount.get(key) ?? 0) + 1;
+    lineCount.set(key, nth);
+    lines.push({
+      rowNumber: r.rowNumber,
+      values: {
+        Type: "Purchase",
+        Date: date,
+        "Bill / Invoice No.": `${invoice}${nth > 1 ? `/${nth}` : ""}`,
+        Medicine: cleanText(g("Drug Name")),
+        Batch: g("Batch No"),
+        Expiry: g("Expiry By"),
+        Supplier: supplier,
+        Manufacturer: cleanText(g("Mfg Name")),
+        // "Purchase Qty" is in units and already includes free goods; free units are recorded separately.
+        Quantity: num(g("Purchase Qty")),
+        "Free Qty": Math.round(num(g("Free Qty")) * (num(g("Strip Qty")) || 1)),
+        Amount: value,
+        Taxable: num(g("Net Value")),
+        GST: num(g("Tax Amount")),
+      },
+    });
+    const ik = `${supplier}|${invoice}|${date}`;
+    const inv = invoices.get(ik) ?? { rowNumber: r.rowNumber, date, supplier, invoice, amount: 0, lines: 0 };
+    inv.amount = r2(inv.amount + value);
+    inv.lines++;
+    invoices.set(ik, inv);
+  }
+  const purchases: Out[] = [...invoices.values()].map((i) => ({
+    rowNumber: i.rowNumber,
+    values: { Date: i.date, Supplier: i.supplier, Invoice: i.invoice, "Purchase Amount": i.amount, "Payment Mode": "", Remarks: `OneGlance purchase invoice · ${i.lines} line${i.lines > 1 ? "s" : ""}` },
+  }));
+  const total = purchases.reduce((a, p) => a + Number(p.values["Purchase Amount"]), 0);
+  const note =
+    `${invoices.size.toLocaleString("en-IN")} supplier invoices (₹${Math.round(total).toLocaleString("en-IN")}) become pharmacy purchases — they count as pharmacy expenditure; ` +
+    `their ${lines.length.toLocaleString("en-IN")} medicine lines are kept for purchase analytics (supplier, manufacturer, batch, expiry). ` +
+    `Payment mode is not in the export.`;
+  return [
+    ...byMonth("oneglance-pharmacy-item-purchases", sheet.name, "pharmacy-purchase", "Purchase invoices", PURCHASE_HEADERS, purchases, note),
+    ...byMonth("oneglance-pharmacy-item-purchases", sheet.name, "pharmacy-items", "Medicines purchased", ITEM_HEADERS, lines, note),
+  ];
+}
+
 export class HmsReportError extends Error {}
 
 /**
@@ -336,6 +436,10 @@ export function convertHmsSheet(sheet: RawSheet): ConvertedSheet[] | null {
       return convertLabItems(sheet);
     case "oneglance-pharmacy-daily":
       return convertPharmacyDaily(sheet);
+    case "oneglance-pharmacy-item-sales":
+      return convertPharmacyItemSales(sheet);
+    case "oneglance-pharmacy-item-purchases":
+      return convertPharmacyItemPurchases(sheet);
     case "oneglance-lab-bills":
       throw new HmsReportError(
         'This is OneGlance "Lab Bill Collection": bill totals without test names, so importing it would count one test per bill. ' +

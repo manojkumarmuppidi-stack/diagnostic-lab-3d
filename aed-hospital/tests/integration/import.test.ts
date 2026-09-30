@@ -196,3 +196,42 @@ describe("OneGlance HMS exports", () => {
     expect((batch.options as any).source).toBe("oneglance-opd");
   });
 });
+
+describe("pharmacy medicine lines", () => {
+  const CSV =
+    " Period:01/04/2026  - To:30/04/2026\nAdvanced Endocrine and Diabetes Hospital\nx\ny\nz\nPurchase/Sales Report(01/04/2026 to 30/04/2026)\n\n\n" +
+    "Bill No,Bill Date,Drug Name,Batch No,HSNcode,Qty,Tax%,Total,Sales Amount,Sales Tax,CGST,SGST,Purchase Amount,Purchase Tax,profit\n" +
+    '"900001","01-04-2026","TAB DEMOMET 50/500MG","B1","3004","15","5","342.68","326.36","16.32","8.16","8.16","200","10","142.68",\n' +
+    '"900002","02-04-2026","TAB DEMOMET 50/1000MG","B2","3004","30","5","700","666.67","33.33","16.66","16.66","400","20","300",\n' +
+    '"900002","02-04-2026","INJ DEMOSP FLEXTOUCH","R1","3004","1","5","1006.24","958.32","47.92","23.96","23.96","845.23","42.26","161.01",\n';
+
+  it("imports medicine lines without touching income, answers 'how many Demomet', dedupes and reverses", async () => {
+    const { pharmacyItemAnalytics, pharmacyMedicineTrend } = await import("@/server/services/analytics");
+    const incomeBefore = await incomeByStream({ from: "2026-04-01", to: "2026-04-30" });
+    const up = await uploadFile(f.admin, "Purchase_Sales_Report.csv", Buffer.from(CSV));
+    expect(up.batches.map((b) => [b.type, b.rows])).toEqual([["pharmacy-items", 3]]);
+    const b = up.batches[0];
+    const v = await validateBatch(f.admin, b.id, { type: b.type, mapping: b.suggestion.mapping });
+    expect(v.summary.valid).toBe(3);
+    const c = await commitBatch(f.admin, b.id, { approveWarnings: true });
+    expect(c.imported).toBe(3);
+    expect(c.newMasters).toBe(3);
+    expect(await incomeByStream({ from: "2026-04-01", to: "2026-04-30" })).toEqual(incomeBefore);
+
+    const a = await pharmacyItemAnalytics({ from: "2026-04-01", to: "2026-04-30" });
+    expect(a.totals).toMatchObject({ bills: 2, units: 46, revenue: 2048.92 });
+    expect(a.totals.margin).toBeCloseTo(326.36 + 666.67 + 958.32 - 200 - 400 - 845.23, 2);
+    const m = await pharmacyMedicineTrend({ from: "2026-04-01", to: "2026-04-30" }, "week", "demomet");
+    expect(m.units).toBe(45);
+    expect(m.variants.map((x) => x.name).sort()).toEqual(["TAB DEMOMET 50/1000MG", "TAB DEMOMET 50/500MG"]);
+
+    // Re-uploading the same report finds every line as a duplicate.
+    const again = await uploadFile(f.admin, "Purchase_Sales_Report.csv", Buffer.from(CSV));
+    const v2 = await validateBatch(f.admin, again.batches[0].id, { type: "pharmacy-items", mapping: again.batches[0].suggestion.mapping });
+    expect(v2.summary.duplicates).toBe(3);
+
+    await reverseBatch(f.admin, b.id, { reason: "test reversal" });
+    expect((await pharmacyItemAnalytics({ from: "2026-04-01", to: "2026-04-30" })).hasData).toBe(false);
+    await expect(prisma.pharmacyItemLine.deleteMany({})).rejects.toThrow();
+  });
+});

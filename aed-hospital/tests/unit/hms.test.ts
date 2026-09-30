@@ -134,3 +134,48 @@ describe("lab item classification", () => {
     expect(classifyLabItem("ECG").department).toBe("Cardiology");
   });
 });
+
+describe("pharmacy medicine reports", () => {
+  const SALES_H = ["Bill No", "Bill Date", "Drug Name", "Batch No", "HSNcode", "Qty", "Tax%", "Total", "Sales Amount", "Sales Tax", "CGST", "SGST", "Purchase Amount", "Purchase Tax", "profit"];
+  const PUR_H = ["Invoice No", "Invoice Date", "Stockiest Name", "Mfg Name", "HSN Code", "Drug Name", "Batch No", "Expiry By", "Batch Qty", "Free Qty", "Strip Qty", "Mrp", "Rate", "Discount Amount", "Net Value", "Tax%", "Tax Amount", "Purchase Qty", "Avail Qty", "Purchase Value", "Sales Value", "Profit", "Profit(%)"];
+
+  it("turns the sales view into medicine lines (analytics only), numbering repeats", async () => {
+    const rows = [
+      ["900001", "01-04-2026", "TAB DEMOMET 50/500MG", "B1", "3004", "15", "5", "342.68", "326.36", "16.32", "8.16", "8.16", "200", "10", "142.68"],
+      ["900001", "01-04-2026", "TAB DEMOMET 50/500MG", "B1", "3004", "15", "5", "342.68", "326.36", "16.32", "8.16", "8.16", "200", "10", "142.68"],
+      ["900002", "02-05-2026", " INJ DEMOSP FLEXTOUCH", "R1", "3004", "1", "5", "1006.24", "958.32", "47.92", "23.96", "23.96", "845.23", "42.26", "161.01"],
+    ];
+    const out = convertHmsSheet(sheet(SALES_H, rows))!;
+    expect(out.map((s) => `${s.type}:${s.name}:${s.rows.length}`)).toEqual(["pharmacy-items:Medicines sold Apr 2026:2", "pharmacy-items:Medicines sold May 2026:1"]);
+    expect(out[0].rows.map((r) => r.values["Bill / Invoice No."])).toEqual(["900001", "900001/2"]);
+    expect(out[1].rows[0].values).toMatchObject({ Type: "Sale", Medicine: "INJ DEMOSP FLEXTOUCH", Quantity: 1, Amount: 1006.24, Taxable: 958.32, GST: 47.92, Cost: 845.23 });
+  });
+
+  it("turns the purchase view into one expense per supplier invoice plus medicine lines", () => {
+    const rows = [
+      ["INV-1", "01-04-2026", "DEMO DISTRIBUTORS", "DemoPharma", "3004", "TAB A", "A1", "Oct-2027", "10", "20", "15", "375", "285", "0", "2850", "5", "142.5", "450", "0", "2992.5", "11250", "8257.5", "275.94"],
+      ["INV-1", "01-04-2026", "DEMO DISTRIBUTORS", "DemoPharma", "3004", "TAB B", "B1", "Jun-2028", "20", "0.5", "10", "115.3", "87.84", "0", "1756.8", "5", "87.84", "200", "5", "1844.64", "2306", "461.36", "25.01"],
+    ];
+    const out = convertHmsSheet(sheet(PUR_H, rows))!;
+    const byType = Object.fromEntries(out.map((s) => [s.type, s]));
+    expect(byType["pharmacy-purchase"].rows).toHaveLength(1);
+    expect(byType["pharmacy-purchase"].rows[0].values).toMatchObject({ Supplier: "DEMO DISTRIBUTORS", Invoice: "INV-1", "Purchase Amount": 4837.14 });
+    expect(byType["pharmacy-items"].rows.map((r) => [r.values.Medicine, r.values.Quantity, r.values["Free Qty"], r.values.Expiry])).toEqual([
+      ["TAB A", 450, 300, "Oct-2027"],
+      ["TAB B", 200, 5, "Jun-2028"],
+    ]);
+  });
+
+  it("normalises medicine lines and reads the dosage form", async () => {
+    const { normalizeItemRow, itemForm } = await import("@/lib/import/items");
+    const mapping = { kind: "Type", date: "Date", docNo: "Bill", item: "Medicine", qty: "Qty", amount: "Amount", cost: "Cost" };
+    const ok = normalizeItemRow({ Type: "Sale", Date: "01-04-2026", Bill: "1", Medicine: "  tab  demomet 50/500mg ", Qty: "15", Amount: "342.68", Cost: "200" }, mapping, "2026-09-30");
+    expect(ok.errors).toEqual([]);
+    expect(ok.input).toMatchObject({ kind: "SALE", date: "2026-04-01", item: "TAB DEMOMET 50/500MG", qty: 15, amount: 342.68, cost: 200 });
+    const bad = normalizeItemRow({ Type: "Transfer", Date: "01-04-2026", Medicine: "X", Qty: "1.5", Amount: "-1" }, mapping, "2026-09-30");
+    expect(bad.input).toBeNull();
+    expect(bad.errors.length).toBeGreaterThanOrEqual(3);
+    expect(itemForm("INJ FIASP PENFILL")).toBe("INJ");
+    expect(itemForm("BD ULTRA FINE NEEDLE")).toBe("OTHER");
+  });
+});

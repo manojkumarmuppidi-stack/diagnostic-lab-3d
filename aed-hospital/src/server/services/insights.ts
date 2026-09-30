@@ -21,6 +21,7 @@ import {
   opdAnalytics,
   periodSummary,
   pharmacyAnalytics,
+  pharmacyItemAnalytics,
   type Range,
 } from "./analytics";
 
@@ -175,15 +176,25 @@ async function ipd(cur: Range, prev: Range, prevLabel: string): Promise<Section>
 
 async function pharmacy(cur: Range, prev: Range, prevLabel: string): Promise<Section> {
   const g = defaultGranularity(cur.from, cur.to);
-  const [a, b] = await Promise.all([pharmacyAnalytics(cur, g), pharmacyAnalytics(prev, g)]);
+  const [a, b, ia, ib] = await Promise.all([pharmacyAnalytics(cur, g), pharmacyAnalytics(prev, g), pharmacyItemAnalytics(cur), pharmacyItemAnalytics(prev)]);
+  // With medicine lines, margin is the real one (sale value − cost of units sold) and bills are real bills.
+  const items = ia.hasData;
   const kpis: KpiCompare[] = [
     { key: "netSales", label: "Net sales", current: a.totals.netSales, previous: b.totals.netSales, unit: "money" },
     { key: "purchases", label: "Purchases", current: a.totals.purchases, previous: b.totals.purchases, unit: "money", goodWhen: "none" },
-    { key: "grossMargin", label: "Gross margin", current: a.totals.grossMargin, previous: b.totals.grossMargin, unit: "money" },
-    { key: "grossMarginPct", label: "Gross margin %", current: a.totals.grossMarginPct, previous: b.totals.grossMarginPct, unit: "pct" },
+    items
+      ? { key: "grossMargin", label: "Margin on medicines sold", current: ia.totals.margin, previous: ib.totals.margin, unit: "money" }
+      : { key: "grossMargin", label: "Gross margin", current: a.totals.grossMargin, previous: b.totals.grossMargin, unit: "money" },
+    items
+      ? { key: "grossMarginPct", label: "Margin %", current: ia.totals.marginPct, previous: ib.totals.marginPct, unit: "pct" }
+      : { key: "grossMarginPct", label: "Gross margin %", current: a.totals.grossMarginPct, previous: b.totals.grossMarginPct, unit: "pct" },
     { key: "returns", label: "Returns", current: a.totals.returns, previous: b.totals.returns, unit: "money", goodWhen: "down" },
-    { key: "bills", label: "Bills", current: a.totals.transactions, previous: b.totals.transactions, unit: "int" },
-    { key: "avgSale", label: "Avg bill value", current: a.totals.avgSale, previous: b.totals.avgSale, unit: "money" },
+    items
+      ? { key: "bills", label: "Bills", current: ia.totals.bills, previous: ib.totals.bills, unit: "int" }
+      : { key: "bills", label: "Bills", current: a.totals.transactions, previous: b.totals.transactions, unit: "int" },
+    items
+      ? { key: "avgSale", label: "Avg bill value", current: ia.totals.avgBill, previous: ib.totals.avgBill, unit: "money" }
+      : { key: "avgSale", label: "Avg bill value", current: a.totals.avgSale, previous: b.totals.avgSale, unit: "money" },
   ];
   const comparisons: Comparison[] = [
     {
@@ -199,6 +210,12 @@ async function pharmacy(cur: Range, prev: Range, prevLabel: string): Promise<Sec
       ],
     },
   ];
+  if (items) {
+    comparisons.push(
+      { id: "pharmacy-medicine-revenue", title: "Sales value by medicine", noun: "medicine", unit: "money", rows: top(rowsFrom(ia.medicines, ib.medicines, (x) => x.id, (x) => x.name, (x) => x.revenue), 16) },
+      { id: "pharmacy-medicine-units", title: "Units sold by medicine", noun: "medicine", unit: "int", rows: top(rowsFrom(ia.medicines, ib.medicines, (x) => x.id, (x) => x.name, (x) => x.units), 16) },
+    );
+  }
   return finish("pharmacy", "Pharmacy", kpis, comparisons, prevLabel);
 }
 
