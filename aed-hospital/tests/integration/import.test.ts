@@ -235,3 +235,39 @@ describe("pharmacy medicine lines", () => {
     await expect(prisma.pharmacyItemLine.deleteMany({})).rejects.toThrow();
   });
 });
+
+describe("supplier payments", () => {
+  it("are not expenses, mark invoices paid, measure credit days and reverse", async () => {
+    const { supplierPayables } = await import("@/server/services/analytics");
+    const P = "Invoice No,Invoice Date,Stockiest Name,Mfg Name,HSN Code,Drug Name,Batch No,Expiry By,Batch Qty,Free Qty,Strip Qty,Mrp,Rate,Discount Amount,Net Value,Tax%,Tax Amount,Purchase Qty,Avail Qty,Purchase Value,Sales Value,Profit,Profit(%)\n";
+    const purchases =
+      "x\nx\nx\nx\nx\nPurchase/Sales Report\n\n\n" + P +
+      '"INV-1","01-04-2026","DEMO DISTRIBUTORS","Demo","3004","TAB A","A1","Oct-2027","10","0","10","10","8","0","800","5","40","100","0","840","1000","160","19",\n' +
+      '"INV-2","05-04-2026","DEMO DISTRIBUTORS","Demo","3004","TAB B","B1","Oct-2027","10","0","10","10","8","0","1000","5","50","100","0","1050","1250","200","19",\n';
+    const payments =
+      "x\nx\nx\nx\nx\nPharmacy Invoice Report\n\n\nBillNo,Paid date,Stockiest Name,Details,Paid Amount\n" +
+      '"1","11-04-2026","Demo Distributors","555,INVOICE NO INV-1","840",\n';
+    const run = async (csv: string, name: string) => {
+      const up = await uploadFile(f.admin, name, Buffer.from(csv));
+      for (const b of up.batches) {
+        await validateBatch(f.admin, b.id, { type: b.type, mapping: b.suggestion.mapping });
+        await commitBatch(f.admin, b.id, { approveWarnings: true });
+      }
+      return up;
+    };
+    await run(purchases, "Purchase_Sales_Report.csv");
+    const expBefore = await prisma.expense.count();
+    const up = await run(payments, "Pharmacy_Invoice_Report.csv");
+    expect(up.batches[0].type).toBe("supplier-payments");
+    expect(await prisma.expense.count()).toBe(expBefore);
+
+    const p = await supplierPayables({ from: "2026-04-01", to: "2026-04-30" });
+    expect(p.hasPayments).toBe(true);
+    expect(p.totals).toMatchObject({ purchased: 1890, paid: 840, invoices: 2, openInvoices: 1, openAmount: 1050, avgDaysToPay: 10, matchedInvoicesPaid: 1 });
+    expect(p.suppliers[0]).toMatchObject({ supplier: "DEMO DISTRIBUTORS", openInvoices: 1, oldestOpen: "2026-04-05" });
+
+    await reverseBatch(f.admin, up.batches[0].id, { reason: "test reversal" });
+    expect((await supplierPayables({ from: "2026-04-01", to: "2026-04-30" })).totals.openInvoices).toBe(2);
+    await expect(prisma.supplierPayment.deleteMany({})).rejects.toThrow();
+  });
+});

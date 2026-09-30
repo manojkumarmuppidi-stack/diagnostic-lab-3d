@@ -13,6 +13,7 @@ import {
   pharmacyAnalytics,
   pharmacyItemAnalytics,
   pharmacyMedicineTrend,
+  supplierPayables,
   profitabilityAnalytics,
   revenueAnalytics,
 } from "@/server/services/analytics";
@@ -58,11 +59,12 @@ export const GET = api<{ kind: string }>(async ({ actor, params, url }) => {
       break;
     }
     case "pharmacy": {
-      const [base, items, prevItems, medicine] = await Promise.all([
+      const [base, items, prevItems, medicine, payables] = await Promise.all([
         pharmacyAnalytics(r, g),
         pharmacyItemAnalytics(r),
         pharmacyItemAnalytics(period.previous),
         q.medicine && q.medicine.trim().length >= 2 ? pharmacyMedicineTrend(r, g, q.medicine.slice(0, 60)) : Promise.resolve(null),
+        supplierPayables(r),
       ]);
       const prevById = new Map(prevItems.medicines.map((m) => [m.id, m]));
       const seen = new Set(items.medicines.map((m) => m.id));
@@ -77,6 +79,7 @@ export const GET = api<{ kind: string }>(async ({ actor, params, url }) => {
           ],
         },
         medicine,
+        payables,
       };
       break;
     }

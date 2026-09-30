@@ -520,6 +520,71 @@ export async function pharmacyMedicineTrend(r: Range, g: Granularity, q: string)
   };
 }
 
+/**
+ * Pharmacy suppliers: purchased vs paid in the period, and which of the period's invoices are
+ * still open (no payment lists that invoice number for that supplier, at any date).
+ */
+export async function supplierPayables(r: Range) {
+  const [anyPayment, byInvoice, paid, credit] = await Promise.all([
+    prisma.supplierPayment.count({ where: { status: "ACTIVE" } }),
+    prisma.$queryRaw<{ sup: string; name: string; invoices: bigint; purchased: Prisma.Decimal; open_count: bigint; open_amount: Prisma.Decimal; oldest_open: Date | null }[]>`
+      WITH pay AS (
+        SELECT DISTINCT upper(regexp_replace(trim(supplier), '[[:space:]]+', ' ', 'g')) AS sup, unnest("invoiceRefs") AS inv
+          FROM "SupplierPayment" WHERE status = 'ACTIVE'),
+      pur AS (
+        SELECT upper(regexp_replace(trim(supplier), '[[:space:]]+', ' ', 'g')) AS sup, supplier, date, amount,
+               upper(regexp_replace(COALESCE("invoiceNo", ''), '[[:space:]]+', '', 'g')) AS inv
+          FROM "PharmacyPurchase" WHERE status = 'ACTIVE' AND date BETWEEN ${D(r.from)} AND ${D(r.to)}),
+      marked AS (
+        SELECT pur.*, EXISTS (SELECT 1 FROM pay WHERE pay.sup = pur.sup AND pay.inv = pur.inv) AS is_paid FROM pur)
+      SELECT sup, MIN(supplier) AS name, COUNT(*) AS invoices, SUM(amount) AS purchased,
+             COUNT(*) FILTER (WHERE NOT is_paid) AS open_count, COALESCE(SUM(amount) FILTER (WHERE NOT is_paid), 0) AS open_amount,
+             MIN(date) FILTER (WHERE NOT is_paid) AS oldest_open
+        FROM marked GROUP BY sup`,
+    prisma.$queryRaw<{ sup: string; name: string; paid: Prisma.Decimal; payments: bigint; last_paid: Date }[]>`
+      SELECT upper(regexp_replace(trim(supplier), '[[:space:]]+', ' ', 'g')) AS sup, MIN(supplier) AS name, SUM(amount) AS paid, COUNT(*) AS payments, MAX(date) AS last_paid
+        FROM "SupplierPayment" WHERE status = 'ACTIVE' AND date BETWEEN ${D(r.from)} AND ${D(r.to)} GROUP BY 1`,
+    // Credit actually taken: days from invoice to the payment that lists it, for payments in the period.
+    prisma.$queryRaw<{ sup: string; days: number | null; matched: bigint }[]>`
+      WITH pay AS (
+        SELECT upper(regexp_replace(trim(supplier), '[[:space:]]+', ' ', 'g')) AS sup, date AS paid_on, unnest("invoiceRefs") AS inv
+          FROM "SupplierPayment" WHERE status = 'ACTIVE' AND date BETWEEN ${D(r.from)} AND ${D(r.to)}),
+      pur AS (
+        SELECT upper(regexp_replace(trim(supplier), '[[:space:]]+', ' ', 'g')) AS sup, MIN(date) AS invoiced_on,
+               upper(regexp_replace(COALESCE("invoiceNo", ''), '[[:space:]]+', '', 'g')) AS inv
+          FROM "PharmacyPurchase" WHERE status = 'ACTIVE' GROUP BY 1, 3)
+      SELECT GROUPING(pay.sup) AS g, COALESCE(pay.sup, '*') AS sup, AVG(pay.paid_on - pur.invoiced_on)::float AS days, COUNT(*) AS matched
+        FROM pay JOIN pur ON pur.sup = pay.sup AND pur.inv = pay.inv
+       GROUP BY ROLLUP (pay.sup)`,
+  ]);
+  const rows = new Map<string, { supplier: string; invoices: number; purchased: number; paid: number; payments: number; openInvoices: number; openAmount: number; oldestOpen: string | null; lastPaid: string | null; avgDaysToPay: number | null }>();
+  const get = (sup: string, name: string) => {
+    let x = rows.get(sup);
+    if (!x) rows.set(sup, (x = { supplier: name, invoices: 0, purchased: 0, paid: 0, payments: 0, openInvoices: 0, openAmount: 0, oldestOpen: null, lastPaid: null, avgDaysToPay: null }));
+    return x;
+  };
+  const creditBySup = new Map(credit.filter((c) => c.sup !== "*").map((c) => [c.sup, c.days === null ? null : Math.round(c.days)]));
+  const overall = credit.find((c) => c.sup === "*");
+  for (const b of byInvoice) Object.assign(get(b.sup, b.name), { invoices: Number(b.invoices), purchased: toNum(b.purchased), openInvoices: Number(b.open_count), openAmount: toNum(b.open_amount), oldestOpen: b.oldest_open ? iso(b.oldest_open) : null });
+  for (const p of paid) Object.assign(get(p.sup, p.name), { paid: toNum(p.paid), payments: Number(p.payments), lastPaid: iso(p.last_paid) });
+  for (const [sup, x] of rows) x.avgDaysToPay = creditBySup.get(sup) ?? null;
+  const suppliers = [...rows.values()].sort((a, b) => b.openAmount - a.openAmount || b.purchased - a.purchased);
+  const sum = (k: "purchased" | "paid" | "openAmount" | "openInvoices" | "invoices") => round2(suppliers.reduce((a, x) => a + x[k], 0));
+  return {
+    hasPayments: anyPayment > 0,
+    totals: {
+      purchased: sum("purchased"),
+      paid: sum("paid"),
+      invoices: sum("invoices"),
+      openInvoices: sum("openInvoices"),
+      openAmount: sum("openAmount"),
+      avgDaysToPay: overall?.days === null || overall?.days === undefined ? null : Math.round(overall.days),
+      matchedInvoicesPaid: Number(overall?.matched ?? 0),
+    },
+    suppliers,
+  };
+}
+
 export async function expenseAnalytics(r: Range, g: Granularity, f: { departmentId?: string; categoryId?: string } = {}) {
   const ef = Prisma.sql`${f.departmentId ? Prisma.sql`AND e."departmentId" = ${f.departmentId}` : Prisma.empty} ${f.categoryId ? Prisma.sql`AND e."categoryId" = ${f.categoryId}` : Prisma.empty}`;
   const [byKind, byCategory, byDepartment, byMonth, series, largest] = await Promise.all([

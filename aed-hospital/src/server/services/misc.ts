@@ -1,4 +1,5 @@
 /** Search, attachments, users & roles, audit log. */
+import { formatNumber } from "@/lib/money";
 import { z } from "zod";
 import { can, requirePermission, requireAnyPermission, type Actor } from "../authz";
 import { prisma } from "../db";
@@ -50,6 +51,22 @@ export async function globalSearch(actor: Actor, qRaw: string) {
       }),
       prisma.labInvestigation.findMany({ where: { OR: [{ name: ci }, { code: ci }] }, take }).then((xs) => {
         for (const x of xs) results.push({ type: "Investigation", title: x.name, subtitle: `${x.category} · rate ${toNum(x.rate)}`, href: `/lab?investigationId=${x.id}` });
+      }),
+    );
+  }
+  // Products and tests → their counts in Analytics ("how many Fiasp / ECG …").
+  if (can(actor, "analytics.view")) {
+    jobs.push(
+      prisma.$queryRaw<{ name: string; units: bigint | null; variants: bigint }[]>`
+        SELECT MIN(i.name) AS name, SUM(l.qty) FILTER (WHERE l.date >= CURRENT_DATE - 30) AS units, COUNT(DISTINCT i.id) AS variants
+          FROM "PharmacyItem" i LEFT JOIN "PharmacyItemLine" l ON l."itemId" = i.id AND l.kind = 'SALE' AND l.status = 'ACTIVE'
+         WHERE i.name ILIKE ${`%${q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`}
+         GROUP BY i.id ORDER BY 2 DESC NULLS LAST LIMIT ${take}`.then((xs) => {
+        for (const x of xs)
+          results.push({ type: "Medicine", title: x.name, subtitle: `${formatNumber(Number(x.units ?? 0))} units sold in the last 30 days · see units per week/month`, href: `/analytics?tab=pharmacy&medicine=${encodeURIComponent(x.name)}` });
+      }),
+      prisma.labInvestigation.findMany({ where: { OR: [{ name: ci }, { code: ci }] }, take: 5 }).then((xs) => {
+        for (const x of xs) results.push({ type: "Test counts", title: x.name, subtitle: `${x.category} · how many were done per week/month`, href: `/analytics?tab=lab&investigationId=${x.id}` });
       }),
     );
   }

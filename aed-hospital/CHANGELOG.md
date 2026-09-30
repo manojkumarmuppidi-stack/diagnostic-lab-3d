@@ -2,6 +2,14 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.6.0: Supplier payments, open invoices and product search
+- New `SupplierPayment` table (migration `20261001010000_supplier_payments`, DB-guarded). Payments are **not** expenses, because the purchase invoices already are.
+- The OneGlance **Pharmacy Invoice Report** is recognised. The cheque/UTR and the invoice numbers are read from "Details", tolerating typos like "INVOICDE NO".
+- Analytics → Pharmacy → **Suppliers — purchased vs paid**. Per supplier it shows invoices, purchased, paid, open invoices and value, oldest open invoice, last payment, and the average days from invoice to payment. An invoice is "paid" when a payment to that supplier lists its number.
+- Global search finds **medicines** (units sold in the last 30 days → opens the medicine's units per week/month) and **test counts** (opens the test's week/month counts). Analytics accepts `?medicine=` and `?investigationId=` deep links.
+- The analytics-only import path is generalised (medicine lines, supplier payments share validation, duplicate detection, commit and reversal).
+- Verified on AED data: 126 payments (₹71.75 L) settle 403 invoices, mostly from before April. The average credit taken is 56 days.
+
 ## 0.5.0: Medicine-wise pharmacy analytics
 - New `PharmacyItem` / `PharmacyItemLine` tables (migration `20261001000000_pharmacy_items`) with the same DB guards (no deletes, immutable values, final reversal). Medicine lines are analytics only: pharmacy income stays collections and purchase expense stays invoices, so nothing is counted twice.
 - The OneGlance **Purchase/Sales Report** is recognised in both views. **Sales view** becomes medicine lines: units, bill, value incl. GST, taxable value and cost. **Purchase view** becomes one pharmacy purchase (expense) per supplier invoice, plus medicine purchase lines (supplier, manufacturer, batch, expiry, free units). New import type "Pharmacy medicine lines" with its own template for other sources.

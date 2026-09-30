@@ -41,7 +41,11 @@ function Inner() {
   const tab = (sp.get("tab") as Tab) || "revenue";
   const [period, setPeriod] = useState<PeriodValue>({ preset: "this_month" });
   const [granularity, setGranularity] = useState<"" | Granularity>("");
-  const [filters, setFilters] = useState<{ doctorId?: string; specialtyId?: string; departmentId?: string; investigationId?: string; medicine?: string }>({});
+  // Deep links from global search: ?tab=pharmacy&medicine=… / ?tab=lab&investigationId=…
+  const [filters, setFilters] = useState<{ doctorId?: string; specialtyId?: string; departmentId?: string; investigationId?: string; medicine?: string }>(() => ({
+    medicine: sp.get("medicine") || undefined,
+    investigationId: sp.get("investigationId") || undefined,
+  }));
   const { masters } = useMasters();
   const url = period.preset === "custom" && (!period.from || !period.to) ? null : `/api/analytics/${tab}${qs({ ...periodQuery(period), granularity, ...filters, investigationId: tab === "lab" ? filters.investigationId : undefined, medicine: tab === "pharmacy" ? filters.medicine : undefined })}`;
   const { data, error, loading, reload } = useApi<{ period: any; granularity: Granularity; data: any }>(url);
@@ -431,6 +435,7 @@ function Pharmacy({ d, g, drill, medicine, onMedicine }: P & { medicine?: string
           </p>
         </Card>
       )}
+      {d.payables?.hasPayments && <Payables p={d.payables} />}
       <Card title="How pharmacy is accounted">
         <ul className="list-disc space-y-1 pl-5 text-sm text-2">
           <li>Net sales (after discount and returns) are counted once in hospital income — from collections.</li>
@@ -440,6 +445,67 @@ function Pharmacy({ d, g, drill, medicine, onMedicine }: P & { medicine?: string
         </ul>
       </Card>
     </>
+  );
+}
+
+function Payables({ p }: { p: any }) {
+  const [all, setAll] = useState(false);
+  const rows = (p.suppliers as any[]).filter((x) => all || x.openAmount > 0);
+  const t = p.totals;
+  return (
+    <Card
+      title="Suppliers — purchased vs paid"
+      actions={
+        <label className="flex items-center gap-2 text-xs text-2">
+          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> Show fully paid suppliers too
+        </label>
+      }
+    >
+      <div className="mb-3 grid grid-cols-2 gap-3 md:grid-cols-5">
+        <Kpi label="Purchased (invoices)" value={t.purchased} hint={`${formatNumber(t.invoices)} invoices dated in this period`} />
+        <Kpi label="Paid to suppliers" value={t.paid} hint="Payments dated in this period (any invoice)" />
+        <Kpi label="Open invoices" value={t.openInvoices} format="int" goodWhen="down" />
+        <Kpi label="Open invoice value" value={t.openAmount} goodWhen="down" hint="This period's invoices not listed in any recorded payment" />
+        <Kpi label="Avg days invoice → payment" value={t.avgDaysToPay} format="int" goodWhen="up" hint={`Credit actually taken, over ${formatNumber(t.matchedInvoicesPaid)} invoices paid in this period`} />
+      </div>
+      <p className="mb-2 text-xs muted">
+        An invoice counts as paid when a recorded payment to that supplier lists its number. Payments made in cash/UPI outside OneGlance&apos;s payment report are not visible here, so treat “open” as “no payment recorded”, not as a confirmed dues figure.
+      </p>
+      <div className="max-h-[420px] overflow-auto">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Supplier</th>
+              <th className="num">Invoices</th>
+              <th className="num">Purchased</th>
+              <th className="num">Paid</th>
+              <th className="num">Open invoices</th>
+              <th className="num">Open value</th>
+              <th>Oldest open</th>
+              <th>Last paid</th>
+              <th className="num">Days to pay</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((x: any) => (
+              <tr key={x.supplier}>
+                <td>{x.supplier}</td>
+                <td className="num">{formatNumber(x.invoices)}</td>
+                <td className="num">{formatINR(x.purchased)}</td>
+                <td className="num">{formatINR(x.paid)}</td>
+                <td className="num">{formatNumber(x.openInvoices)}</td>
+                <td className="num" style={{ color: x.openAmount > 0 ? "var(--status-critical)" : undefined }}>
+                  {formatINR(x.openAmount)}
+                </td>
+                <td>{x.oldestOpen ? formatDayMonth(x.oldestOpen) : "—"}</td>
+                <td>{x.lastPaid ? formatDayMonth(x.lastPaid) : "—"}</td>
+                <td className="num">{x.avgDaysToPay ?? "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 }
 
@@ -461,7 +527,8 @@ function MedicineSection({ it, g, per, medicine, onMedicine, m }: { it: any; g: 
     else xs.sort((a, b) => b.revenue - a.revenue);
     return xs;
   }, [it, q, sort]);
-  const top = useMemo(() => [...(it.medicines as any[])].sort((a, b) => b.revenue - a.revenue).slice(0, 15), [it]);
+  const short = (n: string) => (n.length > 24 ? `${n.slice(0, 23)}…` : n);
+  const top = useMemo(() => [...(it.medicines as any[])].sort((a, b) => b.revenue - a.revenue).slice(0, 15).map((x) => ({ ...x, label: x.name.length > 24 ? `${x.name.slice(0, 23)}…` : x.name })), [it]);
   return (
     <>
       <Card
@@ -568,11 +635,11 @@ function MedicineSection({ it, g, per, medicine, onMedicine, m }: { it: any; g: 
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title="Top 15 medicines by sales value" subtitle="Click a bar to see that medicine over time" height={Math.max(260, top.length * 26)}>
-          <BarsChart data={top} xKey="name" horizontal series={[{ key: "revenue", label: "Sales value", color: SLOT(3) }]} onBarClick={(r) => setQ(String(r.name))} />
+        <ChartCard title="Top 15 medicines by sales value" subtitle="Click a bar to see that medicine over time" height={Math.max(260, top.length * 34)}>
+          <BarsChart data={top} xKey="label" horizontal series={[{ key: "revenue", label: "Sales value", color: SLOT(3) }]} onBarClick={(r) => setQ(String(r.name))} />
         </ChartCard>
-        <ChartCard title="Purchases by supplier" table={{ columns: [{ key: "supplier", label: "Supplier" }, { key: "invoices", label: "Invoices", format: "int" }, { key: "amount", label: "Amount", format: "money" }], rows: it.suppliers }} height={Math.max(260, it.suppliers.length * 26)}>
-          <BarsChart data={it.suppliers} xKey="supplier" horizontal series={[{ key: "amount", label: "Purchases", color: SLOT(6) }]} />
+        <ChartCard title="Purchases by supplier" table={{ columns: [{ key: "supplier", label: "Supplier" }, { key: "invoices", label: "Invoices", format: "int" }, { key: "amount", label: "Amount", format: "money" }], rows: it.suppliers }} height={Math.max(260, it.suppliers.length * 34)}>
+          <BarsChart data={it.suppliers.map((x: any) => ({ ...x, label: short(x.supplier) }))} xKey="label" horizontal series={[{ key: "amount", label: "Purchases", color: SLOT(6) }]} />
         </ChartCard>
       </div>
     </>

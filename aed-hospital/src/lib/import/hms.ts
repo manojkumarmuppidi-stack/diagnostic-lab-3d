@@ -31,7 +31,7 @@ export interface ConvertedSheet extends RawSheet {
   note: string;
   source: HmsReport;
 }
-export type HmsReport = "oneglance-opd" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases";
+export type HmsReport = "oneglance-opd" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments";
 
 export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-opd": "OneGlance · Outpatient Collection Report",
@@ -40,6 +40,7 @@ export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-lab-bills": "OneGlance · Lab Bill Collection",
   "oneglance-pharmacy-item-sales": "OneGlance · Purchase/Sales Report (medicines sold)",
   "oneglance-pharmacy-item-purchases": "OneGlance · Purchase/Sales Report (purchase invoices)",
+  "oneglance-supplier-payments": "OneGlance · Pharmacy Invoice Report (supplier payments)",
 };
 
 const has = (headers: string[], ...names: string[]) => {
@@ -54,6 +55,7 @@ export function detectHmsReport(headers: string[]): HmsReport | null {
   if (has(headers, "BillNo", "RefLab", "RefferedBY", "PaidAmount", "Cash")) return "oneglance-lab-bills";
   if (has(headers, "Bill No", "Drug Name", "Qty", "Total", "Sales Amount", "Purchase Amount")) return "oneglance-pharmacy-item-sales";
   if (has(headers, "Invoice No", "Invoice Date", "Stockiest Name", "Drug Name", "Purchase Value")) return "oneglance-pharmacy-item-purchases";
+  if (has(headers, "BillNo", "Paid date", "Stockiest Name", "Details", "Paid Amount")) return "oneglance-supplier-payments";
   return null;
 }
 
@@ -421,6 +423,21 @@ function convertPharmacyItemPurchases(sheet: RawSheet): ConvertedSheet[] {
   ];
 }
 
+const PAYMENT_HEADERS = ["Date", "Supplier", "Details", "Amount paid"];
+
+/** Pharmacy Invoice Report: one row per payment to a supplier, listing the invoices it settles. */
+function convertSupplierPayments(sheet: RawSheet): ConvertedSheet[] {
+  const out: Out[] = sheet.rows.map((r) => {
+    const g = getter(r.values);
+    return { rowNumber: r.rowNumber, values: { Date: g("Paid date"), Supplier: cleanText(g("Stockiest Name")), Details: cleanText(g("Details")), "Amount paid": num(g("Paid Amount")) } };
+  });
+  const total = out.reduce((a, r) => a + Number(r.values["Amount paid"]), 0);
+  const note =
+    `${out.length} payments to suppliers (₹${Math.round(total).toLocaleString("en-IN")}). They are matched to purchase invoices by invoice number to show what is paid and what is still open. ` +
+    `They are NOT expenses (the purchase invoices already are). If some suppliers are paid in cash/UPI outside this report, their invoices will look unpaid.`;
+  return byMonth("oneglance-supplier-payments", sheet.name, "supplier-payments", "Supplier payments", PAYMENT_HEADERS, out, note);
+}
+
 export class HmsReportError extends Error {}
 
 /**
@@ -440,6 +457,8 @@ export function convertHmsSheet(sheet: RawSheet): ConvertedSheet[] | null {
       return convertPharmacyItemSales(sheet);
     case "oneglance-pharmacy-item-purchases":
       return convertPharmacyItemPurchases(sheet);
+    case "oneglance-supplier-payments":
+      return convertSupplierPayments(sheet);
     case "oneglance-lab-bills":
       throw new HmsReportError(
         'This is OneGlance "Lab Bill Collection": bill totals without test names, so importing it would count one test per bill. ' +

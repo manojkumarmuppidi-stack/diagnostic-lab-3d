@@ -421,6 +421,7 @@ export const IMPORT_TYPES = [
   { key: "combined-income", label: "Combined Income (Stream column)" },
   { key: "combined-expense", label: "Combined Expenditure (Type column)" },
   { key: "pharmacy-items", label: "Pharmacy medicine lines (sold / purchased)" },
+  { key: "supplier-payments", label: "Supplier payments (against purchase invoices)" },
 ] as const;
 export type ImportType = (typeof IMPORT_TYPES)[number]["key"];
 
@@ -497,7 +498,20 @@ export const PHARMACY_ITEM_SAMPLE = [
   ["Purchase", "01-09-2026", "INV-DEMO-9", "TAB DEMO 500MG", "B123", "Dec-2027", "Demo Distributors", "Demo Pharma", 300, 30, 2100, 2000, 100, ""],
 ];
 
+/** Payments to pharmacy suppliers. Not an expense (purchases already are); used for open invoices. */
+export const SUPPLIER_PAYMENT_FIELDS: FieldDef[] = [
+  dateField,
+  { key: "supplier", label: "Supplier", type: "text", required: true, aliases: ["supplier", "stockist", "stockiest name", "vendor", "party", "paid to"] },
+  { key: "reference", label: "Cheque / UTR No.", type: "text", aliases: ["cheque no", "utr", "reference", "ref no", "voucher", "bill no", "billno"] },
+  { key: "invoices", label: "Invoices paid (comma-separated)", type: "text", aliases: ["invoices", "invoice no", "invoice numbers"] },
+  { key: "details", label: "Details", type: "text", aliases: ["details", "narration", "remarks", "particulars"], help: 'OneGlance format "cheque,INVOICE NO A1,A2" is parsed automatically' },
+  { key: "amount", label: "Amount paid", type: "money", required: true, aliases: ["paid amount", "amount", "amount paid", "paid"] },
+];
+export const SUPPLIER_PAYMENT_TEMPLATE = ["Date", "Supplier", "Cheque / UTR No.", "Invoices paid", "Amount paid"];
+export const SUPPLIER_PAYMENT_SAMPLE = [["05-09-2026", "Demo Distributors", "UTR-DEMO-1", "INV-DEMO-9, INV-DEMO-10", 42000]];
+
 export function importFieldsFor(type: ImportType): FieldDef[] {
+  if (type === "supplier-payments") return SUPPLIER_PAYMENT_FIELDS;
   if (type === "pharmacy-items") return PHARMACY_ITEM_FIELDS;
   if (type === "combined-income") return COMBINED_INCOME_FIELDS;
   if (type === "combined-expense") return COMBINED_EXPENSE_FIELDS;
@@ -506,6 +520,7 @@ export function importFieldsFor(type: ImportType): FieldDef[] {
 
 export function templateFor(type: ImportType): { headers: string[]; sample: (string | number)[][] } {
   if (type === "pharmacy-items") return { headers: PHARMACY_ITEM_TEMPLATE, sample: PHARMACY_ITEM_SAMPLE };
+  if (type === "supplier-payments") return { headers: SUPPLIER_PAYMENT_TEMPLATE, sample: SUPPLIER_PAYMENT_SAMPLE };
   if (type === "combined-income") return { headers: COMBINED_INCOME_TEMPLATE, sample: COMBINED_INCOME_SAMPLE };
   if (type === "combined-expense") return { headers: COMBINED_EXPENSE_TEMPLATE, sample: COMBINED_EXPENSE_SAMPLE };
   const m = MODULES[type];

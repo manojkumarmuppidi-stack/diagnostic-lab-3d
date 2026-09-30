@@ -597,6 +597,32 @@ model PharmacyItemLine {
   @@index([importBatchId])
 }
 
+/// Money paid to a pharmacy supplier (HMS "Pharmacy Invoice Report"). Not an expense — the
+/// purchase invoices already are — it only shows what is paid and which invoices are still open.
+model SupplierPayment {
+  id          String   @id @default(cuid())
+  date        DateTime @db.Date
+  supplier    String
+  /// Cheque / UTR / voucher number.
+  reference   String?
+  /// Invoice numbers this payment settles (canonical: upper case, no spaces).
+  invoiceRefs String[]
+  details     String?
+  amount      Decimal  @db.Decimal(12, 2)
+
+  status        RecordStatus @default(ACTIVE)
+  fingerprint   String
+  importBatchId String?
+  importBatch   ImportBatch? @relation(fields: [importBatchId], references: [id])
+  createdById   String
+  createdAt     DateTime     @default(now())
+
+  @@index([date, status])
+  @@index([supplier])
+  @@index([fingerprint])
+  @@index([importBatchId])
+}
+
 model DietTransaction {
   id            String       @id @default(cuid())
   date          DateTime     @db.Date
@@ -816,6 +842,7 @@ model ImportBatch {
   otherIncomes      OtherIncome[]
   expenses          Expense[]
   pharmacyItemLines PharmacyItemLine[]
+  supplierPayments  SupplierPayment[]
 
   @@index([createdAt])
   @@index([fileHash])

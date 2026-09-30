@@ -22,6 +22,7 @@ import { AppError, badRequest, conflict, notFound } from "../errors";
 import { readSpreadsheet, type SheetData } from "../spreadsheet";
 import { classifyLabItem } from "@/lib/import/lab-category";
 import { canonicalItemName, itemFingerprint, itemForm, normalizeItemRow, type ItemLineInput } from "@/lib/import/items";
+import { normalizePaymentRow, paymentFingerprint, type SupplierPaymentInput } from "@/lib/import/payments";
 import { convertHmsSheet, HmsReportError, HMS_LABELS, type ConvertedSheet } from "@/lib/import/hms";
 import { fingerprintFor } from "./modules";
 import { bulkInsertPrepared, insertRecord, prepareRecord } from "./transactions";
@@ -188,7 +189,8 @@ export async function validateBatch(actor: Actor, batchId: string, raw: unknown)
   const fields = importFieldsFor(type);
   const missing = missingRequired(mapping, fields);
   if (missing.length) throw badRequest(`Map these required columns (or set a fixed value): ${missing.join(", ")}`, { missing });
-  if (type === "pharmacy-items") return validateItemBatch(batchId, mapping);
+  const side = SIDE_SPECS[type];
+  if (side) return validateSideBatch(side, batchId, mapping);
 
   const [records, ctx] = await Promise.all([
     prisma.importRecord.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } }),
@@ -338,23 +340,103 @@ export function summarize(outcomes: { status: ImportRowStatus; errors: string[];
   return s;
 }
 
-// ─────────────────────────── pharmacy medicine lines ───────────────────────────
-// Analytics-only rows (PharmacyItemLine): no closed-day checks and no day mutations, because
-// they are not income or expense; duplicates are still detected so a report can be re-uploaded safely.
+// ─────────────────────────── analytics-only imports ───────────────────────────
+// Rows that explain the books without being income or expense (medicine lines, supplier
+// payments). No closed-day checks and no day mutations; duplicates are still detected so a
+// report can be re-uploaded safely, and batches reverse like any other.
 
-async function validateItemBatch(batchId: string, mapping: Mapping) {
+interface SideSpec<I> {
+  type: ImportType;
+  normalize: (values: Record<string, unknown>, mapping: Mapping, today: string) => { input: I | null; errors: string[]; warnings: string[]; amount: number };
+  fingerprint: (input: I) => string;
+  findExisting: (fps: string[]) => Promise<{ id: string; fingerprint: string }[]>;
+  /** Insert rows in one transaction; returns row ids (same order) and master rows created. */
+  insert: (tx: Tx, actor: Actor, batchId: string, inputs: I[]) => Promise<{ ids: string[]; newMasters: number }>;
+  amountOf: (input: I) => number;
+}
+
+const itemSpec: SideSpec<ItemLineInput> = {
+  type: "pharmacy-items",
+  normalize: normalizeItemRow,
+  fingerprint: itemFingerprint,
+  findExisting: (fps) => prisma.pharmacyItemLine.findMany({ where: { fingerprint: { in: fps }, status: "ACTIVE" }, select: { id: true, fingerprint: true } }),
+  amountOf: (i) => i.amount,
+  async insert(tx, actor, batchId, inputs) {
+    // Medicine master: create missing names in one go, then map name → id.
+    const names = [...new Set(inputs.map((i) => canonicalItemName(i.item)))];
+    const before = await tx.pharmacyItem.count();
+    for (let i = 0; i < names.length; i += 1000) {
+      await tx.pharmacyItem.createMany({ data: names.slice(i, i + 1000).map((name) => ({ name, form: itemForm(name) })), skipDuplicates: true });
+    }
+    const newMasters = (await tx.pharmacyItem.count()) - before;
+    const idByName = new Map<string, string>();
+    for (let i = 0; i < names.length; i += 5000) {
+      for (const it of await tx.pharmacyItem.findMany({ where: { name: { in: names.slice(i, i + 5000) } }, select: { id: true, name: true } })) idByName.set(it.name, it.id);
+    }
+    const ids = inputs.map(() => randomUUID());
+    const rows = inputs.map((i, n) => ({
+      id: ids[n],
+      kind: i.kind,
+      date: new Date(`${i.date}T00:00:00.000Z`),
+      docNo: i.docNo ?? null,
+      itemId: idByName.get(canonicalItemName(i.item))!,
+      batchNo: i.batchNo ?? null,
+      expiry: i.expiry ?? null,
+      supplier: i.supplier ?? null,
+      manufacturer: i.manufacturer ?? null,
+      qty: i.qty,
+      freeQty: i.freeQty,
+      amount: i.amount,
+      taxable: i.taxable ?? null,
+      tax: i.tax ?? null,
+      cost: i.cost ?? null,
+      fingerprint: itemFingerprint(i),
+      importBatchId: batchId,
+      createdById: actor.id,
+    }));
+    for (let i = 0; i < rows.length; i += 2000) await tx.pharmacyItemLine.createMany({ data: rows.slice(i, i + 2000) });
+    return { ids, newMasters };
+  },
+};
+
+const paymentSpec: SideSpec<SupplierPaymentInput> = {
+  type: "supplier-payments",
+  normalize: normalizePaymentRow,
+  fingerprint: paymentFingerprint,
+  findExisting: (fps) => prisma.supplierPayment.findMany({ where: { fingerprint: { in: fps }, status: "ACTIVE" }, select: { id: true, fingerprint: true } }),
+  amountOf: (i) => i.amount,
+  async insert(tx, actor, batchId, inputs) {
+    const ids = inputs.map(() => randomUUID());
+    await tx.supplierPayment.createMany({
+      data: inputs.map((i, n) => ({
+        id: ids[n],
+        date: new Date(`${i.date}T00:00:00.000Z`),
+        supplier: i.supplier,
+        reference: i.reference ?? null,
+        invoiceRefs: i.invoiceRefs,
+        details: i.details ?? null,
+        amount: i.amount,
+        fingerprint: paymentFingerprint(i),
+        importBatchId: batchId,
+        createdById: actor.id,
+      })),
+    });
+    return { ids, newMasters: 0 };
+  },
+};
+
+const SIDE_SPECS: Partial<Record<ImportType, SideSpec<any>>> = { "pharmacy-items": itemSpec, "supplier-payments": paymentSpec };
+
+async function validateSideBatch<I>(spec: SideSpec<I>, batchId: string, mapping: Mapping) {
   const records = await prisma.importRecord.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } });
   const today = todayISO();
   const results = records.map((rec) => {
-    const n = normalizeItemRow(rec.raw as Record<string, unknown>, mapping, today);
-    return { rec, n, fingerprint: n.input ? itemFingerprint(n.input) : null };
+    const n = spec.normalize(rec.raw as Record<string, unknown>, mapping, today);
+    return { rec, n, fingerprint: n.input ? spec.fingerprint(n.input) : null };
   });
   const fps = [...new Set(results.map((r) => r.fingerprint).filter(Boolean) as string[])];
   const existing = new Map<string, string>();
-  for (let i = 0; i < fps.length; i += 5000) {
-    const hits = await prisma.pharmacyItemLine.findMany({ where: { fingerprint: { in: fps.slice(i, i + 5000) }, status: "ACTIVE" }, select: { id: true, fingerprint: true } });
-    for (const h of hits) existing.set(h.fingerprint, h.id);
-  }
+  for (let i = 0; i < fps.length; i += 5000) for (const h of await spec.findExisting(fps.slice(i, i + 5000))) existing.set(h.fingerprint, h.id);
   const seen = new Map<string, number>();
   const outcomes: RowOutcome[] = results.map(({ rec, n, fingerprint }) => {
     let status: ImportRowStatus = n.errors.length ? "INVALID" : n.warnings.length ? "WARNING" : "VALID";
@@ -364,13 +446,13 @@ async function validateItemBatch(batchId: string, mapping: Mapping) {
       const inFile = seen.get(fingerprint);
       if (inDb) {
         status = "DUPLICATE";
-        duplicateOf = `pharmacy-items:${inDb}`;
+        duplicateOf = `${spec.type}:${inDb}`;
       } else if (inFile !== undefined) {
         status = "DUPLICATE";
         duplicateOf = `row:${inFile}`;
       } else seen.set(fingerprint, rec.rowNumber);
     }
-    return { status, normalized: n.input ? { module: "pharmacy-items", input: n.input, amount: n.amount, flags: [] } : { flags: [] }, errors: n.errors, warnings: n.warnings, fingerprint, duplicateOf };
+    return { status, normalized: n.input ? { module: spec.type, input: n.input, amount: n.amount, flags: [] } : { flags: [] }, errors: n.errors, warnings: n.warnings, fingerprint, duplicateOf };
   });
   const summary = summarize(outcomes);
   summary.byModule = {};
@@ -397,13 +479,13 @@ async function validateItemBatch(batchId: string, mapping: Mapping) {
     }
     await tx.importBatch.update({
       where: { id: batchId },
-      data: { module: "pharmacy-items", mapping, status: "VALIDATED", validatedAt: new Date(), validRows: summary.valid, warningRows: summary.warnings, invalidRows: summary.invalid, duplicateRows: summary.duplicates, totalAmount: summary.validAmount },
+      data: { module: spec.type, mapping, status: "VALIDATED", validatedAt: new Date(), validRows: summary.valid, warningRows: summary.warnings, invalidRows: summary.invalid, duplicateRows: summary.duplicates, totalAmount: summary.validAmount },
     });
   }, LONG_TX);
-  return { batchId, type: "pharmacy-items" as ImportType, summary };
+  return { batchId, type: spec.type, summary };
 }
 
-async function commitItemBatch(actor: Actor, batch: { id: string; fileName: string; sheetName: string | null; options: Prisma.JsonValue }, opts: z.infer<typeof commitInput>) {
+async function commitSideBatch<I>(spec: SideSpec<I>, actor: Actor, batch: { id: string; fileName: string; sheetName: string | null; options: Prisma.JsonValue }, opts: z.infer<typeof commitInput>) {
   const records = await prisma.importRecord.findMany({ where: { batchId: batch.id }, orderBy: { rowNumber: "asc" } });
   if ((opts.duplicatePolicy === "import" || records.some((r) => r.status === "DUPLICATE" && r.forceImport)) && !can(actor, "import.override_duplicates")) {
     throw new AppError(403, "Only an Admin can import duplicate rows", "FORBIDDEN");
@@ -415,43 +497,11 @@ async function commitItemBatch(actor: Actor, batch: { id: string; fileName: stri
   return prisma.$transaction(async (tx) => {
     const claimed = await tx.importBatch.updateMany({ where: { id: batch.id, status: "VALIDATED" }, data: { status: "IMPORTED", committedAt: new Date() } });
     if (!claimed.count) throw conflict("This batch is already being imported");
-    const inputs = toImport.map((r) => ((r.normalized as any).input as ItemLineInput));
-    // Medicine master: create missing names in one go, then map name → id.
-    const names = [...new Set(inputs.map((i) => canonicalItemName(i.item)))];
-    const before = await tx.pharmacyItem.count();
-    for (let i = 0; i < names.length; i += 1000) {
-      await tx.pharmacyItem.createMany({ data: names.slice(i, i + 1000).map((name) => ({ name, form: itemForm(name) })), skipDuplicates: true });
-    }
-    const created = (await tx.pharmacyItem.count()) - before;
-    const ids = new Map<string, string>();
-    for (let i = 0; i < names.length; i += 5000) {
-      for (const it of await tx.pharmacyItem.findMany({ where: { name: { in: names.slice(i, i + 5000) } }, select: { id: true, name: true } })) ids.set(it.name, it.id);
-    }
-    const lineIds = toImport.map(() => randomUUID());
-    const rows = inputs.map((i, n) => ({
-      id: lineIds[n],
-      kind: i.kind,
-      date: new Date(`${i.date}T00:00:00.000Z`),
-      docNo: i.docNo ?? null,
-      itemId: ids.get(canonicalItemName(i.item))!,
-      batchNo: i.batchNo ?? null,
-      expiry: i.expiry ?? null,
-      supplier: i.supplier ?? null,
-      manufacturer: i.manufacturer ?? null,
-      qty: i.qty,
-      freeQty: i.freeQty,
-      amount: i.amount,
-      taxable: i.taxable ?? null,
-      tax: i.tax ?? null,
-      cost: i.cost ?? null,
-      fingerprint: itemFingerprint(i),
-      importBatchId: batch.id,
-      createdById: actor.id,
-    }));
-    for (let i = 0; i < rows.length; i += 2000) await tx.pharmacyItemLine.createMany({ data: rows.slice(i, i + 2000) });
-    const imported = rows.length;
-    const amount = round2(inputs.reduce((a, i) => a + i.amount, 0));
-    const idByRecord = new Map(toImport.map((r, n) => [r.id, lineIds[n]]));
+    const inputs = toImport.map((r) => (r.normalized as any).input as I);
+    const { ids, newMasters } = await spec.insert(tx, actor, batch.id, inputs);
+    const imported = ids.length;
+    const amount = round2(inputs.reduce((a, i) => a + spec.amountOf(i), 0));
+    const idByRecord = new Map(toImport.map((r, n) => [r.id, ids[n]]));
     await tx.importRecord.deleteMany({ where: { batchId: batch.id } });
     for (let i = 0; i < records.length; i += 2000) {
       await tx.importRecord.createMany({
@@ -475,8 +525,8 @@ async function commitItemBatch(actor: Actor, batch: { id: string; fileName: stri
       where: { id: batch.id },
       data: { imported, rejected: records.length - imported, totalAmount: amount, options: { ...((batch.options as Record<string, unknown> | null) ?? {}), ...opts } },
     });
-    await audit(tx, actor, { action: "IMPORT_COMMIT", entityType: "ImportBatch", entityId: batch.id, after: { fileName: batch.fileName, sheet: batch.sheetName, type: "pharmacy-items", found: records.length, imported, amount, newMedicines: created } });
-    return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected: records.length - imported, amount, newMasters: created };
+    await audit(tx, actor, { action: "IMPORT_COMMIT", entityType: "ImportBatch", entityId: batch.id, after: { fileName: batch.fileName, sheet: batch.sheetName, type: spec.type, found: records.length, imported, amount, newMasters } });
+    return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected: records.length - imported, amount, newMasters };
   }, LONG_TX);
 }
 
@@ -612,7 +662,8 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
   if (!batch) throw notFound();
   if (batch.status !== "VALIDATED") throw badRequest(batch.status === "UPLOADED" ? "Validate the batch first" : `Batch is already ${batch.status.toLowerCase()}`);
-  if (batch.module === "pharmacy-items") return commitItemBatch(actor, batch, opts);
+  const side = SIDE_SPECS[batch.module as ImportType];
+  if (side) return commitSideBatch(side, actor, batch, opts);
   const records = await prisma.importRecord.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } });
   const anyForced = records.some((r) => r.status === "DUPLICATE" && r.forceImport);
   if ((opts.duplicatePolicy === "import" || anyForced) && !can(actor, "import.override_duplicates")) {
@@ -721,7 +772,7 @@ export async function cancelBatch(actor: Actor, batchId: string) {
 
 // ─────────────────────────── reverse ───────────────────────────
 
-const IMPORT_TABLES = ["consultation", "ipdTransaction", "ipdAdmission", "labTransaction", "pharmacySale", "pharmacyReturn", "pharmacyPurchase", "dietTransaction", "otherIncome", "expense", "pharmacyItemLine"] as const;
+const IMPORT_TABLES = ["consultation", "ipdTransaction", "ipdAdmission", "labTransaction", "pharmacySale", "pharmacyReturn", "pharmacyPurchase", "dietTransaction", "otherIncome", "expense", "pharmacyItemLine", "supplierPayment"] as const;
 
 export async function reverseBatch(actor: Actor, batchId: string, raw: unknown) {
   requirePermission(actor, "import.reverse");

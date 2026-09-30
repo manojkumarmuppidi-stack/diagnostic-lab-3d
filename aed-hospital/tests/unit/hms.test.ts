@@ -179,3 +179,21 @@ describe("pharmacy medicine reports", () => {
     expect(itemForm("BD ULTRA FINE NEEDLE")).toBe("OTHER");
   });
 });
+
+describe("supplier payments", () => {
+  it("parses OneGlance payment details, including typos", async () => {
+    const { parsePaymentDetails } = await import("@/lib/import/payments");
+    expect(parsePaymentDetails("636907,INVOICE NO MK13683,MK13806, MK14279")).toEqual({ reference: "636907", invoices: ["MK13683", "MK13806", "MK14279"] });
+    expect(parsePaymentDetails("636853,INVOICDE NO A000397,A000412")).toEqual({ reference: "636853", invoices: ["A000397", "A000412"] });
+    expect(parsePaymentDetails("112879,INVOICE SIS-V/26-27/800,SIS-V/26-27/904")).toEqual({ reference: "112879", invoices: ["SIS-V/26-27/800", "SIS-V/26-27/904"] });
+    expect(parsePaymentDetails("110561,INVOICE NO GST 12")).toEqual({ reference: "110561", invoices: ["GST12"] });
+    expect(parsePaymentDetails("cash advance").invoices).toEqual([]);
+  });
+
+  it("converts the Pharmacy Invoice Report by month", () => {
+    const h = ["BillNo", "Paid date", "Stockiest Name", "Details", "Paid Amount"];
+    const out = convertHmsSheet(sheet(h, [["5936", "01-04-2026", "DEMO ENTERPRISES", "593677,INVOICE NO MK12106", "336"], ["6086", "10-09-2026", "DEMO AGENCIES", "112888,INVOICE NO SB-26-89481", "115289"]]))!;
+    expect(out.map((s) => `${s.type}:${s.name}:${s.rows.length}`)).toEqual(["supplier-payments:Supplier payments Apr 2026:1", "supplier-payments:Supplier payments Sep 2026:1"]);
+    expect(out[0].rows[0].values).toMatchObject({ Supplier: "DEMO ENTERPRISES", Details: "593677,INVOICE NO MK12106", "Amount paid": 336 });
+  });
+});
