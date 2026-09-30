@@ -85,7 +85,7 @@ describe("lab item conversion", () => {
     const [s] = convertHmsSheet(sheet(LAB_H, rows))!;
     expect(s.type).toBe("lab");
     expect(s.rows.map((r) => r.values.Reference)).toEqual(["BILL-90106", "BILL-90106/2", "BILL-90107"]);
-    expect(s.rows[0].values).toMatchObject({ Investigation: "X-RAY WRIST AP VIEW", Rate: 600, Discount: 19.91, "Net Amount": 580.09, Department: "Laboratory" });
+    expect(s.rows[0].values).toMatchObject({ Investigation: "X-RAY WRIST AP VIEW", Rate: 600, Discount: 19.91, "Net Amount": 580.09, Department: "Radiology" });
     expect(s.rows[2].values.Department).toBe("OP Procedures");
   });
 });
@@ -115,5 +115,22 @@ describe("fuzzy matching never flips meaning", () => {
     expect(matchByName("T3", items)).toBeNull();
     expect(meaningDiffers("usg thy screening", "usg thyroid screening")).toBe(false);
     expect(matchByName("Usg Thy Screening", [{ id: "3", name: "Usg Thyroid Screening" }])?.item.id).toBe("3");
+  });
+});
+
+describe("lab item classification", () => {
+  it("puts tests in meaningful categories", async () => {
+    const { classifyLabItem } = await import("@/lib/import/lab-category");
+    const c = (n: string) => classifyLabItem(n).category;
+    expect(c("USG Thyroid Doppler Scan")).toBe("Ultrasound");
+    expect(c("Scrotum Scan")).toBe("Ultrasound");
+    expect(c("HRCT")).toBe("Imaging");
+    expect(c("X-RAY WRIST AP VIEW")).toBe("Imaging");
+    expect(c("ECG")).toBe("Cardiac");
+    expect(c("PeriPheral Nueropathy Examination")).toBe("Diabetic Foot");
+    expect(c("Upper GI Endoscopy")).toBe("Procedures");
+    expect(c("Mycobacterium Tuberculosis PCR Mycosure:TB(Biopsy)")).toBe("Pathology");
+    expect(c("HbA1c")).toBe("Pathology");
+    expect(classifyLabItem("ECG").department).toBe("Cardiology");
   });
 });

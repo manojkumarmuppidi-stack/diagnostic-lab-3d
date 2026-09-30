@@ -3,8 +3,8 @@
 import { Suspense, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { qs, useApi } from "@/lib/client";
-import { INCOME_STREAMS, STREAM_LABELS, EXPENSE_LABELS } from "@/lib/accounting";
-import { addDays, addMonths } from "@/lib/dates";
+import { INCOME_STREAMS, STREAM_LABELS, EXPENSE_LABELS, compare } from "@/lib/accounting";
+import { addDays, addMonths, formatDayMonth, formatMonth } from "@/lib/dates";
 import { formatINR, formatNumber } from "@/lib/money";
 import type { Granularity } from "@/lib/periods";
 import { STREAM_HREF, withRange } from "@/lib/drill";
@@ -41,9 +41,9 @@ function Inner() {
   const tab = (sp.get("tab") as Tab) || "revenue";
   const [period, setPeriod] = useState<PeriodValue>({ preset: "this_month" });
   const [granularity, setGranularity] = useState<"" | Granularity>("");
-  const [filters, setFilters] = useState<{ doctorId?: string; specialtyId?: string; departmentId?: string }>({});
+  const [filters, setFilters] = useState<{ doctorId?: string; specialtyId?: string; departmentId?: string; investigationId?: string }>({});
   const { masters } = useMasters();
-  const url = period.preset === "custom" && (!period.from || !period.to) ? null : `/api/analytics/${tab}${qs({ ...periodQuery(period), granularity, ...filters })}`;
+  const url = period.preset === "custom" && (!period.from || !period.to) ? null : `/api/analytics/${tab}${qs({ ...periodQuery(period), granularity, ...filters, investigationId: tab === "lab" ? filters.investigationId : undefined })}`;
   const { data, error, loading, reload } = useApi<{ period: any; granularity: Granularity; data: any }>(url);
   const g = data?.granularity ?? "day";
   const from = data?.period.current.from;
@@ -122,7 +122,7 @@ function Inner() {
             {tab === "revenue" && <Revenue d={data.data} g={g} drill={drill} filtered={!!(filters.doctorId || filters.specialtyId || filters.departmentId)} />}
             {tab === "opd" && <Opd d={data.data} g={g} drill={drill} />}
             {tab === "ipd" && <Ipd d={data.data} g={g} drill={drill} />}
-            {tab === "lab" && <Lab d={data.data} g={g} drill={drill} />}
+            {tab === "lab" && <Lab d={data.data} g={g} drill={drill} selectedId={filters.investigationId} onSelect={(id) => setFilters((f) => ({ ...f, investigationId: id }))} />}
             {tab === "pharmacy" && <Pharmacy d={data.data} g={g} drill={drill} />}
             {tab === "expense" && <Expense d={data.data} g={g} drill={drill} />}
             {tab === "profitability" && <Profitability d={data.data} g={g} drill={drill} />}
@@ -231,74 +231,130 @@ function Opd({ d, g, drill }: P) {
   );
 }
 
-function Lab({ d, g, drill }: P) {
-  const [sort, setSort] = useState<"volume" | "revenue" | "low">("revenue");
+function Lab({ d, g, drill, selectedId, onSelect }: P & { selectedId?: string; onSelect: (id?: string) => void }) {
+  const [sort, setSort] = useState<"volume" | "revenue" | "low" | "change">("volume");
+  const [q, setQ] = useState("");
   const sorted = useMemo(() => {
-    const xs = [...d.investigations];
+    const needle = q.trim().toLowerCase();
+    const xs = (d.investigations as any[]).filter((x) => !needle || x.name.toLowerCase().includes(needle) || String(x.category ?? "").toLowerCase().includes(needle));
     if (sort === "volume") xs.sort((a, b) => b.tests - a.tests);
     else if (sort === "revenue") xs.sort((a, b) => b.revenue - a.revenue);
+    else if (sort === "change") xs.sort((a, b) => Math.abs(b.tests - b.prevTests) - Math.abs(a.tests - a.prevTests));
     else xs.sort((a, b) => a.tests - b.tests);
     return xs;
-  }, [d, sort]);
+  }, [d, sort, q]);
+  const chartRows = useMemo(() => sorted.filter((x) => x.tests > 0).slice(0, 25), [sorted]);
   const t = d.totals;
+  const p = d.previousTotals;
+  const sel = d.selected;
+  const per = g === "day" ? "day" : g;
   return (
     <>
       <div className={grid6}>
-        <Kpi label="Tests performed" value={t.tests} format="int" />
-        <Kpi label="Lab revenue" value={t.revenue} />
+        <Kpi label="Tests performed" value={t.tests} format="int" change={p ? compare(t.tests, p.tests) : undefined} />
+        <Kpi label="Lab revenue" value={t.revenue} change={p ? compare(t.revenue, p.revenue) : undefined} />
         <Kpi label="Avg revenue / test" value={t.avgPerTest} />
         <Kpi label="Avg tests / day" value={t.avgTestsPerDay} format="int" />
       </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard title={`Tests per ${g}`} table={{ columns: [{ key: "bucket", label: "Period" }, { key: "tests", label: "Tests", format: "int" }], rows: d.trend }}>
-          <BarsChart data={d.trend} xKey="bucket" format="int" granularity={g} series={[{ key: "tests", label: "Tests", color: SLOT(2) }]} onBarClick={(r) => drill("/lab", String(r.bucket))} />
-        </ChartCard>
-        <ChartCard title={`Lab revenue per ${g}`} table={{ columns: [{ key: "bucket", label: "Period" }, { key: "revenue", label: "Revenue", format: "money" }], rows: d.trend }}>
-          <TrendChart data={d.trend} xKey="bucket" granularity={g} series={[{ key: "revenue", label: "Revenue", color: SLOT(2) }]} onPointClick={(r) => drill("/lab", String(r.bucket))} />
-        </ChartCard>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ChartCard
-          title="Investigations"
-          subtitle="Click a bar to see the tests"
-          actions={
+
+      <Card
+        title="Test-wise counts"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="input !w-48 !py-1 text-sm" placeholder="Find a test, e.g. ECG" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a test" />
             <select className="input !w-auto !py-1 text-xs" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort investigations">
+              <option value="volume">Most performed</option>
               <option value="revenue">Highest revenue</option>
-              <option value="volume">Highest volume</option>
-              <option value="low">Lowest volume</option>
+              <option value="change">Biggest change</option>
+              <option value="low">Least performed</option>
             </select>
-          }
-          height={Math.max(260, sorted.length * 26)}
-        >
-          <BarsChart data={sorted} xKey="name" horizontal format={sort === "revenue" ? "money" : "int"} series={[sort === "revenue" ? { key: "revenue", label: "Revenue", color: SLOT(2) } : { key: "tests", label: "Tests", color: SLOT(2) }]} onBarClick={(r) => drill(`/lab?investigationId=${r.id}`)} />
-        </ChartCard>
-        <Card title="Per-test figures">
-          <div className="max-h-[520px] overflow-auto">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Investigation</th>
-                  <th className="num">Performed</th>
-                  <th className="num">Revenue</th>
-                  <th className="num">Avg / test</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((x: any) => (
-                  <tr key={x.id} className="cursor-pointer" onClick={() => drill(`/lab?investigationId=${x.id}`)}>
+          </div>
+        }
+      >
+        <p className="mb-2 text-xs muted">
+          {formatNumber(sorted.length)} tests · this period vs the previous period of the same length. Click a test to see it {per} by {per}.
+        </p>
+        <div className="max-h-[440px] overflow-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Investigation</th>
+                <th className="num">This period</th>
+                <th className="num">Previous</th>
+                <th className="num">Change</th>
+                <th className="num">Revenue</th>
+                <th className="num">Avg / test</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((x: any) => {
+                const diff = x.tests - x.prevTests;
+                return (
+                  <tr key={x.id} className={`cursor-pointer ${x.id === selectedId ? "bg-[var(--surface-2)] font-semibold" : ""}`} onClick={() => onSelect(x.id === selectedId ? undefined : x.id)}>
                     <td>
                       {x.name} <span className="text-xs muted">{x.category}</span>
                     </td>
                     <td className="num">{formatNumber(x.tests)}</td>
+                    <td className="num muted">{formatNumber(x.prevTests)}</td>
+                    <td className="num" style={{ color: diff > 0 ? "var(--status-good)" : diff < 0 ? "var(--status-critical)" : undefined }}>
+                      {diff > 0 ? "+" : ""}
+                      {formatNumber(diff)}
+                      {x.prevTests > 0 && <span className="text-xs muted"> ({diff >= 0 ? "+" : ""}{Math.round((diff / x.prevTests) * 100)}%)</span>}
+                    </td>
                     <td className="num">{formatINR(x.revenue)}</td>
                     <td className="num">{x.avg === null ? "—" : formatINR(x.avg)}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      {sel && (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card title={sel.name} actions={<button className="btn btn-sm btn-secondary" onClick={() => onSelect(undefined)}>Clear</button>}>
+            <dl className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <dt className="text-xs muted">Performed</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{formatNumber(sel.tests)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs muted">Revenue</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{formatINR(sel.revenue)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs muted">Average per {per}</dt>
+                <dd className="text-lg font-semibold tabular-nums">{sel.avgPerBucket === null ? "—" : sel.avgPerBucket.toFixed(1)}</dd>
+              </div>
+              <div>
+                <dt className="text-xs muted">Busiest {per}</dt>
+                <dd className="text-lg font-semibold tabular-nums">{sel.busiest ? `${formatNumber(sel.busiest.tests)} · ${g === "month" ? formatMonth(sel.busiest.bucket) : g === "week" ? `week of ${formatDayMonth(sel.busiest.bucket)}` : formatDayMonth(sel.busiest.bucket)}` : "—"}</dd>
+              </div>
+            </dl>
+            <button className="btn btn-sm btn-ghost mt-3" onClick={() => drill(`/lab?investigationId=${sel.id}`)}>
+              Open the transactions
+            </button>
+          </Card>
+          <div className="lg:col-span-2">
+          <ChartCard title={`${sel.name} per ${per}`} table={{ columns: [{ key: "bucket", label: "Period" }, { key: "tests", label: "Tests", format: "int" }, { key: "revenue", label: "Revenue", format: "money" }], rows: sel.trend }}>
+            <BarsChart data={sel.trend} xKey="bucket" format="int" granularity={g} series={[{ key: "tests", label: sel.name, color: SLOT(2) }]} onBarClick={(r) => drill(`/lab?investigationId=${sel.id}`, String(r.bucket))} />
+          </ChartCard>
           </div>
-        </Card>
+        </div>
+      )}
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ChartCard title={`Tests per ${per}`} table={{ columns: [{ key: "bucket", label: "Period" }, { key: "tests", label: "Tests", format: "int" }], rows: d.trend }}>
+          <BarsChart data={d.trend} xKey="bucket" format="int" granularity={g} series={[{ key: "tests", label: "Tests", color: SLOT(2) }]} onBarClick={(r) => drill("/lab", String(r.bucket))} />
+        </ChartCard>
+        <ChartCard title={`Lab revenue per ${per}`} table={{ columns: [{ key: "bucket", label: "Period" }, { key: "revenue", label: "Revenue", format: "money" }], rows: d.trend }}>
+          <TrendChart data={d.trend} xKey="bucket" granularity={g} series={[{ key: "revenue", label: "Revenue", color: SLOT(2) }]} onPointClick={(r) => drill("/lab", String(r.bucket))} />
+        </ChartCard>
       </div>
+      <ChartCard title={sort === "revenue" ? "Top 25 tests by revenue" : "Top 25 tests by volume"} subtitle="Click a bar to see that test over time" height={Math.max(260, chartRows.length * 26)}>
+        <BarsChart data={chartRows} xKey="name" horizontal format={sort === "revenue" ? "money" : "int"} series={[sort === "revenue" ? { key: "revenue", label: "Revenue", color: SLOT(2) } : { key: "tests", label: "Tests", color: SLOT(2) }]} onBarClick={(r) => onSelect(String(r.id))} />
+      </ChartCard>
     </>
   );
 }

@@ -16,6 +16,7 @@
  */
 import type { ImportType } from "../modules";
 import { norm } from "./text";
+import { classifyLabItem } from "./lab-category";
 
 type Cell = string | number | boolean | null;
 export interface RawSheet {
@@ -250,7 +251,7 @@ function convertLabItems(sheet: RawSheet): ConvertedSheet[] {
         "Net Amount": net,
         "Payment Mode": "Other",
         Doctor: cleanDoctor(g("Doctor")),
-        Department: isOp ? "OP Procedures" : "Laboratory",
+        Department: isOp ? "OP Procedures" : classifyLabItem(g("Particulars")).department,
         Reference: `BILL-${g("Bill NO")}${nth > 1 ? `/${nth}` : ""}`,
         Remarks: [NO_MODE, area && `Area: ${area}`].filter(Boolean).join(" · "),
       },
@@ -260,6 +261,7 @@ function convertLabItems(sheet: RawSheet): ConvertedSheet[] {
   const note =
     `${out.length.toLocaleString("en-IN")} test/service lines from ${bills.toLocaleString("en-IN")} bills` +
     (procedures ? ` (${procedures} physio/procedure lines go to department "OP Procedures")` : "") +
+    `. Departments (Laboratory, Radiology, Cardiology) and test categories are set from the test name` +
     `. Net amounts are taken as billed. The export has no payment mode, so lines are recorded under "Other".`;
   return byMonth("oneglance-lab-items", sheet.name, "lab", "Lab", LAB_HEADERS, out, note);
 }

@@ -8,6 +8,7 @@ import {
   expenseAnalytics,
   ipdAnalytics,
   labAnalytics,
+  labTestTrend,
   opdAnalytics,
   pharmacyAnalytics,
   profitabilityAnalytics,
@@ -33,9 +34,27 @@ export const GET = api<{ kind: string }>(async ({ actor, params, url }) => {
     case "ipd":
       data = await ipdAnalytics(r, g, f);
       break;
-    case "lab":
-      data = await labAnalytics(r, g, f);
+    case "lab": {
+      // Per-test comparison with the previous period, plus an optional single-test trend ("ECGs per week").
+      const [cur, prev, selected] = await Promise.all([
+        labAnalytics(r, g, f),
+        labAnalytics(period.previous, g, f),
+        q.investigationId ? labTestTrend(r, g, q.investigationId, f) : Promise.resolve(null),
+      ]);
+      const prevById = new Map(prev.investigations.map((x) => [x.id, x]));
+      const seen = new Set(cur.investigations.map((x) => x.id));
+      data = {
+        ...cur,
+        previousTotals: prev.totals,
+        investigations: [
+          ...cur.investigations.map((x) => ({ ...x, prevTests: prevById.get(x.id)?.tests ?? 0, prevRevenue: prevById.get(x.id)?.revenue ?? 0 })),
+          // Tests done last period but not this one still matter ("no ECGs this week?").
+          ...prev.investigations.filter((x) => !seen.has(x.id)).map((x) => ({ ...x, tests: 0, revenue: 0, avg: null, prevTests: x.tests, prevRevenue: x.revenue })),
+        ],
+        selected,
+      };
       break;
+    }
     case "pharmacy":
       data = await pharmacyAnalytics(r, g);
       break;

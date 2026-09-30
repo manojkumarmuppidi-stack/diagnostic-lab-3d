@@ -138,7 +138,7 @@ async function lab(cur: Range, prev: Range, prevLabel: string): Promise<Section>
   ];
   const comparisons: Comparison[] = [
     { id: "lab-revenue", title: "Revenue by investigation", noun: "investigation", unit: "money", rows: top(rowsFrom(a.investigations, b.investigations, (x) => x.id, (x) => x.name, (x) => x.revenue), 10), href: "/lab?investigationId={key}" },
-    { id: "lab-volume", title: "Tests by investigation", noun: "investigation", unit: "int", rows: top(rowsFrom(a.investigations, b.investigations, (x) => x.id, (x) => x.name, (x) => x.tests), 10), href: "/lab?investigationId={key}" },
+    { id: "lab-volume", title: "Tests by investigation", noun: "investigation", unit: "int", rows: top(rowsFrom(a.investigations, b.investigations, (x) => x.id, (x) => x.name, (x) => x.tests), 16), href: "/lab?investigationId={key}" },
     { id: "lab-category", title: "Revenue by category", noun: "category", unit: "money", rows: rowsFrom(a.byCategory, b.byCategory, (x) => x.category, (x) => x.category, (x) => x.revenue), href: "/lab?category={key}" },
   ];
   return finish("lab", "Laboratory & diagnostics", kpis, comparisons, prevLabel);

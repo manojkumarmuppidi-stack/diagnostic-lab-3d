@@ -2,6 +2,11 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.4.1: Test-wise lab counts
+- Analytics → Laboratory → **Test-wise counts**: every test performed in the period with this period vs previous, change, revenue and average. It has a search box ("ECG") and sort by volume, revenue, biggest change or least performed. Tests done last period but not this one are listed with 0.
+- Click a test to see it day by day, week by week or month by month (follows "Group by"). The panel shows total, revenue, average per week and the busiest week, and links to the transactions.
+- Board Meeting: new slide "Laboratory — tests performed, test by test". It shows the top 16 tests with this period, previous, change and per-week average.
+
 ## 0.4.0: OneGlance HMS import
 - The importer recognises OneGlance exports (Outpatient Collection, Bill Item Wise Collection, Pharmacy Collection) and converts them to OPD/Diet, Lab and Pharmacy records, split by month. Lab Bill Collection is refused with guidance. See EXCEL_IMPORT_SPEC.md §8a.
 - "Check all months → Import all months" panel for recognised reports.

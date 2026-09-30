@@ -319,6 +319,31 @@ export async function labAnalytics(r: Range, g: Granularity, f: { doctorId?: str
   };
 }
 
+/** One investigation's counts per bucket, e.g. "ECGs per week this month". */
+export async function labTestTrend(r: Range, g: Granularity, investigationId: string, f: { doctorId?: string; departmentId?: string } = {}) {
+  const extra = Prisma.sql`${f.doctorId ? Prisma.sql`AND l."referringDoctorId" = ${f.doctorId}` : Prisma.empty} ${f.departmentId ? Prisma.sql`AND l."departmentId" = ${f.departmentId}` : Prisma.empty}`;
+  const [inv, rows] = await Promise.all([
+    prisma.labInvestigation.findUnique({ where: { id: investigationId }, select: { id: true, name: true, category: true } }),
+    prisma.$queryRaw<{ bucket: Date; tests: bigint; revenue: Prisma.Decimal; patients: bigint }[]>`
+      SELECT ${bucketExpr(g)} AS bucket, COALESCE(SUM(quantity), 0) AS tests, COALESCE(SUM("netAmount"), 0) AS revenue,
+             COUNT(DISTINCT COALESCE(l."patientId", l.id)) AS patients
+        FROM "LabTransaction" l
+       WHERE l.status = 'ACTIVE' AND l."investigationId" = ${investigationId} AND l.date BETWEEN ${D(r.from)} AND ${D(r.to)} ${extra}
+       GROUP BY 1 ORDER BY 1`,
+  ]);
+  if (!inv) return null;
+  const trend = new Map(bucketsFor(r, g).map((b) => [b, { bucket: b, tests: 0, revenue: 0 }]));
+  for (const t of rows) {
+    const m = trend.get(iso(t.bucket));
+    if (m) Object.assign(m, { tests: Number(t.tests), revenue: toNum(t.revenue) });
+  }
+  const series = [...trend.values()];
+  const tests = series.reduce((a, x) => a + x.tests, 0);
+  const revenue = round2(series.reduce((a, x) => a + x.revenue, 0));
+  const busiest = series.reduce<(typeof series)[number] | null>((a, x) => (x.tests > (a?.tests ?? 0) ? x : a), null);
+  return { ...inv, tests, revenue, avgPerBucket: safeDiv(tests, series.length), busiest, trend: series };
+}
+
 export async function ipdAnalytics(r: Range, g: Granularity, f: { doctorId?: string } = {}) {
   const docA = f.doctorId ? Prisma.sql`AND a."doctorId" = ${f.doctorId}` : Prisma.empty;
   const docV = f.doctorId ? Prisma.sql`AND v.doctor_id = ${f.doctorId}` : Prisma.empty;

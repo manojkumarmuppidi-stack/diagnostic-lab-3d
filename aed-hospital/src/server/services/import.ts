@@ -20,6 +20,7 @@ import { getDayStatuses, onDayMutated } from "../closing";
 import { prisma, type Tx } from "../db";
 import { AppError, badRequest, conflict, notFound } from "../errors";
 import { readSpreadsheet, type SheetData } from "../spreadsheet";
+import { classifyLabItem } from "@/lib/import/lab-category";
 import { convertHmsSheet, HmsReportError, HMS_LABELS, type ConvertedSheet } from "@/lib/import/hms";
 import { fingerprintFor } from "./modules";
 import { bulkInsertPrepared, insertRecord, prepareRecord } from "./transactions";
@@ -417,7 +418,7 @@ async function createNewMasters(tx: Tx, actor: Actor, placeholders: Set<string>)
         break;
       case "investigations":
         // Rate 0: imported rows carry their own rate; Admin should set the master rate afterwards.
-        created = (await find(tx.labInvestigation)) ?? (await make(tx.labInvestigation.create({ data: { name, category: "Imported" } })));
+        created = (await find(tx.labInvestigation)) ?? (await make(tx.labInvestigation.create({ data: { name, category: classifyLabItem(name).category } })));
         break;
       case "dietServices":
         created = (await find(tx.dietService)) ?? (await make(tx.dietService.create({ data: { name } })));

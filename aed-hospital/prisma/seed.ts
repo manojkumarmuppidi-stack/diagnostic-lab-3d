@@ -9,6 +9,7 @@ import bcrypt from "bcryptjs";
 import { ALL_PERMISSIONS, PERMISSIONS, ROLE_DEFS } from "../src/lib/permissions";
 import { addDays, todayISO, toDbDate, fromDbDate } from "../src/lib/dates";
 import { round2 } from "../src/lib/money";
+import { classifyLabItem } from "../src/lib/import/lab-category";
 import { fingerprintFor } from "../src/server/services/modules";
 import { DEFAULT_SETTINGS } from "../src/server/settings";
 
@@ -110,6 +111,10 @@ async function seedMasters() {
   for (const [name, category, dept, rate] of INVESTIGATIONS) {
     const d = await prisma.department.findUniqueOrThrow({ where: { name: dept } });
     await prisma.labInvestigation.upsert({ where: { name }, create: { name, category, departmentId: d.id, rate: DEMO ? rate : 0 }, update: {} });
+  }
+  // Tests created by early imports were all categorised "Imported"; give them a real category (idempotent).
+  for (const inv of await prisma.labInvestigation.findMany({ where: { category: "Imported" }, select: { id: true, name: true } })) {
+    await prisma.labInvestigation.update({ where: { id: inv.id }, data: { category: classifyLabItem(inv.name).category } });
   }
   for (const [name, rate] of DIET_SERVICES) await prisma.dietService.upsert({ where: { name }, create: { name, rate: DEMO ? rate : 0 }, update: {} });
   for (const [name, group, subs] of EXPENSE_CATEGORIES) {
