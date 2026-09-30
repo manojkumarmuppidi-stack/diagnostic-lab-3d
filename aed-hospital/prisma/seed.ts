@@ -92,9 +92,9 @@ async function seedSecurity() {
   const admin = await prisma.role.findUniqueOrThrow({ where: { code: "ADMIN" } });
   if (!(await prisma.user.findUnique({ where: { username: "admin" } }))) {
     const pw = process.env.SEED_ADMIN_PASSWORD;
-    if (!pw || pw.length < 8) throw new Error("Set SEED_ADMIN_PASSWORD (min 8 chars) before seeding");
+    if (!pw || pw.length < 8) throw new Error("No admin user yet: set SEED_ADMIN_PASSWORD (min 8 chars) for the first deploy/seed, then remove it.");
     await prisma.user.create({ data: { username: "admin", name: "Administrator", passwordHash: bcrypt.hashSync(pw, 12), roleId: admin.id, mustChangePassword: !DEMO } });
-    console.log("✔ admin user created (username: admin)");
+    console.log("✔ admin user created (username: admin) — you can now remove SEED_ADMIN_PASSWORD");
   }
 }
 

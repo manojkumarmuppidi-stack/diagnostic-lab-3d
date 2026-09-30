@@ -2,6 +2,28 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.3.1: Zero-terminal Vercel setup
+- `vercel-build` applies migrations and the idempotent base seed before `next build`, so importing the repo on Vercel sets up a fresh Neon database without a terminal.
+- The build fails fast when `DIRECT_URL` is missing, `DIRECT_URL` is a pooler URL, or demo data is enabled on production.
+
+## [0.3.0] — 2026-09-25 — Vercel deployment
+### Added
+- **Private Vercel Blob storage** for bill attachments (automatic when `BLOB_READ_WRITE_TOKEN` is set); files are only streamed to signed-in users. Refuses to write to Vercel's ephemeral disk rather than silently losing bills.
+- Browser-side photo compression (≤ 2000 px JPEG) before upload; upload limit 4 MB on Vercel.
+- `DIRECT_URL` for migrations so the app can use Neon's pooled connection (`pgbouncer=true`) on serverless.
+- VERCEL.md step-by-step guide; `check:deploy` validates pooled/direct URLs and Blob connectivity (`--vercel`).
+### Changed
+- Import commit is batched (cached lookups within the operation, one INSERT per 500 rows, bulk staging-row rewrite): 5,000 rows 38 s → ~4 s, largely independent of database latency.
+- 60 s function time limit declared on import, report, export and board-pack routes; pdfkit font files bundled for serverless.
+
+## [0.2.1] — 2026-09-25 — Deployment readiness
+### Added
+- `npm run check:deploy`: read-only readiness check of env vars, database version/latency, migrations, accounting views, guard triggers, role ownership, seed state, master rates and demo data (PASS/WARN/FAIL, exit code 1 on FAIL).
+- `/api/health` probe, production `Dockerfile` + `.dockerignore`, `engines` (Node ≥ 20.9).
+- DEPLOYMENT.md: step-by-step for your own PostgreSQL (direct vs pooled URLs, SSL, restricted app role).
+### Verified
+- Fresh clone → `npm ci` → migrate → seed → build → run as a restricted role: all workflows succeed; the role cannot truncate, delete, edit amounts, disable triggers or drop views.
+
 ## [0.2.0] — 2026-09-25 — Insights & Board Meeting pack
 
 ### Added
