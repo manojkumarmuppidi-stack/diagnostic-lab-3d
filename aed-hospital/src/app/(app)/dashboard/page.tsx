@@ -304,6 +304,9 @@ function Segments({ cur, prev, from, to }: { cur: Summary; prev: Summary; from: 
           </div>
         </div>
       </div>
+      <p className="mt-2 text-xs muted">
+        Wellness: the partner&apos;s revenue share and wellness salaries are booked as hospital expenses (department Wellness). Wellness package receipts are manual and not recorded here.
+      </p>
     </Section>
   );
 }
