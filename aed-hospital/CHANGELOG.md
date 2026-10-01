@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.12.3: Dashboard explains spread expenses; doctor fees per visit
+- Dashboard shows the expenses entered in the period next to Total Expenses when monthly items (salaries, rent…) are counted as a daily share.
+- "Doctor fees" is a per-visit head: picking it no longer spreads the fee over the month; such October entries are put back on their day (migration `20261005020000_doctor_fees_per_visit`).
+
 ## 0.12.2: Reception bills and imports lab
 - Reception roles may view, enter and import laboratory transactions (migration `20261005010000_reception_lab`).
 

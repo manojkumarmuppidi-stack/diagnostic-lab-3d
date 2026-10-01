@@ -25,3 +25,14 @@ describe("monthly expenses spread over the month", () => {
   });
 });
 const round = (n: number) => Math.round(n * 100) / 100;
+
+describe("dashboard explains spread expenses", () => {
+  it("reports what was entered on the day next to the spread total", async () => {
+    const { getDashboard } = await import("@/server/services/dashboard");
+    await createTransaction(f.admin, "expense", { date: "2026-09-01", categoryId: f.ids.otherExp, description: "Staff salaries – Sep", amount: 30000, paymentModeId: f.ids.CASH, spreadMonth: "Yes" });
+    await createTransaction(f.admin, "expense", { date: "2026-09-01", categoryId: f.ids.otherExp, description: "Tea", amount: 150, paymentModeId: f.ids.CASH });
+    const d = await getDashboard(f.admin, { preset: "custom", from: "2026-09-01", to: "2026-09-01" });
+    expect(d.current.kpis.totalExpenses).toBe(1150);
+    expect(d.expenseBasis).toEqual({ entered: 30150, enteredCount: 2, spreadShare: 1000 });
+  });
+});

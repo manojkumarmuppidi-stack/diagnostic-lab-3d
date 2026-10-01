@@ -31,6 +31,8 @@ interface DashboardData {
   previous: Summary;
   comparison: Record<string, Change>;
   collectionsByMode: Record<string, number>;
+  /** Expenses entered in the period vs. the spread shares inside Total Expenses. */
+  expenseBasis?: { entered: number; enteredCount: number; spreadShare: number };
   alerts: { id: string; severity: "info" | "warning" | "critical"; title: string; detail: string; href?: string }[];
   trend: Record<string, number | string>[];
   trendGranularity: Granularity;
@@ -115,6 +117,12 @@ export default function DashboardPage() {
               <Kpi label="Total Expenses" value={data.current.kpis.totalExpenses} change={data.comparison.totalExpenses} goodWhen="down" href={withRange("/expenses", data.period.current.from, data.period.current.to)} hint="AED Hospital: hospital + other expenses (pharmacy stock and staff excluded)" emphasis />
               <Kpi label="Net Operating Result" value={data.current.kpis.netOperatingResult} change={data.comparison.netOperatingResult} hint="Total Income − Total Expenses" emphasis />
             </div>
+            {data.expenseBasis && Math.abs(data.expenseBasis.entered - (data.current.kpis.totalExpenses ?? 0)) >= 1 && (
+              <p className="mt-2 text-xs muted">
+                Expenses entered with dates in this period: <b>{formatINR(data.expenseBasis.entered)}</b> ({data.expenseBasis.enteredCount} entr{data.expenseBasis.enteredCount === 1 ? "y" : "ies"}). Monthly items such as salaries and rent count here only as their daily share
+                {data.expenseBasis.spreadShare ? ` (${formatINR(data.expenseBasis.spreadShare)} in this period)` : ""}, so a single day is not charged a whole month. Choose <i>This month</i> to see them in full.
+              </p>
+            )}
           </Section>
 
           <Segments cur={data.current} prev={data.previous} from={data.period.current.from} to={data.period.current.to} />

@@ -93,7 +93,7 @@ const EXPENSE_HEADS: [string, string, string | null, string, string | null, bool
   ["Security", "Salaries & Wages", "Security", "security,watchman,guard,salary", null, true],
   ["Housekeeping staff", "Salaries & Wages", "Support staff", "housekeeping,cleaning staff,salary", null, true],
   ["Staff incentives & bonus", "Salaries & Wages", "Incentives & bonus", "bonus,incentive,token,performance", "CASH", false],
-  ["Doctor fees", "Doctor & consultant fees", null, "doctor,consultant,visiting,dr", null, true],
+  ["Doctor fees", "Doctor & consultant fees", null, "doctor,consultant,visiting,dr", null, false],
   ["OP referral – Cash", "Referral fees", null, "referral,op referral", "CASH", true],
   ["OP referral – Online", "Referral fees", null, "referral,op referral", "BANK", true],
   ["IP referral", "Referral fees", null, "referral,ip referral", null, true],

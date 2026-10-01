@@ -40,7 +40,25 @@ export async function getDashboard(actor: Actor, q: { preset?: string; from?: st
     incomeSeries(trendRange, trendGranularity),
   ]);
   const alerts = settings.alerts.enabled ? await computeAlerts(actor, settings, today, current, previous) : [];
-  return { today, period, current, previous, comparison: compareSummaries(current, previous), collectionsByMode: modes, alerts, trend, trendGranularity, trendRange };
+  const expenseBasis = await expenseBasisFor(period.current);
+  return { today, period, current, previous, comparison: compareSummaries(current, previous), collectionsByMode: modes, alerts, trend, trendGranularity, trendRange, expenseBasis };
+}
+
+/**
+ * Why "Total Expenses" can differ from the expenses entered in the period: monthly items (salaries,
+ * rent…) count only their daily share. Returns what was entered with dates in the period and how much
+ * of the total is spread shares, both AED only (pharmacy-department costs excluded).
+ */
+async function expenseBasisFor(r: { from: ISODate; to: ISODate }) {
+  const [entered, spread] = await Promise.all([
+    prisma.$queryRaw<{ amount: number | null; n: bigint }[]>`
+      SELECT SUM(e.amount)::float AS amount, COUNT(*) AS n FROM "Expense" e LEFT JOIN "Department" d ON d.id = e."departmentId"
+       WHERE e.status = 'ACTIVE' AND e.date BETWEEN ${toDbDate(r.from)} AND ${toDbDate(r.to)} AND d.name IS DISTINCT FROM 'Pharmacy'`,
+    prisma.$queryRaw<{ amount: number | null }[]>`
+      SELECT SUM(amount)::float AS amount FROM v_expense_line
+       WHERE spread AND kind IN ('HOSPITAL', 'OTHER') AND date BETWEEN ${toDbDate(r.from)} AND ${toDbDate(r.to)}`,
+  ]);
+  return { entered: Math.round((entered[0]?.amount ?? 0) * 100) / 100, enteredCount: Number(entered[0]?.n ?? 0), spreadShare: Math.round((spread[0]?.amount ?? 0) * 100) / 100 };
 }
 
 async function computeAlerts(
