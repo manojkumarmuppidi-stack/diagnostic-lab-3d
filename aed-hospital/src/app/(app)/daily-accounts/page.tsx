@@ -2,7 +2,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Lock, LockOpen, FileDown } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Lock, LockOpen, FileDown } from "lucide-react";
 import { apiFetch, cn, download, useApi } from "@/lib/client";
 import { EXPENSE_LABELS, STREAM_LABELS, type Counts, type ExpenseByKind, type IncomeByStream, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { addDays, formatDate, formatDateTime } from "@/lib/dates";
@@ -47,6 +47,77 @@ interface Statement {
 
 const STEPS = ["OPEN", "REVIEW", "RECONCILED", "CLOSED"] as const;
 const MODE_LABEL: Record<string, string> = { CASH: "Cash", CARD: "Card", UPI: "UPI", BANK: "Bank transfer", OTHER: "Other" };
+
+interface DayLine {
+  id: string;
+  title: string;
+  detail: string | null;
+  mode: string | null;
+  reference: string | null;
+  amount: number;
+  spread?: boolean;
+  monthTotal?: number;
+}
+
+/** One statement figure; tap it to see the entries behind it on this day. */
+function DrillRow({ date, k, label, amount, href }: { date: string; k: string; label: string; amount: number; href: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <tr>
+        <td>
+          <button type="button" className="flex items-center gap-1 text-left hover:underline" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={!amount}>
+            {amount ? open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" /> : <span className="inline-block w-4" />}
+            {label}
+          </button>
+        </td>
+        <td className="num">{formatINR(amount, { paise: true })}</td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={2} className="!pt-0">
+            <DrillLines date={date} k={k} href={href} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function DrillLines({ date, k, href }: { date: string; k: string; href: string }) {
+  const { data, error, reload } = useApi<{ lines: DayLine[]; total: number }>(`/api/daily/${date}/lines?key=${k}`);
+  if (error) return <ErrorState error={error} onRetry={reload} />;
+  if (!data) return <Spinner />;
+  const spread = data.lines.filter((l) => l.spread);
+  return (
+    <div className="rounded-lg p-2 text-sm" style={{ background: "var(--surface-2)" }}>
+      {data.lines.length === 0 && <p className="muted">No entries.</p>}
+      <ul className="divide-y" style={{ borderColor: "var(--border)" }}>
+        {data.lines.map((l) => (
+          <li key={l.id} className="flex items-start justify-between gap-3 py-1.5">
+            <div className="min-w-0">
+              <div className="font-medium">{l.title}</div>
+              <div className="text-xs muted">
+                {[l.detail, l.mode, l.reference].filter(Boolean).join(" · ")}
+                {l.spread && l.monthTotal ? ` · daily share of ${formatINR(l.monthTotal)} for the month` : ""}
+              </div>
+            </div>
+            <span className="num shrink-0 tabular-nums">{formatINR(l.amount, { paise: true })}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-1 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <span className="muted">
+          {data.lines.length} entr{data.lines.length === 1 ? "y" : "ies"}
+          {spread.length ? ` · ${spread.length} monthly item${spread.length === 1 ? "" : "s"} spread over the month` : ""}
+        </span>
+        <Link className="underline" href={href}>
+          Open full list
+        </Link>
+      </div>
+    </div>
+  );
+}
 
 function DayView({ date }: { date: string }) {
   const { data, error, loading, reload } = useApi<Statement>(`/api/daily/${date}`);
@@ -147,14 +218,7 @@ function DayView({ date }: { date: string }) {
           <table className="table">
             <tbody>
               {AED_INCOME_STREAMS.map((s) => (
-                <tr key={s}>
-                  <td>
-                    <Link className="hover:underline" href={r(STREAM_HREF[s])}>
-                      {STREAM_LABELS[s]}
-                    </Link>
-                  </td>
-                  <td className="num">{formatINR(data.income[s], { paise: true })}</td>
-                </tr>
+                <DrillRow key={s} date={date} k={s} label={STREAM_LABELS[s]} amount={data.income[s]} href={r(STREAM_HREF[s])} />
               ))}
               <tr>
                 <td className="font-semibold">AED TOTAL INCOME</td>
@@ -166,22 +230,8 @@ function DayView({ date }: { date: string }) {
         <Card title="AED Hospital — expenses">
           <table className="table">
             <tbody>
-              <tr>
-                <td>
-                  <Link className="hover:underline" href={r("/expenses?group=HOSPITAL")}>
-                    {EXPENSE_LABELS.HOSPITAL}
-                  </Link>
-                </td>
-                <td className="num">{formatINR(data.expense.HOSPITAL, { paise: true })}</td>
-              </tr>
-              <tr>
-                <td>
-                  <Link className="hover:underline" href={r("/expenses?group=OTHER")}>
-                    {EXPENSE_LABELS.OTHER}
-                  </Link>
-                </td>
-                <td className="num">{formatINR(data.expense.OTHER, { paise: true })}</td>
-              </tr>
+              <DrillRow date={date} k="EXP_HOSPITAL" label={EXPENSE_LABELS.HOSPITAL} amount={data.expense.HOSPITAL} href={r("/expenses?group=HOSPITAL")} />
+              <DrillRow date={date} k="EXP_OTHER" label={EXPENSE_LABELS.OTHER} amount={data.expense.OTHER} href={r("/expenses?group=OTHER")} />
               <tr>
                 <td className="font-semibold">AED TOTAL EXPENSE</td>
                 <td className="num font-semibold">{formatINR(data.totalExpenses, { paise: true })}</td>
@@ -209,22 +259,8 @@ function DayView({ date }: { date: string }) {
           <div className="grid gap-4 sm:grid-cols-2">
             <table className="table">
               <tbody>
-                <tr>
-                  <td>
-                    <Link className="hover:underline" href={r("/pharmacy")}>
-                      Sales (net of returns)
-                    </Link>
-                  </td>
-                  <td className="num">{formatINR(data.income.PHARMACY, { paise: true })}</td>
-                </tr>
-                <tr>
-                  <td>
-                    <Link className="hover:underline" href={r("/pharmacy?tab=purchases")}>
-                      {EXPENSE_LABELS.PHARMACY_PURCHASE}
-                    </Link>
-                  </td>
-                  <td className="num">{formatINR(data.expense.PHARMACY_PURCHASE, { paise: true })}</td>
-                </tr>
+                <DrillRow date={date} k="PHARMACY" label="Sales (net of returns)" amount={data.income.PHARMACY} href={r("/pharmacy")} />
+                <DrillRow date={date} k="EXP_PHARMACY" label={EXPENSE_LABELS.PHARMACY_PURCHASE} amount={data.expense.PHARMACY_PURCHASE} href={r("/pharmacy?tab=purchases")} />
               </tbody>
             </table>
             <div className="text-sm">
