@@ -126,7 +126,7 @@ describe("Excel import", () => {
 
   it("rejects non-spreadsheet files and users without import permission", async () => {
     await expect(uploadFile(f.admin, "x.xlsx", Buffer.from("not a zip"), "opd")).rejects.toThrow(/Unsupported|corrupted/);
-    await expect(uploadFile(f.reception, "x.csv", Buffer.from("a,b\n1,2"), "opd")).rejects.toThrow(/permission/);
+    await expect(uploadFile(f.management, "x.csv", Buffer.from("a,b\n1,2"), "opd")).rejects.toThrow(/permission/);
   });
 
   it("CSV import works too", async () => {
@@ -372,5 +372,26 @@ describe("historical backfill into closed days", () => {
     expect(day.closedDrift).toBeNull();
     expect(day.events.some((e: any) => e.action === "BACKFILL")).toBe(true);
     expect(await prisma.expense.count({ where: { spreadMonth: true } })).toBe(1);
+  });
+});
+
+describe("import by reception and pharmacy staff", () => {
+  it("reception imports OPD, cannot import expenses, and sees only their own files", async () => {
+    const buf = await workbook({ "OPD Jan": OPD_ROWS });
+    const admin = await uploadFile(f.admin, "admin-opd.xlsx", buf, "opd");
+    const up = await uploadFile(f.reception, "opd.xlsx", buf, "opd");
+    const b = up.batches[0];
+    const v = await validateBatch(f.reception, b.id, { type: "opd", mapping: b.suggestion.mapping });
+    expect(v.summary.valid).toBeGreaterThan(0);
+    const r = await commitBatch(f.reception, b.id, { approveWarnings: true });
+    expect(r.imported).toBeGreaterThan(0);
+
+    await expect(validateBatch(f.reception, b.id, { type: "expense", mapping: {} })).rejects.toMatchObject({ status: 403 });
+    // Someone else's file is invisible to reception.
+    await expect(validateBatch(f.reception, admin.batches[0].id, { type: "opd", mapping: admin.batches[0].suggestion.mapping })).rejects.toThrow(/not found/i);
+    const { importHistory } = await import("@/server/services/import");
+    const h = await importHistory(f.reception, {});
+    expect(h.rows.map((x) => x.fileName)).toEqual(["opd.xlsx"]);
+    expect((await importHistory(f.admin, {})).total).toBe(2);
   });
 });

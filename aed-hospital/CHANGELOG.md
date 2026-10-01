@@ -2,6 +2,13 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.12.1: Reception and pharmacy can import their own reports
+- Import is limited to the modules a role may enter by hand: Reception → OPD and Diet; Pharmacy → pharmacy sales, returns, purchases, medicine lines and supplier payments. Importing expenses needs approval rights (imported expenses count at once). The type list on Excel Import shows only what the person may import.
+- Staff who cannot see the accounts see only the import files they uploaded (history, rows, error sheet).
+- Reception, Reception + expenses and Pharmacy roles get "import.run" (migration `20261005000000_import_for_reception_pharmacy`).
+- Daily Accounts: tap an entry under a figure to correct or void it.
+- Pop-up forms no longer lose the cursor after each key press; the staff-login form is no longer autofilled with the admin's own email and password.
+
 ## 0.12.0: Team logins, routine expenses, notifications; tap-to-see entries
 - **Daily Accounts:** tap any figure (IPD, Lab, Hospital expenses, …) to list the entries behind it on that day, with mode and reference; spread monthly items show as the day's share of the month.
 - **New roles** (created on the next deploy): *Accounts head* (everything Accounts does, plus approving staff expenses) and *Reception + expenses* (reception work plus entering expenses, which wait for approval). Admin / CEO creates logins and sets first passwords under Users & Permissions; each person must change the password at first sign-in.

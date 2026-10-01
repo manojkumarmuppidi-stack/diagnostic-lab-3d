@@ -38,7 +38,7 @@ export const PERMISSIONS = {
   "corrections.approve": { group: "Accounting", description: "Approve / reject correction requests" },
 
   // Import
-  "import.run": { group: "Import", description: "Upload, validate and import Excel files" },
+  "import.run": { group: "Import", description: "Upload and import Excel files — only for the modules the role can enter (expenses need approval rights)" },
   "import.override_duplicates": { group: "Import", description: "Import duplicate rows anyway" },
   "import.reverse": { group: "Import", description: "Reverse an entire import batch" },
 
@@ -86,12 +86,12 @@ export const ROLE_DEFS: Record<string, { name: string; description: string; perm
   RECEPTION: {
     name: "Reception",
     description: "OPD and consultation transactions",
-    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "diet.view", "diet.write", "patients.view_identity"],
+    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "diet.view", "diet.write", "import.run", "patients.view_identity"],
   },
   RECEPTION_EXPENSES: {
     name: "Reception + expenses",
     description: "Reception work, and entering day-to-day expenses (they wait for the accounts head's approval; staff see only their own)",
-    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "diet.view", "diet.write", "expense.view", "expense.write", "patients.view_identity"],
+    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "diet.view", "diet.write", "expense.view", "expense.write", "import.run", "patients.view_identity"],
   },
   IPD_STAFF: {
     name: "IPD Staff",
@@ -106,7 +106,7 @@ export const ROLE_DEFS: Record<string, { name: string; description: string; perm
   PHARMACY: {
     name: "Pharmacy",
     description: "Pharmacy sales, purchases and returns",
-    permissions: ["dashboard.view", "search.use", "pharmacy.view", "pharmacy.write", "patients.view_identity"],
+    permissions: ["dashboard.view", "search.use", "pharmacy.view", "pharmacy.write", "import.run", "patients.view_identity"],
   },
   MANAGEMENT: {
     name: "Management",

@@ -11,7 +11,7 @@ import { fromDbDate, todayISO, toDbDate, type ISODate } from "@/lib/dates";
 import { suggestMapping, missingRequired, type Mapping } from "@/lib/import/mapping";
 import { normalizeRow, parsePlaceholder, NEW_PREFIX, type MasterCtx, type NewMasterType } from "@/lib/import/normalize";
 import { norm } from "@/lib/import/text";
-import { IMPORT_TYPES, MODULES, importFieldsFor, isImportType, type ImportType, type ModuleKey } from "@/lib/modules";
+import { IMPORT_PERMS, IMPORT_TYPES, MODULES, importFieldsFor, isImportType, type ImportType, type ModuleKey } from "@/lib/modules";
 import { round2, toNum } from "@/lib/money";
 import { MODULE_SCHEMAS, zodErrorMap } from "@/lib/schemas";
 import { audit } from "../audit";
@@ -184,12 +184,33 @@ function labelFor(module: ModuleKey, key: string) {
   return MODULES[module].fields.find((f) => f.key === key)?.label ?? key;
 }
 
+/** Staff who cannot see the accounts see only the import files they uploaded themselves. */
+const ownBatchesOnly = (actor: Actor) => !can(actor, "accounts.view");
+function assertBatchVisible(actor: Actor, batch: { uploadedById: string } | null): asserts batch {
+  if (!batch || (ownBatchesOnly(actor) && batch.uploadedById !== actor.id)) throw notFound("Import batch not found");
+}
+
+/** A person may import only what they may enter by hand (and expenses only if they can approve them). */
+function assertCanImport(actor: Actor, type: ImportType) {
+  const missing = (IMPORT_PERMS[type] ?? []).filter((p) => !can(actor, p));
+  if (!missing.length) return;
+  const label = IMPORT_TYPES.find((t) => t.key === type)?.label ?? type;
+  throw new AppError(
+    403,
+    type === "expense" || type === "combined-expense"
+      ? `${label} can only be imported by someone who approves expenses — imported expenses count at once. Enter them one by one instead; they will wait for approval.`
+      : `Your role cannot import ${label}.`,
+    "FORBIDDEN",
+  );
+}
+
 export async function validateBatch(actor: Actor, batchId: string, raw: unknown) {
   requirePermission(actor, "import.run");
   const { type, mapping, intoClosedDays } = validateInput.parse(raw) as { type: ImportType; mapping: Mapping; intoClosedDays?: boolean };
   if (intoClosedDays) requirePermission(actor, "accounts.reopen");
+  assertCanImport(actor, type);
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
-  if (!batch) throw notFound("Import batch not found");
+  assertBatchVisible(actor, batch);
   if (!["UPLOADED", "VALIDATED"].includes(batch.status)) throw badRequest(`Batch is already ${batch.status.toLowerCase()}`);
   const fields = importFieldsFor(type);
   const missing = missingRequired(mapping, fields);
@@ -613,7 +634,7 @@ async function commitSideBatch<I>(spec: SideSpec<I>, actor: Actor, batch: { id: 
 export async function getBatch(actor: Actor, batchId: string) {
   requirePermission(actor, "import.run");
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
-  if (!batch) throw notFound();
+  assertBatchVisible(actor, batch);
   const outcomes = await prisma.importRecord.findMany({ where: { batchId }, select: { status: true, errors: true, warnings: true, normalized: true } });
   const summary = summarize(outcomes.map((o) => ({ status: o.status, errors: (o.errors as string[]) ?? [], warnings: (o.warnings as string[]) ?? [], normalized: o.normalized })));
   const uploader = await prisma.user.findUnique({ where: { id: batch.uploadedById }, select: { name: true } });
@@ -628,6 +649,7 @@ export async function getBatch(actor: Actor, batchId: string) {
 
 export async function listRows(actor: Actor, batchId: string, q: { status?: string; page?: string; pageSize?: string }) {
   requirePermission(actor, "import.run");
+  if (ownBatchesOnly(actor)) assertBatchVisible(actor, await prisma.importBatch.findUnique({ where: { id: batchId }, select: { uploadedById: true } }));
   const page = Math.max(1, Number(q.page) || 1);
   const pageSize = Math.min(200, Number(q.pageSize) || 50);
   const statuses = q.status ? (q.status.split(",") as ImportRowStatus[]) : undefined;
@@ -739,8 +761,9 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
   requirePermission(actor, "import.run");
   const opts = commitInput.parse(raw);
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
-  if (!batch) throw notFound();
+  assertBatchVisible(actor, batch);
   if (batch.status !== "VALIDATED") throw badRequest(batch.status === "UPLOADED" ? "Validate the batch first" : `Batch is already ${batch.status.toLowerCase()}`);
+  assertCanImport(actor, batch.module as ImportType);
   const side = SIDE_SPECS[batch.module as ImportType];
   if (side) return commitSideBatch(side, actor, batch, opts);
   const records = await prisma.importRecord.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } });
@@ -846,7 +869,7 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
 export async function cancelBatch(actor: Actor, batchId: string) {
   requirePermission(actor, "import.run");
   const b = await prisma.importBatch.findUnique({ where: { id: batchId } });
-  if (!b) throw notFound();
+  assertBatchVisible(actor, b);
   if (!["UPLOADED", "VALIDATED"].includes(b.status)) throw badRequest("Only un-imported batches can be cancelled");
   await prisma.$transaction(async (tx) => {
     await tx.importBatch.update({ where: { id: batchId }, data: { status: "CANCELLED" } });
@@ -908,10 +931,11 @@ export async function reverseBatch(actor: Actor, batchId: string, raw: unknown) 
 
 export async function importHistory(actor: Actor, q: { page?: string }) {
   requirePermission(actor, "import.run");
+  const mine = ownBatchesOnly(actor) ? { uploadedById: actor.id } : {};
   const page = Math.max(1, Number(q.page) || 1);
   const [rows, total] = await Promise.all([
-    prisma.importBatch.findMany({ orderBy: { createdAt: "desc" }, skip: (page - 1) * 30, take: 30 }),
-    prisma.importBatch.count(),
+    prisma.importBatch.findMany({ where: mine, orderBy: { createdAt: "desc" }, skip: (page - 1) * 30, take: 30 }),
+    prisma.importBatch.count({ where: mine }),
   ]);
   const users = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.flatMap((r) => [r.uploadedById, r.reversedById].filter(Boolean) as string[]))] } }, select: { id: true, name: true } });
   return {
@@ -932,7 +956,7 @@ export async function importHistory(actor: Actor, q: { page?: string }) {
 export async function errorWorkbook(actor: Actor, batchId: string): Promise<Buffer> {
   requirePermission(actor, "import.run");
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
-  if (!batch) throw notFound();
+  assertBatchVisible(actor, batch);
   const rows = await prisma.importRecord.findMany({
     where: { batchId, status: { in: ["INVALID", "DUPLICATE", "WARNING", "SKIPPED"] } },
     orderBy: { rowNumber: "asc" },

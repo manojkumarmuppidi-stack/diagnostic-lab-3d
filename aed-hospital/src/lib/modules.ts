@@ -534,3 +534,29 @@ export function viewPerm(m: ModuleKey): PermissionCode {
 export function writePerm(m: ModuleKey): PermissionCode {
   return `${MODULES[m].perm}.write` as PermissionCode;
 }
+
+/**
+ * Permissions needed to import each type, on top of "import.run": a person may import only what
+ * they may enter by hand. Expenses also need approval rights, because imported expenses count at
+ * once (they do not go through the approval queue).
+ */
+export const IMPORT_PERMS: Record<ImportType, PermissionCode[]> = {
+  opd: ["opd.write"],
+  ipd: ["ipd.write"],
+  lab: ["lab.write"],
+  "pharmacy-sale": ["pharmacy.write"],
+  "pharmacy-return": ["pharmacy.write"],
+  "pharmacy-purchase": ["pharmacy.write"],
+  diet: ["diet.write"],
+  "other-income": ["income.write"],
+  expense: ["expense.write", "expense.approve"],
+  "combined-income": ["opd.write", "ipd.write", "lab.write", "pharmacy.write", "diet.write", "income.write"],
+  "combined-expense": ["expense.write", "expense.approve", "pharmacy.write"],
+  "pharmacy-items": ["pharmacy.write"],
+  "supplier-payments": ["pharmacy.write"],
+};
+
+/** Import types this set of permissions may use. */
+export function importTypesFor(has: (p: PermissionCode) => boolean): ImportType[] {
+  return IMPORT_TYPES.map((t) => t.key).filter((k) => IMPORT_PERMS[k].every(has));
+}

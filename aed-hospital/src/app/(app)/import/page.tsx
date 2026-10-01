@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CheckCircle2, Download, FileSpreadsheet, RotateCcw, Upload, XCircle } from "lucide-react";
 import { apiFetch, ApiError, download, qs, useApi } from "@/lib/client";
-import { IMPORT_TYPES, importFieldsFor, type FieldDef, type ImportType } from "@/lib/modules";
+import { IMPORT_TYPES as ALL_IMPORT_TYPES, importFieldsFor, importTypesFor, type FieldDef, type ImportType } from "@/lib/modules";
 import { formatDateTime } from "@/lib/dates";
 import { formatINR, formatNumber } from "@/lib/money";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, PageHeader, Spinner, StatusBadge, Tabs, useToast } from "@/components/ui";
@@ -28,6 +28,13 @@ interface UploadedBatch {
   note?: string | null;
 }
 
+/** The import types this person may use (e.g. reception: OPD and diet; expenses need approval rights). */
+function useImportTypes() {
+  const can = useCan();
+  const allowed = new Set(importTypesFor(can));
+  return ALL_IMPORT_TYPES.filter((t) => allowed.has(t.key));
+}
+
 /** Admin historical backfill (rows may land on closed days), toggled on the page and kept in the URL. */
 function useBackfill() {
   return useSearchParams().get("backfill") === "1";
@@ -36,6 +43,7 @@ function useBackfill() {
 // ─────────────────────────── step 1: upload ───────────────────────────
 
 function UploadStep({ onUploaded }: { onUploaded: (b: UploadedBatch[], fileName: string) => void }) {
+  const IMPORT_TYPES = useImportTypes();
   const [type, setType] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -116,6 +124,7 @@ function UploadStep({ onUploaded }: { onUploaded: (b: UploadedBatch[], fileName:
 // ─────────────────────────── step 2: mapping ───────────────────────────
 
 function MappingStep({ batch, onValidated }: { batch: UploadedBatch; onValidated: () => void }) {
+  const IMPORT_TYPES = useImportTypes();
   const backfill = useBackfill();
   const [type, setType] = useState<ImportType>(batch.type);
   const fields = useMemo(() => importFieldsFor(type), [type]);

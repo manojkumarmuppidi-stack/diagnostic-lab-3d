@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ALL_PERMISSIONS, ROLE_DEFS, maskName } from "@/lib/permissions";
+import { importTypesFor } from "@/lib/modules";
 import { DAY_TRANSITIONS, nextStatus } from "@/server/closing";
 
 describe("role matrix", () => {
@@ -22,6 +23,14 @@ describe("role matrix", () => {
       expect(has(r, "import.override_duplicates")).toBe(false);
       expect(has(r, "import.reverse")).toBe(false);
     }
+  });
+  it("reception and pharmacy import only what they can enter; expenses need approval rights", () => {
+    const types = (role: string) => importTypesFor((p) => has(role, p));
+    expect(types("RECEPTION")).toEqual(["opd", "diet"]);
+    expect(types("RECEPTION_EXPENSES")).toEqual(["opd", "diet"]);
+    expect(types("PHARMACY")).toEqual(["pharmacy-sale", "pharmacy-return", "pharmacy-purchase", "pharmacy-items", "supplier-payments"]);
+    expect(types("ACCOUNTS_HEAD")).toContain("expense");
+    expect(types("ACCOUNTS")).not.toContain("expense");
   });
   it("masks patient names", () => {
     expect(maskName("Ramesh Kumar")).toBe("R***h K***r");
