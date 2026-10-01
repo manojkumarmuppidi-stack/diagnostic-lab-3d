@@ -2,6 +2,13 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.9.2: OneGlance OP bill collection export; exact payment modes
+- A second OneGlance OPD export (BillNo, Bill Date, Visit Purpose, Cash / Online / Cheque / OneGlance Wallet) is recognised. It converts to OPD (and Diet) **with payment modes**: Online → UPI, Wallet → Other. A bill paid in two modes goes under the larger one, with the split in Remarks.
+- That export has no consultation name. Specialty is General unless Visit Purpose names one. New/Old comes from the patient registration number: a bill whose patient ID is higher than every ID billed before it is a new registration.
+- **Exact payment modes**: new modes **GPay** and **PhonePe** (both reconcile under UPI), alongside Cash, Card, UPI, Bank Transfer and Cheque. Imports record "cheque", "Google Pay" and "Phone Pe" as Cheque / GPay / PhonePe instead of the generic Bank / UPI.
+- Expenses → Month-wise has a **by payment mode** view.
+- Import duplicate check: a OneGlance OPD/diet bill already in the app (same `OP-<bill no>` on the same date) is flagged as a duplicate, even when the two exports disagree on specialty.
+
 ## 0.9.1: Cash book repeats are kept
 - Cash-book lines without a cheque number get the cash-book row as their reference (`CB-412`). Genuine repeats on one day (three ₹10,000 payments to one doctor, several ₹1,000 per-case charges) are no longer dropped as duplicates; re-uploading the same cash book is still caught.
 

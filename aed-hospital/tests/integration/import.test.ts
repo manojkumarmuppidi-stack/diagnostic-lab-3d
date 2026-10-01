@@ -298,3 +298,26 @@ describe("cash book", () => {
     expect(sp.map((p) => [p.supplier, Number(p.amount)])).toEqual([["Vijaya Pharma", 12443]]);
   });
 });
+
+describe("OneGlance bill numbers", () => {
+  it("a bill already imported from another OneGlance export is a duplicate even when specialty differs", async () => {
+    const opdA =
+      "x\nx\nOutpatient Collection Report\n\nBillNO,BillDate,BillTime,Patientid,PatientName,DoctorName,Particulars,Quantity,BillAmount,ToatlAmount,Discount,S/C,Refferby,Category,UHID,Area,Admit No\n" +
+      '"5001","03-01-2026","08:00","9001","Miss.DEMO A(30)","Dr.Demo","Thyroid New Consultation","1","600","600","0","0","","","","",""\n';
+    const up1 = await uploadFile(f.admin, "op1.csv", Buffer.from(opdA));
+    for (const b of up1.batches) {
+      await validateBatch(f.admin, b.id, { type: b.type, mapping: b.suggestion.mapping });
+      await commitBatch(f.admin, b.id, { approveWarnings: true });
+    }
+    const H = "BillNo,PatientID,Bill Date,BillTime,PatientName,DoctorName,TotalAmount,DiscAmount,BillAmount,PaidAmount,S/C,Due,Visit Purpose,Billby,Refferby,Category,Area,Admit No,BillID,ReceivedDate,paidvalue,Pstatus,paymentdetails,Cash,Cheque,Online,OneGlance Wallet\n";
+    const opdB = H + '"5001","9001","03-01-2026","08:00 AM","Miss.DEMO A(30)","Dr.Demo","600","0","600","600","0","0","CONSULTATION","Desk","","","","","","","","","","600","0","0","0"\n' +
+      '"5002","9002","03-01-2026","08:10 AM","Mr.DEMO B(40)","Dr.Demo","600","0","600","600","0","0","CONSULTATION","Desk","","","","","","","","","","0","0","600","0"\n';
+    const up2 = await uploadFile(f.admin, "op2.csv", Buffer.from(opdB));
+    expect(up2.batches.map((b) => b.type)).toEqual(["opd"]);
+    const v = await validateBatch(f.admin, up2.batches[0].id, { type: "opd", mapping: up2.batches[0].suggestion.mapping });
+    expect(v.summary).toMatchObject({ total: 2, duplicates: 1 });
+    await commitBatch(f.admin, up2.batches[0].id, { approveWarnings: true });
+    expect(await prisma.consultation.count({ where: { status: "ACTIVE" } })).toBe(2);
+  });
+});
+

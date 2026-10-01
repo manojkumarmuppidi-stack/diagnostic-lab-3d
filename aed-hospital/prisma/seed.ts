@@ -127,6 +127,9 @@ const PAYMENT_MODES: [string, string, "CASH" | "CARD" | "UPI" | "BANK" | "OTHER"
   ["CASH", "Cash", "CASH"],
   ["CARD", "Card", "CARD"],
   ["UPI", "UPI", "UPI"],
+  // GPay and PhonePe are kept apart so staff record exactly how they paid; both reconcile under UPI.
+  ["GPAY", "GPay", "UPI"],
+  ["PHONEPE", "PhonePe", "UPI"],
   ["BANK", "Bank Transfer", "BANK"],
   ["CHEQUE", "Cheque", "BANK"],
   ["OTHER", "Other", "OTHER"],

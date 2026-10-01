@@ -7,6 +7,7 @@
  * sheets then go through the normal validate → review → commit pipeline unchanged.
  *
  *  - Outpatient Collection Report       → OPD (+ Diet for "Diet Follow up" bills)
+ *  - OP bill collection (Bill Date, Visit Purpose, Cash/Online…) → OPD with payment modes
  *  - Bill Item Wise Collection          → Laboratory (one row per test / service line)
  *  - Pharmacy Collection Report (daily) → Pharmacy sales per payment mode + refunds
  *  - Lab Bill Collection                → rejected with guidance (bill totals, no test names)
@@ -34,10 +35,11 @@ export interface ConvertedSheet extends RawSheet {
   note: string;
   source: HmsReport;
 }
-export type HmsReport = "oneglance-opd" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book";
+export type HmsReport = "oneglance-opd" | "oneglance-opd-collection" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book";
 
 export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-opd": "OneGlance · Outpatient Collection Report",
+  "oneglance-opd-collection": "OneGlance · OP bill collection (with payment modes)",
   "oneglance-lab-items": "OneGlance · Bill Item Wise Collection",
   "oneglance-pharmacy-daily": "OneGlance · Pharmacy Collection Report (daily totals)",
   "oneglance-lab-bills": "OneGlance · Lab Bill Collection",
@@ -54,6 +56,7 @@ const has = (headers: string[], ...names: string[]) => {
 
 export function detectHmsReport(headers: string[]): HmsReport | null {
   if (has(headers, "BillNO", "DoctorName", "Particulars", "ToatlAmount", "Discount")) return "oneglance-opd";
+  if (has(headers, "BillNo", "Bill Date", "DoctorName", "DiscAmount", "BillAmount", "Visit Purpose")) return "oneglance-opd-collection";
   if (has(headers, "Bill NO", "Particulars", "Accountgroup", "Itemdiscount", "NetAmount")) return "oneglance-lab-items";
   if (has(headers, "Bill Date", "Net Revenue", "Pending Collected", "paidvalue", "Cash")) return "oneglance-pharmacy-daily";
   if (has(headers, "BillNo", "RefLab", "RefferedBY", "PaidAmount", "Cash")) return "oneglance-lab-bills";
@@ -228,6 +231,84 @@ function convertOpd(sheet: RawSheet): ConvertedSheet[] {
   return [
     ...byMonth("oneglance-opd", sheet.name, "opd", "OPD", OPD_HEADERS, opd, note),
     ...byMonth("oneglance-opd", sheet.name, "diet", "Diet", DIET_HEADERS, diet, note),
+  ];
+}
+
+/**
+ * OneGlance OP bill collection: one row per OPD bill with the amount paid per payment mode, but no
+ * consultation name. New/Old: patient IDs are issued in sequence, so a bill whose patient ID is higher
+ * than every ID billed before it (in bill-number order) is a new registration; "new"/"follow up" in
+ * Visit Purpose wins when present. Specialty comes from Visit Purpose when it names one, else General.
+ */
+const MODE_COLUMNS: [string, string][] = [["Cash", "Cash"], ["Online", "UPI"], ["Cheque", "Cheque"], ["OneGlance Wallet", "Other"]];
+function convertOpdCollection(sheet: RawSheet): ConvertedSheet[] {
+  const src = sheet.rows.map((r) => ({ rowNumber: r.rowNumber, g: getter(r.values) })).filter((r) => r.g("BillNo") && r.g("Bill Date"));
+  const ordered = [...src].sort((a, b) => num(a.g("BillNo")) - num(b.g("BillNo")));
+  let maxId = -Infinity;
+  let first = true;
+  const opd: Out[] = [];
+  const diet: Out[] = [];
+  let split = 0;
+  let unpaid = 0;
+  for (const { rowNumber, g } of ordered) {
+    const purpose = cleanText(g("Visit Purpose"));
+    const pid = g("PatientID");
+    const idNum = num(pid);
+    let vt = visitTypeFor(purpose);
+    if (!vt) vt = !first && idNum > maxId ? "New" : "Old";
+    if (idNum > maxId) maxId = idNum;
+    first = false;
+    const total = num(g("TotalAmount"));
+    const discount = num(g("DiscAmount"));
+    const net = num(g("BillAmount")) || r2(total - discount);
+    const paid = MODE_COLUMNS.map(([col, mode]) => [mode, num(g(col))] as const).filter(([, a]) => a > 0);
+    let mode = "Other";
+    const notes: string[] = [];
+    if (paid.length) {
+      mode = [...paid].sort((a, b) => b[1] - a[1])[0][0];
+      if (paid.length > 1) {
+        split++;
+        notes.push(`Paid ${paid.map(([m, a]) => `${m} ${a}`).join(" + ")}`);
+      }
+    } else {
+      unpaid++;
+      notes.push("No payment recorded in the export");
+    }
+    const due = num(g("Due"));
+    if (due > 0) notes.push(`Due ${due}`);
+    const refBy = cleanText(g("Refferby"));
+    const area = cleanText(g("Area"));
+    if (refBy) notes.push(`Ref: ${refBy}`);
+    if (area) notes.push(`Area: ${area}`);
+    const base = {
+      Date: g("Bill Date"),
+      "Patient ID": pid,
+      "Patient Name": cleanPatient(g("PatientName")),
+      Amount: total,
+      Discount: discount,
+      "Net Amount": net,
+      "Payment Mode": mode,
+      Reference: `OP-${g("BillNo")}`,
+      Remarks: notes.join(" · "),
+    };
+    if (/\bdiet\b/i.test(purpose)) {
+      diet.push({ rowNumber, values: { ...base, Service: purpose || "Diet consultation" } });
+      continue;
+    }
+    const consult = purpose ? purpose.charAt(0) + purpose.slice(1).toLowerCase() : "Consultation";
+    opd.push({ rowNumber, values: { ...base, Doctor: cleanDoctor(g("DoctorName")), Specialty: specialtyFor(purpose), "Consultation Type": consult, "New/Old": vt } });
+  }
+  const note =
+    `${opd.length.toLocaleString("en-IN")} OPD bills` +
+    (diet.length ? ` and ${diet.length} diet bills` : "") +
+    ` with payment modes (Cash, Online → UPI, Cheque, Wallet → Other)` +
+    (split ? `; ${split} bills paid in two modes are recorded under the larger one (split in Remarks)` : "") +
+    (unpaid ? `; ${unpaid} bills with no payment are recorded under Other` : "") +
+    `. This export has no consultation name, so specialty is General unless Visit Purpose names one, and New/Old comes from the patient registration number. ` +
+    `Bills already in the app (same OP bill number and date) are flagged as duplicates.`;
+  return [
+    ...byMonth("oneglance-opd-collection", sheet.name, "opd", "OPD", OPD_HEADERS, opd, note),
+    ...byMonth("oneglance-opd-collection", sheet.name, "diet", "Diet", DIET_HEADERS, diet, note),
   ];
 }
 
@@ -575,6 +656,8 @@ export function convertHmsSheet(sheet: RawSheet): ConvertedSheet[] | null {
   switch (kind) {
     case "oneglance-opd":
       return convertOpd(sheet);
+    case "oneglance-opd-collection":
+      return convertOpdCollection(sheet);
     case "oneglance-lab-items":
       return convertLabItems(sheet);
     case "oneglance-pharmacy-daily":

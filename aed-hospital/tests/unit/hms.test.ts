@@ -197,3 +197,33 @@ describe("supplier payments", () => {
     expect(out[0].rows[0].values).toMatchObject({ Supplier: "DEMO ENTERPRISES", Details: "593677,INVOICE NO MK12106", "Amount paid": 336 });
   });
 });
+
+describe("OneGlance OP bill collection (with payment modes)", () => {
+  const H = ["BillNo", "PatientID", "Bill Date", "BillTime", "PatientName", "DoctorName", "TotalAmount", "DiscAmount", "BillAmount", "PaidAmount", "S/C", "Due", "Visit Purpose", "Billby", "Refferby", "Category", "Area", "Admit No", "BillID", "ReceivedDate", "paidvalue", "Pstatus", "paymentdetails", "Cash", "Cheque", "Online", "OneGlance Wallet"];
+  const row = (bill: number, pid: number, date: string, total: number, disc: number, net: number, purpose: string, cash: number, online: number) =>
+    [bill, pid, date, "08:00 AM", "Miss.DEMO A(24)", "Dr.Demo Doctor", total, disc, net, net, 0, 0, purpose, "Desk", "Google", "", "KPHB", "", "", "", "", "", "", cash, 0, online, 0];
+  it("is recognised and converted with payment modes, New/Old from the registration number", () => {
+    expect(detectHmsReport(H)).toBe("oneglance-opd-collection");
+    const out = convertHmsSheet(
+      sheet(H, [
+        row(100, 500, "03-01-2026", 600, 0, 600, "CONSULTATION", 600, 0),
+        row(101, 512, "03-01-2026", 1200, 200, 1000, "CONSULTATION", 400, 600),
+        row(102, 480, "04-01-2026", 600, 0, 600, "CONSULTATION", 0, 600),
+        row(103, 513, "05-02-2026", 500, 0, 500, "DIET CONSULTATION", 500, 0),
+      ]),
+    )!;
+    expect(out.map((s) => [s.type, s.name, s.rows.length])).toEqual([
+      ["opd", "OPD Jan 2026", 3],
+      ["diet", "Diet Feb 2026", 1],
+    ]);
+    const v = out[0].rows.map((r) => r.values);
+    expect(v.map((x) => [x["New/Old"], x["Net Amount"], x["Payment Mode"], x.Reference])).toEqual([
+      ["Old", 600, "Cash", "OP-100"],
+      ["New", 1000, "UPI", "OP-101"],
+      ["Old", 600, "UPI", "OP-102"],
+    ]);
+    expect(String(v[1].Remarks)).toContain("Paid Cash 400 + UPI 600");
+    expect(v[0].Specialty).toBe("General");
+  });
+});
+

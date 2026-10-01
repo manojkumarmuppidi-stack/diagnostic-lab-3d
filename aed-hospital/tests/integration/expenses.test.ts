@@ -106,3 +106,14 @@ describe("monthly heads", () => {
     expect(p.grandTotal).toBe(4100);
   });
 });
+
+describe("month-wise by payment mode", () => {
+  it("shows exactly how the money was paid", async () => {
+    await createTransaction(f.admin, "expense", { ...veg(400), paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "expense", { ...veg(900), description: "Veg 2", paymentModeId: f.ids.UPI });
+    await createTransaction(f.admin, "expense", { ...veg(150000), description: "Rent", paymentModeId: f.ids.BANK });
+    const p = await expensePivot(f.accounts, { from: "2026-09-01", to: "2026-09-30", by: "mode" });
+    expect(Object.fromEntries(p.lines.map((l) => [l.label, l.total]))).toEqual({ Cash: 400, UPI: 900, "Bank Transfer": 150000 });
+  });
+});
+

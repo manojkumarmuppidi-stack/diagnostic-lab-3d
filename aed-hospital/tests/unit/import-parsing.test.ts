@@ -70,6 +70,19 @@ describe("payment modes & visit types", () => {
     expect(parsePaymentMode("Debit Card", modes)).toMatchObject({ ok: true, value: { code: "CARD" } });
     expect(parsePaymentMode("cash", modes)).toMatchObject({ ok: true, value: { code: "CASH" } });
   });
+  it("records cheque, GPay and PhonePe exactly when those modes exist", () => {
+    const more = [
+      ...modes,
+      { id: "g", code: "GPAY", name: "GPay", reconGroup: "UPI" as const },
+      { id: "p", code: "PHONEPE", name: "PhonePe", reconGroup: "UPI" as const },
+      { id: "c", code: "CHEQUE", name: "Cheque", reconGroup: "BANK" as const },
+    ];
+    expect(parsePaymentMode("Google Pay", more)).toMatchObject({ ok: true, value: { code: "GPAY" } });
+    expect(parsePaymentMode("Phone Pe", more)).toMatchObject({ ok: true, value: { code: "PHONEPE" } });
+    expect(parsePaymentMode("chq", more)).toMatchObject({ ok: true, value: { code: "CHEQUE" } });
+    expect(parsePaymentMode("paytm", more)).toMatchObject({ ok: true, value: { code: "UPI" } });
+    expect(parsePaymentMode("NEFT", more)).toMatchObject({ ok: true, value: { code: "BANK" } });
+  });
   it("unknown / blank modes become Other with a warning", () => {
     const r = parsePaymentMode("crypto", modes);
     expect(r).toMatchObject({ ok: true, value: { code: "OTHER" } });

@@ -142,6 +142,12 @@ const MODE_SYNONYMS: Record<ReconCode, string[]> = {
   OTHER: ["other", "others", "insurance", "tpa", "credit", "wallet", "adjustment"],
 };
 
+const SPECIFIC_MODES: Record<string, string[]> = {
+  CHEQUE: ["cheque", "chq", "check", "cheque payment"],
+  GPAY: ["gpay", "g pay", "google pay", "googlepay"],
+  PHONEPE: ["phonepe", "phone pe", "phone pay", "phonepay"],
+};
+
 export interface ModeLike {
   id: string;
   code: string;
@@ -163,6 +169,13 @@ export function parsePaymentMode(v: unknown, modes: ModeLike[]): Parsed<ModeLike
   }
   const exact = modes.find((m) => norm(m.code) === s || norm(m.name) === s);
   if (exact) return { ok: true, value: exact };
+  // Specific modes first, so "cheque" is recorded as Cheque and "Google Pay" as GPay when those exist.
+  for (const [code, words] of Object.entries(SPECIFIC_MODES)) {
+    if (words.includes(s) || words.includes(s.replace(/ /g, ""))) {
+      const m = modes.find((x) => norm(x.code) === norm(code));
+      if (m) return { ok: true, value: m };
+    }
+  }
   for (const [group, words] of Object.entries(MODE_SYNONYMS) as [ReconCode, string[]][]) {
     if (words.includes(s) || words.some((w) => s.split(" ").includes(w) && w.length >= 3)) {
       const m = modes.find((x) => x.reconGroup === group && norm(x.code) === norm(group)) ?? modes.find((x) => x.reconGroup === group);

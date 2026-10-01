@@ -233,7 +233,7 @@ function Checklist({ onSaved }: { onSaved: () => void }) {
 function MonthWise() {
   const [to, setTo] = useState(todayISO());
   const [from, setFrom] = useState<string>(startOfMonth(addMonths(todayISO(), -5)));
-  const [by, setBy] = useState<"category" | "subcategory" | "head">("category");
+  const [by, setBy] = useState<"category" | "subcategory" | "head" | "mode">("category");
   const { data, error, reload } = useApi<any>(`/api/expenses/pivot${qs({ from, to, by })}`);
   const csv = () => {
     if (!data) return;
@@ -265,6 +265,7 @@ function MonthWise() {
             <option value="category">Category</option>
             <option value="subcategory">Category / subcategory</option>
             <option value="head">Expense head</option>
+            <option value="mode">Payment mode (cash, cheque, GPay, PhonePe…)</option>
           </select>
         </label>
         <Button variant="secondary" onClick={csv} disabled={!data}>
@@ -282,7 +283,7 @@ function MonthWise() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>{by === "head" ? "Head" : "Category"}</th>
+                    <th>{by === "head" ? "Head" : by === "mode" ? "Paid by" : "Category"}</th>
                     {data.months.map((m: string) => (
                       <th key={m} className="num">
                         {monthLabel(m)}

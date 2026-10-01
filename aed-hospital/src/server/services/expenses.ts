@@ -145,19 +145,22 @@ export async function expensePivot(actor: Actor, q: { from?: string; to?: string
   requirePermission(actor, "expense.view");
   const to = q.to && isISODate(q.to) ? q.to : todayISO();
   const from = q.from && isISODate(q.from) ? q.from : startOfMonth(addMonths(to, -5));
-  const by = q.by === "head" ? "head" : q.by === "subcategory" ? "subcategory" : "category";
+  const by = q.by === "head" ? "head" : q.by === "subcategory" ? "subcategory" : q.by === "mode" ? "mode" : "category";
   const rows = await prisma.$queryRaw<{ label: string; grp: string; month: string; amount: Prisma.Decimal; n: bigint }[]>`
     SELECT ${
-      by === "head"
+      by === "mode"
+        ? Prisma.sql`COALESCE(pm.name, 'Not recorded')`
+        : by === "head"
         ? Prisma.sql`COALESCE(h.name, '(no head) ' || c.name)`
         : by === "subcategory"
           ? Prisma.sql`c.name || COALESCE(' / ' || s.name, '')`
           : Prisma.sql`c.name`
-    } AS label, c."group"::text AS grp, to_char(e.date, 'YYYY-MM') AS month, SUM(e.amount) AS amount, COUNT(*) AS n
+    } AS label, ${by === "mode" ? Prisma.sql`'MODE'` : Prisma.sql`c."group"::text`} AS grp, to_char(e.date, 'YYYY-MM') AS month, SUM(e.amount) AS amount, COUNT(*) AS n
       FROM "Expense" e
       JOIN "ExpenseCategory" c ON c.id = e."categoryId"
       LEFT JOIN "ExpenseCategory" s ON s.id = e."subcategoryId"
       LEFT JOIN "ExpenseHead" h ON h.id = e."headId"
+      LEFT JOIN "PaymentMode" pm ON pm.id = e."paymentModeId"
      WHERE e.status = 'ACTIVE' AND e.date BETWEEN ${D(from as ISODate)} AND ${D(to as ISODate)}
      GROUP BY 1, 2, 3`;
   const purchases = await prisma.$queryRaw<{ month: string; amount: Prisma.Decimal; n: bigint }[]>`

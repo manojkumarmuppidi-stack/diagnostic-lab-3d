@@ -213,6 +213,7 @@ export async function validateBatch(actor: Actor, batchId: string, raw: unknown)
   const statuses = await getDayStatuses(prisma, dates);
   const fps = results.map((r) => r.fingerprint).filter(Boolean) as string[];
   const existing = await findExistingFingerprints(fps);
+  const byBill = await findExistingOneGlanceBills(results.map((r) => r.n));
   const seen = new Map<string, number>();
   const outcomes: RowOutcome[] = results.map((r) => {
     const date = (r.n.input?.date ?? r.n.input?.admissionDate) as ISODate | undefined;
@@ -222,9 +223,14 @@ export async function validateBatch(actor: Actor, batchId: string, raw: unknown)
     if (status !== "INVALID" && r.fingerprint) {
       const inFile = seen.get(r.fingerprint);
       const inDb = existing.get(r.fingerprint);
+      const bk = billKey(r.n);
+      const sameBill = bk ? byBill.get(bk) : undefined;
       if (inDb) {
         status = "DUPLICATE";
         duplicateOf = `${inDb.module}:${inDb.id}`;
+      } else if (sameBill) {
+        status = "DUPLICATE";
+        duplicateOf = `${sameBill.module}:${sameBill.id}`;
       } else if (inFile !== undefined) {
         status = "DUPLICATE";
         duplicateOf = `row:${inFile}`;
@@ -274,6 +280,32 @@ export async function validateBatch(actor: Actor, batchId: string, raw: unknown)
     });
   }, LONG_TX);
   return { batchId, type, summary };
+}
+
+/**
+ * OneGlance OPD/diet bills carry their bill number ("OP-166259"). Two OneGlance exports of the same
+ * bill can differ in specialty or consultation name, so the fingerprint alone would miss the repeat;
+ * the same bill number on the same date is the same bill.
+ */
+function billKey(n: { module?: string | null; input?: any }): string | null {
+  if (!n.module || !n.input || (n.module !== "opd" && n.module !== "diet")) return null;
+  const ref = String(n.input.reference ?? "");
+  return /^OP-\d+$/.test(ref) && n.input.date ? `${n.module}|${ref}|${n.input.date}` : null;
+}
+async function findExistingOneGlanceBills(ns: { module?: string | null; input?: any }[]) {
+  const out = new Map<string, { module: string; id: string }>();
+  const refs = { opd: new Set<string>(), diet: new Set<string>() };
+  for (const n of ns) if (billKey(n)) refs[n.module as "opd" | "diet"].add(String(n.input.reference));
+  const look = async (module: "opd" | "diet", del: any) => {
+    const list = [...refs[module]];
+    for (let i = 0; i < list.length; i += 5000) {
+      const rows = await del.findMany({ where: { reference: { in: list.slice(i, i + 5000) }, status: "ACTIVE" }, select: { id: true, reference: true, date: true } });
+      for (const h of rows) out.set(`${module}|${h.reference}|${fromDbDate(h.date)}`, { module, id: h.id });
+    }
+  };
+  await look("opd", prisma.consultation);
+  await look("diet", prisma.dietTransaction);
+  return out;
 }
 
 async function findExistingFingerprints(fps: string[]) {
