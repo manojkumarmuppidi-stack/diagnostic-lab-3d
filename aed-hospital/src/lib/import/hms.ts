@@ -539,7 +539,9 @@ function convertCashBook(sheet: RawSheet): ConvertedSheet[] {
         Subcategory: subcategory ?? null,
         Description: desc || "(no description)",
         Vendor: vendorFrom(desc) ?? null,
-        "Bill Number": g("Cheque No.") || null,
+        // The cash-book row is the voucher reference: it keeps genuine repeats apart (three ₹10,000 payments
+        // to one doctor on one day) while a re-upload of the same book is still caught as a duplicate.
+        "Bill Number": g("Cheque No.") || `CB-${r.rowNumber}`,
         Amount: r2(debit),
         "Payment Mode": mode ? MODE_NAMES[mode] : "Cash",
         Remarks: ["Cash book", g("Ledger") ? `ledger ${g("Ledger")}` : "", "payment mode estimated from amount"].filter(Boolean).join(" · "),

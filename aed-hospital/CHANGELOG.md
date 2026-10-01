@@ -2,6 +2,9 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.9.1: Cash book repeats are kept
+- Cash-book lines without a cheque number get the cash-book row as their reference (`CB-412`). Genuine repeats on one day (three ₹10,000 payments to one doctor, several ₹1,000 per-case charges) are no longer dropped as duplicates; re-uploading the same cash book is still caught.
+
 ## 0.9.0: Hormonal Pharmacy as its own segment
 - The pharmacy is now **Hormonal Pharmacy** everywhere (income stream, purchases, Analytics tab, reports, navigation).
 - New page **Hormonal Pharmacy → accounts** (`/hormonal-pharmacy`), built for phones:

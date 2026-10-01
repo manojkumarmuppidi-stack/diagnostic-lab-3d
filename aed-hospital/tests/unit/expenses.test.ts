@@ -106,6 +106,7 @@ describe("cash book conversion", () => {
       ["30-01-2026", "Electricity", "Card"],
     ]);
     expect(out[1].rows[0].values["Payment Mode"]).toBe("Bank Transfer");
+    expect(out[0].rows.map((r) => r.values["Bill Number"])).toEqual(["CB-2", "CB-3"]);
     expect(out[0].note).toMatch(/1 cash-received lines skipped; 1 lines without an amount skipped/);
   });
 });
