@@ -19,7 +19,7 @@ describe("entries behind a Daily Accounts figure", () => {
     const st = await getDailyStatement(f.admin, D);
     const lab = await dayLines(f.admin, D, "LAB");
     expect(lab.total).toBe(st.income.LAB);
-    expect(lab.lines[0]).toMatchObject({ title: "ECG × 2", detail: "DEMO A", mode: "UPI" });
+    expect(lab.lines[0]).toMatchObject({ module: "lab", title: "ECG × 2", detail: "DEMO A", mode: "UPI" });
 
     const exp = await dayLines(f.admin, D, "EXP_OTHER");
     expect(exp.total).toBe(st.expense.OTHER);
@@ -28,6 +28,8 @@ describe("entries behind a Daily Accounts figure", () => {
       ["Rent – Sep", 1000, true],
     ]);
     expect(exp.lines[1].monthTotal).toBe(30000);
+    // Each entry carries its module so Daily Accounts can open it for correction.
+    expect(exp.lines.every((l) => l.module === "expense")).toBe(true);
     await expect(dayLines(f.admin, D, "NOPE")).rejects.toThrow();
   });
 });

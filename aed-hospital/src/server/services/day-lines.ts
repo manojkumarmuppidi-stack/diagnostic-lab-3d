@@ -5,6 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { isISODate, toDbDate, type ISODate } from "@/lib/dates";
+import type { ModuleKey } from "@/lib/modules";
 import { round2, toNum } from "@/lib/money";
 import { requirePermission, type Actor } from "../authz";
 import { prisma } from "../db";
@@ -15,6 +16,8 @@ export type DayLineKey = (typeof DAY_LINE_KEYS)[number];
 
 export interface DayLine {
   id: string;
+  /** Module of the record, so the screen can open it for correction. */
+  module: ModuleKey;
   title: string;
   detail: string | null;
   mode: string | null;
@@ -50,6 +53,7 @@ export async function dayLines(actor: Actor, date: string, key: string): Promise
     lines = [
       ...exp.map((e) => ({
         id: e.id,
+        module: "expense" as const,
         title: e.description,
         detail: join(e.category.name, name(e.subcategory), name(e.department), e.vendor),
         mode: name(e.paymentMode),
@@ -57,7 +61,7 @@ export async function dayLines(actor: Actor, date: string, key: string): Promise
         amount: amt.get(e.id)!.amount,
         ...(amt.get(e.id)!.spread ? { spread: true, monthTotal: toNum(e.amount) } : {}),
       })),
-      ...pur.map((p) => ({ id: p.id, title: p.supplier, detail: "Stock purchase", mode: name(p.paymentMode), reference: p.invoiceNo, amount: amt.get(p.id)!.amount })),
+      ...pur.map((p) => ({ id: p.id, module: "pharmacy-purchase" as const, title: p.supplier, detail: "Stock purchase", mode: name(p.paymentMode), reference: p.invoiceNo, amount: amt.get(p.id)!.amount })),
     ];
   } else {
     const rows = await prisma.$queryRaw<{ source_table: string; source_id: string; amount: Prisma.Decimal }[]>`
@@ -76,13 +80,13 @@ export async function dayLines(actor: Actor, date: string, key: string): Promise
     ]);
     const base = (x: { id: string; reference?: string | null; paymentMode: { name: string } | null }) => ({ id: x.id, mode: name(x.paymentMode), reference: x.reference ?? null, amount: amt.get(x.id)! });
     lines = [
-      ...opd.map((c) => ({ ...base(c), title: c.patientName || "Patient", detail: join(name(c.doctor), name(c.consultationType), c.visitType === "NEW" ? "New visit" : "Follow-up") })),
-      ...ipd.map((t) => ({ ...base(t), title: t.admission.patientName || "Patient", detail: join(IPD_TYPE[t.type], name(t.admission.admissionType), name(t.admission.doctor), t.remarks) })),
-      ...lab.map((l) => ({ ...base(l), title: l.investigation.name + (l.quantity > 1 ? ` × ${l.quantity}` : ""), detail: l.patientName })),
-      ...diet.map((x) => ({ ...base(x), title: x.patientName || "Patient", detail: join(name(x.service), name(x.dietician)) })),
-      ...other.map((o) => ({ ...base(o), title: o.source, detail: o.description })),
-      ...sale.map((s) => ({ ...base({ ...s, reference: s.invoiceNo }), title: s.patientName || "Sale", detail: s.remarks })),
-      ...ret.map((r) => ({ ...base({ ...r, reference: r.invoiceNo }), title: "Return", detail: r.reason })),
+      ...opd.map((c) => ({ ...base(c), module: "opd" as const, title: c.patientName || "Patient", detail: join(name(c.doctor), name(c.consultationType), c.visitType === "NEW" ? "New visit" : "Follow-up") })),
+      ...ipd.map((t) => ({ ...base(t), module: "ipd-payment" as const, title: t.admission.patientName || "Patient", detail: join(IPD_TYPE[t.type], name(t.admission.admissionType), name(t.admission.doctor), t.remarks) })),
+      ...lab.map((l) => ({ ...base(l), module: "lab" as const, title: l.investigation.name + (l.quantity > 1 ? ` × ${l.quantity}` : ""), detail: l.patientName })),
+      ...diet.map((x) => ({ ...base(x), module: "diet" as const, title: x.patientName || "Patient", detail: join(name(x.service), name(x.dietician)) })),
+      ...other.map((o) => ({ ...base(o), module: "other-income" as const, title: o.source, detail: o.description })),
+      ...sale.map((s) => ({ ...base({ ...s, reference: s.invoiceNo }), module: "pharmacy-sale" as const, title: s.patientName || "Sale", detail: s.remarks })),
+      ...ret.map((r) => ({ ...base({ ...r, reference: r.invoiceNo }), module: "pharmacy-return" as const, title: "Return", detail: r.reason })),
     ];
   }
   lines.sort((a, b) => b.amount - a.amount);

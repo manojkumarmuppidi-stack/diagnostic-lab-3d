@@ -12,6 +12,8 @@ import { Badge, Button, Card, ConfirmDialog, ErrorState, PageHeader, Spinner, St
 import { Guard } from "@/components/Guard";
 import { useCan, useSession } from "@/components/session";
 import { ModuleInsights } from "@/components/insights/ModuleInsights";
+import { RecordDrawer } from "@/components/ModuleList";
+import type { ModuleKey } from "@/lib/modules";
 
 interface ReconLine {
   group: string;
@@ -50,6 +52,7 @@ const MODE_LABEL: Record<string, string> = { CASH: "Cash", CARD: "Card", UPI: "U
 
 interface DayLine {
   id: string;
+  module: ModuleKey;
   title: string;
   detail: string | null;
   mode: string | null;
@@ -60,7 +63,7 @@ interface DayLine {
 }
 
 /** One statement figure; tap it to see the entries behind it on this day. */
-function DrillRow({ date, k, label, amount, href }: { date: string; k: string; label: string; amount: number; href: string }) {
+function DrillRow({ date, k, label, amount, href, onChanged }: { date: string; k: string; label: string; amount: number; href: string; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -76,7 +79,7 @@ function DrillRow({ date, k, label, amount, href }: { date: string; k: string; l
       {open && (
         <tr>
           <td colSpan={2} className="!pt-0">
-            <DrillLines date={date} k={k} href={href} />
+            <DrillLines date={date} k={k} href={href} onChanged={onChanged} />
           </td>
         </tr>
       )}
@@ -84,8 +87,9 @@ function DrillRow({ date, k, label, amount, href }: { date: string; k: string; l
   );
 }
 
-function DrillLines({ date, k, href }: { date: string; k: string; href: string }) {
+function DrillLines({ date, k, href, onChanged }: { date: string; k: string; href: string; onChanged: () => void }) {
   const { data, error, reload } = useApi<{ lines: DayLine[]; total: number }>(`/api/daily/${date}/lines?key=${k}`);
+  const [open, setOpen] = useState<DayLine | null>(null);
   if (error) return <ErrorState error={error} onRetry={reload} />;
   if (!data) return <Spinner />;
   const spread = data.lines.filter((l) => l.spread);
@@ -94,15 +98,17 @@ function DrillLines({ date, k, href }: { date: string; k: string; href: string }
       {data.lines.length === 0 && <p className="muted">No entries.</p>}
       <ul className="divide-y" style={{ borderColor: "var(--border)" }}>
         {data.lines.map((l) => (
-          <li key={l.id} className="flex items-start justify-between gap-3 py-1.5">
-            <div className="min-w-0">
-              <div className="font-medium">{l.title}</div>
-              <div className="text-xs muted">
-                {[l.detail, l.mode, l.reference].filter(Boolean).join(" · ")}
-                {l.spread && l.monthTotal ? ` · daily share of ${formatINR(l.monthTotal)} for the month` : ""}
-              </div>
-            </div>
-            <span className="num shrink-0 tabular-nums">{formatINR(l.amount, { paise: true })}</span>
+          <li key={l.id}>
+            <button type="button" className="flex w-full items-start justify-between gap-3 py-1.5 text-left hover:opacity-80" onClick={() => setOpen(l)} title="Open to view, correct or void">
+              <span className="min-w-0">
+                <span className="block font-medium underline decoration-dotted underline-offset-2">{l.title}</span>
+                <span className="block text-xs muted">
+                  {[l.detail, l.mode, l.reference].filter(Boolean).join(" · ")}
+                  {l.spread && l.monthTotal ? ` · daily share of ${formatINR(l.monthTotal)} for the month` : ""}
+                </span>
+              </span>
+              <span className="num shrink-0 tabular-nums">{formatINR(l.amount, { paise: true })}</span>
+            </button>
           </li>
         ))}
       </ul>
@@ -111,10 +117,27 @@ function DrillLines({ date, k, href }: { date: string; k: string; href: string }
           {data.lines.length} entr{data.lines.length === 1 ? "y" : "ies"}
           {spread.length ? ` · ${spread.length} monthly item${spread.length === 1 ? "" : "s"} spread over the month` : ""}
         </span>
+        <span className="muted">Tap an entry to correct or void it</span>
         <Link className="underline" href={href}>
           Open full list
         </Link>
       </div>
+      {open?.spread && (
+        <p className="mt-2 text-xs" style={{ color: "var(--status-warning)" }}>
+          {open.title} is a monthly item: a correction changes the whole month&apos;s {formatINR(open.monthTotal ?? 0)}, not only this day&apos;s share.
+        </p>
+      )}
+      {open && (
+        <RecordDrawer
+          module={open.module}
+          id={open.id}
+          onClose={() => setOpen(null)}
+          onChanged={() => {
+            reload();
+            onChanged();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -218,7 +241,7 @@ function DayView({ date }: { date: string }) {
           <table className="table">
             <tbody>
               {AED_INCOME_STREAMS.map((s) => (
-                <DrillRow key={s} date={date} k={s} label={STREAM_LABELS[s]} amount={data.income[s]} href={r(STREAM_HREF[s])} />
+                <DrillRow key={s} date={date} k={s} label={STREAM_LABELS[s]} amount={data.income[s]} href={r(STREAM_HREF[s])} onChanged={reload} />
               ))}
               <tr>
                 <td className="font-semibold">AED TOTAL INCOME</td>
@@ -230,8 +253,8 @@ function DayView({ date }: { date: string }) {
         <Card title="AED Hospital — expenses">
           <table className="table">
             <tbody>
-              <DrillRow date={date} k="EXP_HOSPITAL" label={EXPENSE_LABELS.HOSPITAL} amount={data.expense.HOSPITAL} href={r("/expenses?group=HOSPITAL")} />
-              <DrillRow date={date} k="EXP_OTHER" label={EXPENSE_LABELS.OTHER} amount={data.expense.OTHER} href={r("/expenses?group=OTHER")} />
+              <DrillRow date={date} k="EXP_HOSPITAL" label={EXPENSE_LABELS.HOSPITAL} amount={data.expense.HOSPITAL} href={r("/expenses?group=HOSPITAL")} onChanged={reload} />
+              <DrillRow date={date} k="EXP_OTHER" label={EXPENSE_LABELS.OTHER} amount={data.expense.OTHER} href={r("/expenses?group=OTHER")} onChanged={reload} />
               <tr>
                 <td className="font-semibold">AED TOTAL EXPENSE</td>
                 <td className="num font-semibold">{formatINR(data.totalExpenses, { paise: true })}</td>
@@ -259,8 +282,8 @@ function DayView({ date }: { date: string }) {
           <div className="grid gap-4 sm:grid-cols-2">
             <table className="table">
               <tbody>
-                <DrillRow date={date} k="PHARMACY" label="Sales (net of returns)" amount={data.income.PHARMACY} href={r("/pharmacy")} />
-                <DrillRow date={date} k="EXP_PHARMACY" label={EXPENSE_LABELS.PHARMACY_PURCHASE} amount={data.expense.PHARMACY_PURCHASE} href={r("/pharmacy?tab=purchases")} />
+                <DrillRow date={date} k="PHARMACY" label="Sales (net of returns)" amount={data.income.PHARMACY} href={r("/pharmacy")} onChanged={reload} />
+                <DrillRow date={date} k="EXP_PHARMACY" label={EXPENSE_LABELS.PHARMACY_PURCHASE} amount={data.expense.PHARMACY_PURCHASE} href={r("/pharmacy?tab=purchases")} onChanged={reload} />
               </tbody>
             </table>
             <div className="text-sm">
