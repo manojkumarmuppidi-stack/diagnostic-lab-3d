@@ -227,3 +227,29 @@ describe("OneGlance OP bill collection (with payment modes)", () => {
   });
 });
 
+describe("OneGlance pharmacy bill collection (bill-wise)", () => {
+  const H = ["Bill No", "Bill Date", "Bill Time", "Patientid", "Patient Name", "Reffered By", "Total Amount", "Discount", "Bill Amount", "Paid Amount", "Due", "Billby", "BillID", "ReceivedDate", "paidvalue", "paymentdetails", "Cash", "Card", "Cheque", "Online", "Adjust deposit", "OneGlance Wallet", "Phone Pay", "G Pay", "Category", "Area", "Admit No"];
+  const row = (bill: number, date: string, total: number, disc: number, net: number, m: Partial<Record<string, number>>) =>
+    [bill, date, "09:00 AM", "1001", "Mrs DEMO A(37)", "DR.Demo", total, disc, net, net, 0, "Desk", bill, "", net, "", m.cash ?? 0, m.card ?? 0, 0, m.online ?? 0, m.adj ?? 0, 0, m.phonepe ?? 0, m.gpay ?? 0, "", "", ""];
+  it("one sale per bill with the exact payment app; IPD-deposit part left out", () => {
+    expect(detectHmsReport(H)).toBe("oneglance-pharmacy-bills");
+    const out = convertHmsSheet(
+      sheet(H, [
+        row(220902, "02-01-2026", 437.64, 17.64, 420, { phonepe: 420 }),
+        row(220903, "03-01-2026", 150, 10, 140, { gpay: 100, cash: 40 }),
+        row(220904, "03-01-2026", 1000, 0, 1000, { adj: 1000 }),
+        row(220905, "03-01-2026", 600, 0, 600, { adj: 200, card: 400 }),
+      ]),
+    )!;
+    expect(out.map((s) => [s.type, s.name, s.rows.length])).toEqual([["pharmacy-sale", "Pharmacy bills Jan 2026", 3]]);
+    const v = out[0].rows.map((r) => r.values);
+    expect(v.map((x) => [x.Invoice, x["Net Sales"], x["Payment Mode"]])).toEqual([
+      ["PHB-220902", 420, "PhonePe"],
+      ["PHB-220903", 140, "GPay"],
+      ["PHB-220905", 400, "Card"],
+    ]);
+    expect(String(v[1].Remarks)).toContain("Paid Cash 40 + GPay 100");
+    expect(out[0].note).toMatch(/1 bills paid fully from deposit skipped/);
+  });
+});
+

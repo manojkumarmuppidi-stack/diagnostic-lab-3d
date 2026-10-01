@@ -7,7 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { ImportRowStatus, Prisma } from "@prisma/client";
 import { z } from "zod";
 import ExcelJS from "exceljs";
-import { fromDbDate, todayISO, type ISODate } from "@/lib/dates";
+import { fromDbDate, todayISO, toDbDate, type ISODate } from "@/lib/dates";
 import { suggestMapping, missingRequired, type Mapping } from "@/lib/import/mapping";
 import { normalizeRow, parsePlaceholder, NEW_PREFIX, type MasterCtx, type NewMasterType } from "@/lib/import/normalize";
 import { norm } from "@/lib/import/text";
@@ -214,6 +214,7 @@ export async function validateBatch(actor: Actor, batchId: string, raw: unknown)
   const fps = results.map((r) => r.fingerprint).filter(Boolean) as string[];
   const existing = await findExistingFingerprints(fps);
   const byBill = await findExistingOneGlanceBills(results.map((r) => r.n));
+  const pharmacyClash = await findPharmacyDayClashes(results.map((r) => r.n));
   const seen = new Map<string, number>();
   const outcomes: RowOutcome[] = results.map((r) => {
     const date = (r.n.input?.date ?? r.n.input?.admissionDate) as ISODate | undefined;
@@ -231,6 +232,10 @@ export async function validateBatch(actor: Actor, batchId: string, raw: unknown)
       } else if (sameBill) {
         status = "DUPLICATE";
         duplicateOf = `${sameBill.module}:${sameBill.id}`;
+      } else if (pharmacyClash.has(pharmacyDayKey(r.n) ?? "")) {
+        // The same day's pharmacy sales are already in the app in the other form (daily totals vs bills).
+        status = "DUPLICATE";
+        duplicateOf = `pharmacy-sale:${pharmacyClash.get(pharmacyDayKey(r.n)!)}`;
       } else if (inFile !== undefined) {
         status = "DUPLICATE";
         duplicateOf = `row:${inFile}`;
@@ -305,6 +310,39 @@ async function findExistingOneGlanceBills(ns: { module?: string | null; input?: 
   };
   await look("opd", prisma.consultation);
   await look("diet", prisma.dietTransaction);
+  return out;
+}
+
+/**
+ * Pharmacy sales arrive either as OneGlance daily totals ("PH-DAY-…") or as bills ("PHB-…"). A day
+ * held in one form must not be imported again in the other, or its sales would count twice.
+ * Returns, per "kind|date" of an incoming row, the id of a clashing sale already in the app.
+ */
+function pharmacyDayKey(n: { module?: string | null; input?: any }): string | null {
+  if (n.module !== "pharmacy-sale" || !n.input?.date) return null;
+  const inv = String(n.input.invoiceNo ?? "");
+  if (inv.startsWith("PH-DAY-")) return `day|${n.input.date}`;
+  if (inv.startsWith("PHB-")) return `bill|${n.input.date}`;
+  return null;
+}
+async function findPharmacyDayClashes(ns: { module?: string | null; input?: any }[]) {
+  const out = new Map<string, string>();
+  const want = { day: new Set<string>(), bill: new Set<string>() };
+  for (const n of ns) {
+    const k = pharmacyDayKey(n);
+    if (k) want[k.split("|")[0] as "day" | "bill"].add(k.split("|")[1]);
+  }
+  // Incoming daily totals clash with existing bills, and incoming bills with existing daily totals.
+  for (const [kind, other] of [["day", "PHB-"], ["bill", "PH-DAY-"]] as const) {
+    const dates = [...want[kind]];
+    for (let i = 0; i < dates.length; i += 1000) {
+      const rows = await prisma.pharmacySale.findMany({
+        where: { status: "ACTIVE", invoiceNo: { startsWith: other }, date: { in: dates.slice(i, i + 1000).map((d) => toDbDate(d as ISODate)) } },
+        select: { id: true, date: true },
+      });
+      for (const h of rows) out.set(`${kind}|${fromDbDate(h.date)}`, h.id);
+    }
+  }
   return out;
 }
 

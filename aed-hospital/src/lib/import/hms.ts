@@ -10,6 +10,7 @@
  *  - OP bill collection (Bill Date, Visit Purpose, Cash/Online…) → OPD with payment modes
  *  - Bill Item Wise Collection          → Laboratory (one row per test / service line)
  *  - Pharmacy Collection Report (daily) → Pharmacy sales per payment mode + refunds
+ *  - Pharmacy bill collection (bill-wise) → one pharmacy sale per bill, with its exact payment mode
  *  - Lab Bill Collection                → rejected with guidance (bill totals, no test names)
  *  - Cash book (Date/Description/Debit/Credit/Balance) → Expenses, categorised from the description
  *
@@ -35,11 +36,12 @@ export interface ConvertedSheet extends RawSheet {
   note: string;
   source: HmsReport;
 }
-export type HmsReport = "oneglance-opd" | "oneglance-opd-collection" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book";
+export type HmsReport = "oneglance-opd" | "oneglance-opd-collection" | "oneglance-pharmacy-bills" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book";
 
 export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-opd": "OneGlance · Outpatient Collection Report",
   "oneglance-opd-collection": "OneGlance · OP bill collection (with payment modes)",
+  "oneglance-pharmacy-bills": "OneGlance · Pharmacy bill collection (bill-wise, Hormonal Pharmacy)",
   "oneglance-lab-items": "OneGlance · Bill Item Wise Collection",
   "oneglance-pharmacy-daily": "OneGlance · Pharmacy Collection Report (daily totals)",
   "oneglance-lab-bills": "OneGlance · Lab Bill Collection",
@@ -60,6 +62,7 @@ export function detectHmsReport(headers: string[]): HmsReport | null {
   if (has(headers, "Bill NO", "Particulars", "Accountgroup", "Itemdiscount", "NetAmount")) return "oneglance-lab-items";
   if (has(headers, "Bill Date", "Net Revenue", "Pending Collected", "paidvalue", "Cash")) return "oneglance-pharmacy-daily";
   if (has(headers, "BillNo", "RefLab", "RefferedBY", "PaidAmount", "Cash")) return "oneglance-lab-bills";
+  if (has(headers, "Bill No", "Bill Date", "Patientid", "Total Amount", "Bill Amount", "Paid Amount", "Phone Pay", "G Pay")) return "oneglance-pharmacy-bills";
   if (has(headers, "Bill No", "Drug Name", "Qty", "Total", "Sales Amount", "Purchase Amount")) return "oneglance-pharmacy-item-sales";
   if (has(headers, "Invoice No", "Invoice Date", "Stockiest Name", "Drug Name", "Purchase Value")) return "oneglance-pharmacy-item-purchases";
   if (has(headers, "BillNo", "Paid date", "Stockiest Name", "Details", "Paid Amount")) return "oneglance-supplier-payments";
@@ -413,6 +416,89 @@ function convertPharmacyDaily(sheet: RawSheet): ConvertedSheet[] {
   return byMonth("oneglance-pharmacy-daily", sheet.name, "pharmacy-sale", "Pharmacy", PHARMACY_HEADERS, out, note);
 }
 
+const PHARMACY_BILL_HEADERS = ["Date", "Invoice", "Patient ID", "Patient Name", "Sales", "Discount", "Net Sales", "Payment Mode", "Remarks"];
+/** Bill-wise: each payment app is kept apart (PhonePe, GPay), since staff need the exact mode. */
+const PHARMACY_BILL_MODES: [string, string][] = [
+  ["Cash", "Cash"],
+  ["Card", "Card"],
+  ["Cheque", "Cheque"],
+  ["Online", "UPI"],
+  ["Phone Pay", "PhonePe"],
+  ["G Pay", "GPay"],
+  ["OneGlance Wallet", "Other"],
+];
+
+/**
+ * Pharmacy bill collection: one row per Hormonal Pharmacy bill with the amount per payment mode.
+ * A bill paid from an IPD deposit is reduced by that part (the deposit was already counted as IPD
+ * income), the same rule as the daily report. Days that already hold daily totals are flagged at
+ * validation so the same sales are not counted twice.
+ */
+function convertPharmacyBills(sheet: RawSheet): ConvertedSheet[] {
+  const out: Out[] = [];
+  let split = 0;
+  let deposit = 0;
+  let depositOnly = 0;
+  let unpaid = 0;
+  for (const r of sheet.rows) {
+    const g = getter(r.values);
+    const bill = g("Bill No");
+    const date = g("Bill Date");
+    if (!bill || !date) continue;
+    const total = num(g("Total Amount"));
+    const discount = num(g("Discount"));
+    const billed = num(g("Bill Amount")) || r2(total - discount);
+    const adj = num(g("Adjust deposit"));
+    if (adj > 0) {
+      deposit += adj;
+      if (adj >= billed - 0.5) {
+        depositOnly++;
+        continue;
+      }
+    }
+    const paid = PHARMACY_BILL_MODES.map(([col, mode]) => [mode, num(g(col))] as const).filter(([, a]) => a > 0);
+    const notes: string[] = [];
+    let mode = "Other";
+    if (paid.length) {
+      mode = [...paid].sort((a, b) => b[1] - a[1])[0][0];
+      if (paid.length > 1) {
+        split++;
+        notes.push(`Paid ${paid.map(([m, a]) => `${m} ${a}`).join(" + ")}`);
+      }
+    } else if (adj <= 0) {
+      unpaid++;
+      notes.push("No payment recorded in the export");
+    }
+    if (adj > 0) notes.push(`₹${adj} paid from IPD deposit left out`);
+    const due = num(g("Due"));
+    if (due > 0) notes.push(`Due ${due}`);
+    const ref = cleanText(g("Reffered By"));
+    if (ref) notes.push(`Ref: ${ref}`);
+    out.push({
+      rowNumber: r.rowNumber,
+      values: {
+        Date: date,
+        Invoice: `PHB-${bill}`,
+        "Patient ID": g("Patientid") || null,
+        "Patient Name": cleanPatient(g("Patient Name")) || null,
+        Sales: r2(total - adj),
+        Discount: discount,
+        "Net Sales": r2(billed - adj),
+        "Payment Mode": mode,
+        Remarks: notes.join(" · "),
+      },
+    });
+  }
+  const sum = out.reduce((a, r) => a + Number(r.values["Net Sales"]), 0);
+  const note =
+    `${out.length.toLocaleString("en-IN")} Hormonal Pharmacy bills (₹${Math.round(sum).toLocaleString("en-IN")} after discount), each with its payment mode — Cash, Card, Cheque, Online (UPI), PhonePe, GPay` +
+    (split ? `; ${split} bills paid in two modes are recorded under the larger one (split in Remarks)` : "") +
+    (unpaid ? `; ${unpaid} bills with no payment recorded are under Other` : "") +
+    (deposit > 0 ? `; ₹${Math.round(deposit).toLocaleString("en-IN")} paid from IPD deposits left out (already IPD income)` + (depositOnly ? `, ${depositOnly} bills paid fully from deposit skipped` : "") : "") +
+    `. Days that already have pharmacy daily totals in the app are flagged as duplicates, so nothing is counted twice.`;
+  return byMonth("oneglance-pharmacy-bills", sheet.name, "pharmacy-sale", "Pharmacy bills", PHARMACY_BILL_HEADERS, out, note);
+}
+
 const ITEM_HEADERS = ["Type", "Date", "Bill / Invoice No.", "Medicine", "Batch", "Expiry", "Supplier", "Manufacturer", "Quantity", "Free Qty", "Amount", "Taxable", "GST", "Cost"];
 
 /** Purchase/Sales Report, sales view: one line per medicine per bill → medicine lines (analytics only). */
@@ -662,6 +748,8 @@ export function convertHmsSheet(sheet: RawSheet): ConvertedSheet[] | null {
       return convertLabItems(sheet);
     case "oneglance-pharmacy-daily":
       return convertPharmacyDaily(sheet);
+    case "oneglance-pharmacy-bills":
+      return convertPharmacyBills(sheet);
     case "oneglance-pharmacy-item-sales":
       return convertPharmacyItemSales(sheet);
     case "oneglance-pharmacy-item-purchases":

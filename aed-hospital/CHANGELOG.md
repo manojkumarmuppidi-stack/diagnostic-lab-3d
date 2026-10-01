@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.9.3: OneGlance pharmacy bill collection (bill-wise)
+- The bill-wise pharmacy collection export (Bill No, Bill Date, Patientid, Total/Bill/Paid Amount, Cash, Card, Cheque, Online, Phone Pay, G Pay…) is recognised: one Hormonal Pharmacy sale per bill (`PHB-<bill no>`) with its exact payment mode — PhonePe and GPay kept apart. Bills paid from an IPD deposit are reduced by that part (already IPD income); bills paid fully from deposit are skipped.
+- A day already held as pharmacy daily totals is not imported again as bills (and the reverse): those rows are flagged as duplicates.
+
 ## 0.9.2: OneGlance OP bill collection export; exact payment modes
 - A second OneGlance OPD export (BillNo, Bill Date, Visit Purpose, Cash / Online / Cheque / OneGlance Wallet) is recognised. It converts to OPD (and Diet) **with payment modes**: Online → UPI, Wallet → Other. A bill paid in two modes goes under the larger one, with the split in Remarks.
 - That export has no consultation name. Specialty is General unless Visit Purpose names one. New/Old comes from the patient registration number: a bill whose patient ID is higher than every ID billed before it is a new registration.

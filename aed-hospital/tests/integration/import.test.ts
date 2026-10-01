@@ -321,3 +321,29 @@ describe("OneGlance bill numbers", () => {
   });
 });
 
+describe("pharmacy daily totals vs bills", () => {
+  it("a day already imported as daily totals is not imported again as bills", async () => {
+    const PH = "x\nx\nPharmacy Collection Report\n\nBill Date,Total Amount,Discount,Bill Amount,Paid Amount,DueAmount,Pending Collected,Refund Amount,Net Revenue,ReceivedDate,paidvalue,Pstatus,Cash,Card ,Cheque,Online,Adjust deposit,OneGlance Wallet,Phone Pay,G Pay\n" +
+      '"01-04-2026","1000","0","1000","1000","0","0","0","1000","","1000","","1000","0","0","0","0","0","0","0",\n';
+    const run = async (csv: string, name: string) => {
+      const up = await uploadFile(f.admin, name, Buffer.from(csv));
+      const res = [];
+      for (const b of up.batches) {
+        const v = await validateBatch(f.admin, b.id, { type: b.type, mapping: b.suggestion.mapping });
+        res.push(v.summary);
+        if (v.summary.valid + v.summary.warnings) await commitBatch(f.admin, b.id, { approveWarnings: true });
+      }
+      return res;
+    };
+    await run(PH, "Pharmacy_Collection_Report.csv");
+    const H = "Bill No,Bill Date,Bill Time,Patientid,Patient Name,Reffered By,Total Amount,Discount,Bill Amount,Paid Amount,Due,Billby,BillID,ReceivedDate,paidvalue,paymentdetails,Cash,Card,Cheque,Online,Adjust deposit,OneGlance Wallet,Phone Pay,G Pay,Category,Area,Admit No\n";
+    const bills = H +
+      '"227903","01-04-2026","09:00 AM","1","DEMO A","","1000","0","1000","1000","0","Desk","227903","","1000","","1000","0","0","0","0","0","0","0","","","",\n' +
+      '"227990","02-04-2026","09:00 AM","2","DEMO B","","500","0","500","500","0","Desk","227990","","500","","0","0","0","0","0","0","0","500","","","",\n';
+    const [s] = await run(bills, "Pharmacy_Bill_Collection.csv");
+    expect(s).toMatchObject({ total: 2, duplicates: 1 });
+    const sales = await prisma.pharmacySale.findMany({ where: { status: "ACTIVE" }, select: { invoiceNo: true, netAmount: true }, orderBy: { invoiceNo: "asc" } });
+    expect(sales.map((x) => [x.invoiceNo, Number(x.netAmount)])).toEqual([["PH-DAY-20260401-CASH", 1000], ["PHB-227990", 500]]);
+  });
+});
+
