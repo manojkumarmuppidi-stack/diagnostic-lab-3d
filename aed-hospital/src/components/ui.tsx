@@ -152,19 +152,25 @@ export function StatusBadge({ status }: { status: string | null | undefined }) {
 export function Modal({ open, onClose, title, children, footer, wide }: { open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // Callers pass a new onClose on every render; keep the latest in a ref so the effect below runs
+  // only when the dialog opens — re-running it on each keystroke moved the cursor out of the field.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeRef.current();
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
-    setTimeout(() => ref.current?.querySelector<HTMLElement>("input,select,textarea,button")?.focus(), 30);
+    // First field of the form (not the close button in the header).
+    const t = setTimeout(() => (ref.current?.querySelector<HTMLElement>("[data-modal-body] :is(input,select,textarea)") ?? ref.current?.querySelector<HTMLElement>("input,select,textarea,button"))?.focus(), 30);
     return () => {
+      clearTimeout(t);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
       prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -184,7 +190,9 @@ export function Modal({ open, onClose, title, children, footer, wide }: { open: 
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">{children}</div>
+        <div className="flex-1 overflow-y-auto p-4" data-modal-body>
+          {children}
+        </div>
         {footer && (
           <div className="flex flex-wrap justify-end gap-2 border-t px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" style={{ borderColor: "var(--border)" }}>
             {footer}

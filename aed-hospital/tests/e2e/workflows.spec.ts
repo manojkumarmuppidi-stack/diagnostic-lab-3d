@@ -181,3 +181,20 @@ test("one-page daily summary: dashboard button, figures and print layout", async
   await page.emulateMedia({ media: "print" });
   await expect(page.getByRole("button", { name: "Download PDF" })).toBeHidden();
 });
+
+test("Admin creates a staff login, typing letter by letter without losing the cursor", async ({ page }) => {
+  await login(page);
+  await page.getByRole("link", { name: "Staff logins" }).click();
+  await expect(page.getByRole("heading", { name: "Logins & Permissions" })).toBeVisible();
+  await page.getByRole("button", { name: "Add user" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Username").pressSequentially("e2e.staff", { delay: 20 });
+  await dialog.getByLabel("Full name").pressSequentially("E2E Staff", { delay: 20 });
+  await dialog.getByLabel("Role").selectOption({ label: "Reception + expenses" });
+  await dialog.getByLabel("Initial password").pressSequentially("Temp2026xyz", { delay: 20 });
+  await expect(dialog.getByLabel("Username")).toHaveValue("e2e.staff");
+  await expect(dialog.getByLabel("Full name")).toHaveValue("E2E Staff");
+  await dialog.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByRole("cell", { name: "e2e.staff" })).toBeVisible();
+  await expect(page.getByRole("row", { name: /e2e\.staff/ }).getByText("must change password")).toBeVisible();
+});

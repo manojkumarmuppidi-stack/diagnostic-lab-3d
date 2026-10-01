@@ -75,18 +75,18 @@ function Users({ roles }: { roles: any[] }) {
       <Modal open={!!edit} onClose={() => setEdit(null)} title={edit?.id ? `Edit ${edit.username}` : "New user"} footer={<><Button variant="secondary" onClick={() => setEdit(null)}>Cancel</Button><Button onClick={save}>Save</Button></>}>
         <div className="space-y-3">
           {!edit?.id && (
-            <Field label="Username" required error={errs.username}>
-              <input className="input" autoCapitalize="none" value={v.username ?? ""} onChange={(e) => setV({ ...v, username: e.target.value })} />
+            <Field label="Username" required error={errs.username} htmlFor="u-username">
+              <input id="u-username" className="input" autoCapitalize="none" value={v.username ?? ""} onChange={(e) => setV({ ...v, username: e.target.value })} />
             </Field>
           )}
-          <Field label="Full name" required error={errs.name}>
-            <input className="input" value={v.name ?? ""} onChange={(e) => setV({ ...v, name: e.target.value })} />
+          <Field label="Full name" required error={errs.name} htmlFor="u-name">
+            <input id="u-name" className="input" value={v.name ?? ""} onChange={(e) => setV({ ...v, name: e.target.value })} />
           </Field>
-          <Field label="Email" error={errs.email}>
-            <input className="input" type="email" value={v.email ?? ""} onChange={(e) => setV({ ...v, email: e.target.value })} />
+          <Field label="Email" error={errs.email} htmlFor="u-email">
+            <input id="u-email" className="input" type="email" value={v.email ?? ""} onChange={(e) => setV({ ...v, email: e.target.value })} />
           </Field>
-          <Field label="Role" required>
-            <select className="input" value={v.roleId ?? ""} onChange={(e) => setV({ ...v, roleId: e.target.value })} disabled={edit?.id === me.id}>
+          <Field label="Role" required htmlFor="u-role">
+            <select id="u-role" className="input" value={v.roleId ?? ""} onChange={(e) => setV({ ...v, roleId: e.target.value })} disabled={edit?.id === me.id}>
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
@@ -94,8 +94,8 @@ function Users({ roles }: { roles: any[] }) {
               ))}
             </select>
           </Field>
-          <Field label={edit?.id ? "Reset password (optional)" : "Initial password"} required={!edit?.id} error={errs.password ?? errs.resetPassword} help="User must change it at next sign-in. Min 8 characters with letters and numbers.">
-            <input className="input" type="password" autoComplete="new-password" value={v.password ?? ""} onChange={(e) => setV({ ...v, password: e.target.value })} />
+          <Field label={edit?.id ? "Reset password (optional)" : "Initial password"} required={!edit?.id} error={errs.password ?? errs.resetPassword} help="User must change it at next sign-in. Min 8 characters with letters and numbers." htmlFor="u-password">
+            <input id="u-password" className="input" type="password" autoComplete="new-password" value={v.password ?? ""} onChange={(e) => setV({ ...v, password: e.target.value })} />
           </Field>
           {edit?.id && edit.id !== me.id && (
             <label className="flex items-center gap-2 text-sm">
