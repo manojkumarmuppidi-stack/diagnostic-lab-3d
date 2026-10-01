@@ -521,5 +521,6 @@ function expenseInput(
     amount,
     paymentModeId: b.mode(),
     remarks: b.text("remarks", 500),
+    spreadMonth: b.text("spreadMonth", 20),
   };
 }

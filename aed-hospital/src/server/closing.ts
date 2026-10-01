@@ -40,9 +40,13 @@ export async function getDayStatuses(tx: Tx, dates: ISODate[]): Promise<Map<ISOD
   return m;
 }
 
-/** Throw 423 if the business date is CLOSED. Applies to every role, Admin included (Admin must reopen). */
+/**
+ * Throw 423 if the business date is CLOSED. Applies to every role, Admin included (Admin must reopen),
+ * except inside an Admin's historical-backfill import, which re-snapshots the closed days it touches.
+ */
 export async function assertDayWritable(tx: Tx, date: ISODate) {
   const cache = bulkCache();
+  if (cache?.allowClosed) return;
   let status = cache?.days.get(date);
   if (!status) {
     status = await getDayStatus(tx, date);

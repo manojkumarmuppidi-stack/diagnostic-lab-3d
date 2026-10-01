@@ -4,7 +4,7 @@
  * (average of the last four same weekdays) day — plus plain-language insights.
  */
 import { addDays, isISODate, todayISO, type ISODate } from "@/lib/dates";
-import { INCOME_STREAMS, STREAM_LABELS, totalIncome } from "@/lib/accounting";
+import { STREAM_LABELS, totalIncome, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { insightsFromComparison, insightsFromKpis, rankInsights, type Comparison, type Insight, type KpiCompare } from "@/lib/insights";
 import { round2 } from "@/lib/money";
 import { can, requirePermission, type Actor } from "../authz";
@@ -44,7 +44,7 @@ export async function getDailySummary(actor: Actor, dateRaw?: string) {
   const weekday = WEEKDAY[new Date(`${date}T00:00:00Z`).getUTCDay()];
   const lastWeekLabel = `last ${weekday}`;
   const kpis: KpiCompare[] = [
-    { key: "income", label: "Total income", current: income, previous: totalIncome(prevWeek.income), unit: "money" },
+    { key: "income", label: "AED income", current: income, previous: totalIncome(prevWeek.income), unit: "money" },
     { key: "patients", label: "Patients", current: cur.counts.patients, previous: prevWeek.counts.patients, unit: "int" },
     { key: "consultations", label: "Consultations", current: cur.counts.consultations, previous: prevWeek.counts.consultations, unit: "int" },
     { key: "new", label: "New patients", current: cur.counts.newConsultations, previous: prevWeek.counts.newConsultations, unit: "int" },
@@ -55,7 +55,7 @@ export async function getDailySummary(actor: Actor, dateRaw?: string) {
     title: "Income by stream",
     noun: "stream",
     unit: "money",
-    rows: INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], current: cur.income[s], previous: prevWeek.income[s] })),
+    rows: AED_INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], current: cur.income[s], previous: prevWeek.income[s] })),
   };
   const extra: Insight[] = [];
   if (typical !== null && typical > 0 && income > 0) {
@@ -90,7 +90,9 @@ export async function getDailySummary(actor: Actor, dateRaw?: string) {
     today: {
       income,
       byStream: cur.income,
-      expenses: round2(Object.values(cur.expense).reduce((a, b) => a + b, 0)),
+      expenses: cur.kpis.totalExpenses, // AED only
+      pharmacySales: cur.income.PHARMACY,
+      pharmacyCosts: cur.expense.PHARMACY_PURCHASE,
       net: cur.kpis.netOperatingResult,
       counts: cur.counts,
       pharmacyBills: items?.hasData ? items.totals.bills : null,

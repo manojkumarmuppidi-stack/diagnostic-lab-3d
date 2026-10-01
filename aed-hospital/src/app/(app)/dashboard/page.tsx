@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Info, OctagonAlert } from "lucide-react";
 import { useApi, qs } from "@/lib/client";
-import { EXPENSE_LABELS, INCOME_STREAMS, STREAM_LABELS, type Change, type Counts, type ExpenseByKind, type IncomeByStream } from "@/lib/accounting";
+import { EXPENSE_LABELS, STREAM_LABELS, type Change, type Counts, type ExpenseByKind, type IncomeByStream, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { addDays } from "@/lib/dates";
 import { formatINR, formatNumber, formatPct } from "@/lib/money";
 import type { Granularity, ResolvedPeriod } from "@/lib/periods";
@@ -109,10 +109,10 @@ export default function DashboardPage() {
             </section>
           )}
 
-          <Section title="Financial result">
+          <Section title="AED Hospital — financial result (Hormonal Pharmacy separate, below)">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <Kpi label="Total Income" value={data.current.kpis.totalIncome} change={data.comparison.totalIncome} href={withRange("/daily-accounts", data.period.current.from, data.period.current.to)} hint="OPD + IPD collections + Lab + Pharmacy net sales + Diet + Other" emphasis />
-              <Kpi label="Total Expenses" value={data.current.kpis.totalExpenses} change={data.comparison.totalExpenses} goodWhen="down" href={withRange("/expenses", data.period.current.from, data.period.current.to)} hint="Hospital expenses + Pharmacy purchases + Other expenses" emphasis />
+              <Kpi label="Total Income" value={data.current.kpis.totalIncome} change={data.comparison.totalIncome} href={withRange("/daily-accounts", data.period.current.from, data.period.current.to)} hint="AED Hospital: OPD + IPD collections + Lab + Diet + Other (Hormonal Pharmacy excluded)" emphasis />
+              <Kpi label="Total Expenses" value={data.current.kpis.totalExpenses} change={data.comparison.totalExpenses} goodWhen="down" href={withRange("/expenses", data.period.current.from, data.period.current.to)} hint="AED Hospital: hospital + other expenses (pharmacy stock and staff excluded)" emphasis />
               <Kpi label="Net Operating Result" value={data.current.kpis.netOperatingResult} change={data.comparison.netOperatingResult} hint="Total Income − Total Expenses" emphasis />
             </div>
           </Section>
@@ -123,7 +123,7 @@ export default function DashboardPage() {
             <div className="xl:col-span-2">
               <Section title="Income">
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                  {INCOME_STREAMS.map((s) => (
+                  {AED_INCOME_STREAMS.map((s) => (
                     <Kpi key={s} label={STREAM_LABELS[s]} value={data.current.income[s]} change={data.comparison[s.toLowerCase()]} href={withRange(STREAM_HREF[s], data.period.current.from, data.period.current.to)} swatch={STREAM_COLORS[s]} />
                   ))}
                 </div>
@@ -132,7 +132,6 @@ export default function DashboardPage() {
             <Section title="Expenditure">
               <div className="grid grid-cols-2 gap-3 xl:grid-cols-1">
                 <Kpi label={EXPENSE_LABELS.HOSPITAL} value={data.current.expense.HOSPITAL} change={data.comparison.hospitalExpenses} goodWhen="down" href={withRange("/expenses?group=HOSPITAL", data.period.current.from, data.period.current.to)} />
-                <Kpi label={EXPENSE_LABELS.PHARMACY_PURCHASE} value={data.current.expense.PHARMACY_PURCHASE} change={data.comparison.pharmacyPurchases} goodWhen="down" href={withRange("/pharmacy?tab=purchases", data.period.current.from, data.period.current.to)} />
                 <Kpi label={EXPENSE_LABELS.OTHER} value={data.current.expense.OTHER} change={data.comparison.otherExpenses} goodWhen="down" href={withRange("/expenses?group=OTHER", data.period.current.from, data.period.current.to)} />
               </div>
             </Section>
@@ -159,21 +158,21 @@ export default function DashboardPage() {
               <ChartCard
                 title={data.period.current.from === data.period.current.to ? "Income — last 14 days" : "Income by stream"}
                 subtitle="Click a bar to see that day's accounts"
-                table={{ columns: [{ key: "bucket", label: "Period" }, ...INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], format: "money" as const })), { key: "expenses", label: "Expenses", format: "money" as const }], rows: data.trend }}
+                table={{ columns: [{ key: "bucket", label: "Period" }, ...AED_INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], format: "money" as const })), { key: "expenses", label: "Expenses", format: "money" as const }], rows: data.trend }}
               >
                 <BarsChart
                   data={data.trend}
                   xKey="bucket"
                   stacked
                   granularity={data.trendGranularity}
-                  series={INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], color: STREAM_COLORS[s] }))}
+                  series={AED_INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], color: STREAM_COLORS[s] }))}
                   onBarClick={(row) => data.trendGranularity === "day" ? router.push(`/daily-accounts?date=${row.bucket}`) : router.push(withRange("/daily-accounts", String(row.bucket), data.trendGranularity === "week" ? addDays(String(row.bucket), 6) : String(row.bucket)))}
                 />
               </ChartCard>
             </div>
             <ChartCard title="Revenue mix" subtitle="Click a segment to drill down" height={260}>
               <DonutChart
-                data={INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], value: Math.max(0, data.current.income[s]), color: STREAM_COLORS[s] }))}
+                data={AED_INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], value: Math.max(0, data.current.income[s]), color: STREAM_COLORS[s] }))}
                 onSliceClick={(d) => d.key && router.push(withRange(STREAM_HREF[d.key], data.period.current.from, data.period.current.to))}
               />
             </ChartCard>

@@ -22,9 +22,16 @@ export const STREAM_LABELS: Record<IncomeStream, string> = {
 
 export const EXPENSE_LABELS: Record<ExpenseKind, string> = {
   HOSPITAL: "Hospital Expenses",
-  PHARMACY_PURCHASE: "Hormonal Pharmacy Purchases",
+  PHARMACY_PURCHASE: "Hormonal Pharmacy costs (stock & staff)",
   OTHER: "Other Expenses",
 };
+
+/**
+ * AED Hospital and Hormonal Pharmacy are separate entities. Every hospital total in the app
+ * (income, expenses, net result, reconciliation) is AED only; the pharmacy is reported on its own.
+ */
+export const AED_INCOME_STREAMS = ["OPD", "IPD", "LAB", "DIET", "OTHER"] as const satisfies readonly IncomeStream[];
+export const AED_EXPENSE_KINDS = ["HOSPITAL", "OTHER"] as const satisfies readonly ExpenseKind[];
 
 export type IncomeByStream = Record<IncomeStream, number>;
 export type ExpenseByKind = Record<ExpenseKind, number>;
@@ -36,14 +43,14 @@ export function emptyExpense(): ExpenseByKind {
   return { HOSPITAL: 0, PHARMACY_PURCHASE: 0, OTHER: 0 };
 }
 
-/** Gross Income = OPD + IPD + Lab + Pharmacy (net of returns) + Diet + Other. */
+/** AED Hospital income = OPD + IPD + Lab + Diet + Other (the Hormonal Pharmacy is a separate entity). */
 export function totalIncome(i: IncomeByStream): number {
-  return sum(INCOME_STREAMS.map((s) => i[s]));
+  return sum(AED_INCOME_STREAMS.map((s) => i[s]));
 }
 
-/** Total Expenses = Hospital operating + Pharmacy purchases + Other. */
+/** AED Hospital expenses = Hospital operating + Other (pharmacy stock and staff belong to the pharmacy). */
 export function totalExpenses(e: ExpenseByKind): number {
-  return sum(EXPENSE_KINDS.map((k) => e[k]));
+  return sum(AED_EXPENSE_KINDS.map((k) => e[k]));
 }
 
 /** Net Operating Result = Total Income − Total Expenses. */

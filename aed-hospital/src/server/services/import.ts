@@ -25,6 +25,7 @@ import { canonicalItemName, itemFingerprint, itemForm, normalizeItemRow, type It
 import { normalizePaymentRow, paymentFingerprint, type SupplierPaymentInput } from "@/lib/import/payments";
 import { convertHmsSheet, HmsReportError, HMS_LABELS, type ConvertedSheet } from "@/lib/import/hms";
 import { fingerprintFor } from "./modules";
+import { refreshClosedDays } from "./daily";
 import { bulkInsertPrepared, insertRecord, prepareRecord } from "./transactions";
 import { withBulkCache } from "../bulk-cache";
 
@@ -158,6 +159,8 @@ export async function loadMasterCtx(tx: Tx = prisma): Promise<MasterCtx> {
 const validateInput = z.object({
   type: z.string().refine(isImportType, "Unknown import type"),
   mapping: z.record(z.string(), z.string().nullable()),
+  /** Admin historical backfill: rows on closed days become warnings instead of errors. */
+  intoClosedDays: z.boolean().optional(),
 });
 
 interface RowOutcome {
@@ -182,7 +185,8 @@ function labelFor(module: ModuleKey, key: string) {
 
 export async function validateBatch(actor: Actor, batchId: string, raw: unknown) {
   requirePermission(actor, "import.run");
-  const { type, mapping } = validateInput.parse(raw) as { type: ImportType; mapping: Mapping };
+  const { type, mapping, intoClosedDays } = validateInput.parse(raw) as { type: ImportType; mapping: Mapping; intoClosedDays?: boolean };
+  if (intoClosedDays) requirePermission(actor, "accounts.reopen");
   const batch = await prisma.importBatch.findUnique({ where: { id: batchId } });
   if (!batch) throw notFound("Import batch not found");
   if (!["UPLOADED", "VALIDATED"].includes(batch.status)) throw badRequest(`Batch is already ${batch.status.toLowerCase()}`);
@@ -218,7 +222,10 @@ export async function validateBatch(actor: Actor, batchId: string, raw: unknown)
   const seen = new Map<string, number>();
   const outcomes: RowOutcome[] = results.map((r) => {
     const date = (r.n.input?.date ?? r.n.input?.admissionDate) as ISODate | undefined;
-    if (date && statuses.get(date) === "CLOSED") r.errors.push(`Day ${date} is closed — reopen it before importing into it`);
+    if (date && statuses.get(date) === "CLOSED") {
+      if (intoClosedDays) r.warnings.push(`Day ${date} is closed — will be added as a historical backfill and the day's closing totals refreshed`);
+      else r.errors.push(`Day ${date} is closed — reopen it, or as Admin tick "Import into closed days (historical backfill)"`);
+    }
     let status: ImportRowStatus = r.errors.length ? "INVALID" : r.warnings.length ? "WARNING" : "VALID";
     let duplicateOf: string | null = null;
     if (status !== "INVALID" && r.fingerprint) {
@@ -644,6 +651,7 @@ export async function setDuplicateDecision(actor: Actor, batchId: string, raw: u
 const commitInput = z.object({
   approveWarnings: z.boolean().default(false),
   duplicatePolicy: z.enum(["skip", "import"]).default("skip"),
+  intoClosedDays: z.boolean().default(false),
 });
 
 /** Create any master rows referenced by placeholders; returns placeholder → real id. */
@@ -745,8 +753,9 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
     (r.status === "DUPLICATE" && (r.forceImport || opts.duplicatePolicy === "import") && (!(r.warnings as string[] | null)?.length || opts.approveWarnings));
   const toImport = records.filter(importable);
   if (!toImport.length) throw badRequest("Nothing to import. Approve warnings or fix errors and re-upload.");
+  if (opts.intoClosedDays) requirePermission(actor, "accounts.reopen");
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     // Claim the batch (guards against a double click / concurrent commit).
     const claimed = await tx.importBatch.updateMany({ where: { id: batchId, status: "VALIDATED" }, data: { status: "IMPORTED", committedAt: new Date() } });
     if (!claimed.count) throw conflict("This batch is already being imported");
@@ -790,7 +799,7 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
         }
       }
       await bulkInsertPrepared(tx, bulk);
-    });
+    }, { allowClosed: opts.intoClosedDays });
     // Rewrite the staging rows in bulk (one delete + chunked inserts instead of one UPDATE per row).
     await tx.importRecord.deleteMany({ where: { batchId } });
     const rewritten = records.map((r) => {
@@ -823,8 +832,13 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
       entityId: batchId,
       after: { fileName: batch.fileName, sheet: batch.sheetName, type: batch.module, found: records.length, imported, rejected, amount, options: opts, newMasters: [...masterMap.keys()].map((k) => parsePlaceholder(k)) },
     });
-    return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected, amount, newMasters: createdCount };
+    return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected, amount, newMasters: createdCount, touchedDates: [...touchedDates] };
   }, LONG_TX);
+  // Closed days that received backfilled rows keep their status; their closing totals are refreshed and logged.
+  const { touchedDates: dates, ...rest } = result;
+  let backfilledClosedDays = 0;
+  if (opts.intoClosedDays && dates.length) backfilledClosedDays = await refreshClosedDays(actor, dates, `Historical import: ${batch.fileName}${batch.sheetName ? ` (${batch.sheetName})` : ""}`);
+  return { ...rest, backfilledClosedDays };
 }
 
 export async function cancelBatch(actor: Actor, batchId: string) {

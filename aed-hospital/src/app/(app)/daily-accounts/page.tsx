@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Lock, LockOpen, FileDown } from "lucide-react";
 import { apiFetch, cn, download, useApi } from "@/lib/client";
-import { EXPENSE_LABELS, INCOME_STREAMS, STREAM_LABELS, type Counts, type ExpenseByKind, type IncomeByStream } from "@/lib/accounting";
+import { EXPENSE_LABELS, STREAM_LABELS, type Counts, type ExpenseByKind, type IncomeByStream, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { addDays, formatDate, formatDateTime } from "@/lib/dates";
 import { formatINR, formatNumber, round2 } from "@/lib/money";
 import { STREAM_HREF, withRange } from "@/lib/drill";
@@ -31,6 +31,8 @@ interface Statement {
   netOperatingResult: number;
   collectionsByMode: Record<string, number>;
   paymentsByMode: Record<string, number>;
+  streamByMode: { stream: string; group: string; amount: number }[];
+  spreadExpenses: number;
   status: "OPEN" | "REVIEW" | "RECONCILED" | "CLOSED";
   reviewedBy: string | null;
   reconciledBy: string | null;
@@ -141,10 +143,10 @@ function DayView({ date }: { date: string }) {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Income">
+        <Card title="AED Hospital — income">
           <table className="table">
             <tbody>
-              {INCOME_STREAMS.map((s) => (
+              {AED_INCOME_STREAMS.map((s) => (
                 <tr key={s}>
                   <td>
                     <Link className="hover:underline" href={r(STREAM_HREF[s])}>
@@ -155,13 +157,13 @@ function DayView({ date }: { date: string }) {
                 </tr>
               ))}
               <tr>
-                <td className="font-semibold">TOTAL INCOME</td>
+                <td className="font-semibold">AED TOTAL INCOME</td>
                 <td className="num font-semibold">{formatINR(data.totalIncome, { paise: true })}</td>
               </tr>
             </tbody>
           </table>
         </Card>
-        <Card title="Expenses">
+        <Card title="AED Hospital — expenses">
           <table className="table">
             <tbody>
               <tr>
@@ -174,14 +176,6 @@ function DayView({ date }: { date: string }) {
               </tr>
               <tr>
                 <td>
-                  <Link className="hover:underline" href={r("/pharmacy?tab=purchases")}>
-                    {EXPENSE_LABELS.PHARMACY_PURCHASE}
-                  </Link>
-                </td>
-                <td className="num">{formatINR(data.expense.PHARMACY_PURCHASE, { paise: true })}</td>
-              </tr>
-              <tr>
-                <td>
                   <Link className="hover:underline" href={r("/expenses?group=OTHER")}>
                     {EXPENSE_LABELS.OTHER}
                   </Link>
@@ -189,11 +183,18 @@ function DayView({ date }: { date: string }) {
                 <td className="num">{formatINR(data.expense.OTHER, { paise: true })}</td>
               </tr>
               <tr>
-                <td className="font-semibold">TOTAL EXPENSE</td>
+                <td className="font-semibold">AED TOTAL EXPENSE</td>
                 <td className="num font-semibold">{formatINR(data.totalExpenses, { paise: true })}</td>
               </tr>
+              {data.spreadExpenses > 0 && (
+                <tr>
+                  <td colSpan={2} className="text-xs muted">
+                    Includes {formatINR(data.spreadExpenses)} — this day&apos;s share of monthly expenses (rent, salaries…) spread over the month.
+                  </td>
+                </tr>
+              )}
               <tr>
-                <td className="font-semibold">NET OPERATING RESULT</td>
+                <td className="font-semibold">AED NET RESULT</td>
                 <td className="num text-base font-bold" style={{ color: data.netOperatingResult < 0 ? "var(--bad)" : "var(--good)" }}>
                   {formatINR(data.netOperatingResult, { paise: true })}
                 </td>
@@ -202,6 +203,53 @@ function DayView({ date }: { date: string }) {
           </table>
         </Card>
       </div>
+
+      {(data.income.PHARMACY !== 0 || data.expense.PHARMACY_PURCHASE !== 0) && (
+        <Card title="Hormonal Pharmacy — separate entity, not included in the AED figures above">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <table className="table">
+              <tbody>
+                <tr>
+                  <td>
+                    <Link className="hover:underline" href={r("/pharmacy")}>
+                      Sales (net of returns)
+                    </Link>
+                  </td>
+                  <td className="num">{formatINR(data.income.PHARMACY, { paise: true })}</td>
+                </tr>
+                <tr>
+                  <td>
+                    <Link className="hover:underline" href={r("/pharmacy?tab=purchases")}>
+                      {EXPENSE_LABELS.PHARMACY_PURCHASE}
+                    </Link>
+                  </td>
+                  <td className="num">{formatINR(data.expense.PHARMACY_PURCHASE, { paise: true })}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="text-sm">
+              <p className="mb-1 text-xs font-medium text-2">Pharmacy collections by mode (its own counter — not in AED reconciliation)</p>
+              <ul className="space-y-0.5">
+                {data.streamByMode
+                  .filter((x) => x.stream === "PHARMACY" && x.amount)
+                  .map((x) => (
+                    <li key={x.group} className="flex justify-between">
+                      <span>{x.group === "BANK" ? "Bank transfer" : x.group === "UPI" ? "UPI" : x.group[0] + x.group.slice(1).toLowerCase()}</span>
+                      <span className="tabular-nums">{formatINR(x.amount)}</span>
+                    </li>
+                  ))}
+              </ul>
+              <p className="mt-2 text-xs muted">
+                Sales are not profit: medicine costs come in by supplier invoice on other days. Read the pharmacy month by month on{" "}
+                <Link className="underline" href={`/hormonal-pharmacy?month=${data.date.slice(0, 7)}`}>
+                  Hormonal Pharmacy → accounts
+                </Link>
+                .
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <Card
         title="Payment modes & reconciliation"

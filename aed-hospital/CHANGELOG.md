@@ -2,6 +2,20 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.11.0: AED Hospital and Hormonal Pharmacy fully separated
+- Every hospital total is now **AED Hospital only**: Total Income = OPD + IPD + Lab + Diet + Other; Total Expenses = hospital + other expenses; Net Result = the difference. This applies to the Dashboard, Daily Accounts, the daily PDF, Analytics, Reports, insights and the Board Meeting pack.
+- Hormonal Pharmacy sales, stock purchases and **expenses booked to department "Pharmacy"** (pharmacy staff) are reported only in the pharmacy's own places: Daily Accounts' separate "Hormonal Pharmacy — separate entity" card, Hormonal Pharmacy → accounts, Analytics → Hormonal Pharmacy and the AED vs Pharmacy P&L.
+- Daily reconciliation covers AED collections and payments only; the pharmacy counter's collections by mode are shown separately.
+- Closing drift on days closed before this change re-totals the stored snapshot the AED way, so no false "changed since closing" warnings.
+- Daily Accounts shows how much of the day's expenses is its share of spread monthly expenses.
+- Migration `20261003010000_pharmacy_department_costs`.
+
+## 0.10.2: Historical backfill into closed days; import all sheets at once
+- Admin option on Excel Import, **Import into closed days (historical backfill)**: rows on closed days become warnings instead of errors and are imported; each closed day stays closed, its closing totals are refreshed, and a BACKFILL entry is written to the day's history and the audit log.
+- Closing drift ("changed since closing") ignores the day's share of spread monthly expenses.
+- "Check all / Import all" now works for any multi-sheet file whose columns all match (e.g. one sheet per month), not only OneGlance reports.
+- The expense importer now reads the "Spread over month" column.
+
 ## 0.10.1: Monthly expenses spread over the month
 - Expenses can be marked **Spread over the month** (form checkbox, ticked automatically for monthly heads such as rent and salaries; import column "Spread over month" = Yes). In every day-level figure (Daily Accounts, daily PDF, day trends, week ranges) such an expense is split evenly over the days of its month; month and year totals are unchanged.
 - Spread expenses are left out of "expenses paid" by payment mode in daily reconciliation, since their real payment day is not known.

@@ -3,7 +3,7 @@
  */
 import { z } from "zod";
 import type { DayStatus, ReconGroup } from "@prisma/client";
-import { reconVariance, totalExpenses, totalIncome } from "@/lib/accounting";
+import { reconVariance, totalExpenses, totalIncome, type ExpenseByKind, type IncomeByStream } from "@/lib/accounting";
 import { addDays, fromDbDate, isISODate, toDbDate, todayISO, type ISODate } from "@/lib/dates";
 import { round2, toNum } from "@/lib/money";
 import { audit } from "../audit";
@@ -37,7 +37,32 @@ async function dayFigures(date: ISODate) {
   ]);
   const ti = totalIncome(income);
   const te = totalExpenses(expense);
-  return { income, expense, counts, totalIncome: ti, totalExpenses: te, netOperatingResult: round2(ti - te), collectionsByMode: byGroup, paymentsByMode: expenseGroups, streamByMode: streamGroups };
+  const [spread] = await prisma.$queryRaw<{ amount: number | null }[]>`
+    SELECT SUM(amount)::float AS amount FROM v_expense_line WHERE spread AND kind <> 'PHARMACY_PURCHASE' AND date = ${toDbDate(date)}`;
+  // The day's share of monthly expenses (rent, payroll) spread over the month: part of the day's
+  // result, but not a payment made that day, so closing checks ignore it.
+  const spreadExpenses = round2(spread?.amount ?? 0);
+  return { income, expense, counts, totalIncome: ti, totalExpenses: te, spreadExpenses, netOperatingResult: round2(ti - te), collectionsByMode: byGroup, paymentsByMode: expenseGroups, streamByMode: streamGroups };
+}
+
+/**
+ * After an Admin's historical backfill into closed days: keep each day closed, refresh its closing
+ * snapshot to include the backfilled rows, and record why in the day's history and the audit log.
+ */
+export async function refreshClosedDays(actor: Actor, dates: ISODate[], reason: string): Promise<number> {
+  let n = 0;
+  for (const date of dates) {
+    const day = await prisma.dailyAccount.findUnique({ where: { date: toDbDate(date) } });
+    if (day?.status !== "CLOSED") continue;
+    const figures = await dayFigures(date);
+    await prisma.$transaction(async (tx) => {
+      await tx.dailyAccount.update({ where: { id: day.id }, data: { closingSnapshot: JSON.parse(JSON.stringify({ ...figures, closedAt: day.closedAt, backfilledAt: new Date() })) } });
+      await tx.dayEvent.create({ data: { dailyAccountId: day.id, fromStatus: "CLOSED", toStatus: "CLOSED", action: "BACKFILL", reason, userId: actor.id } });
+      await audit(tx, actor, { action: "DAY_BACKFILL", entityType: "DailyAccount", entityId: day.id, after: { date, totalIncome: figures.totalIncome, totalExpenses: figures.totalExpenses }, reason });
+    });
+    n++;
+  }
+  return n;
 }
 
 export async function getDailyStatement(actor: Actor, dateRaw: string) {
@@ -54,10 +79,16 @@ export async function getDailyStatement(actor: Actor, dateRaw: string) {
   const userIds = [...new Set([day?.closedById, day?.reviewedById, day?.reconciledById, ...(day?.events.map((e) => e.userId) ?? [])].filter(Boolean) as string[])];
   const users = await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } });
   const uname = (id?: string | null) => users.find((u) => u.id === id)?.name ?? null;
-  const snapshot = day?.closingSnapshot as { totalIncome: number; totalExpenses: number } | null;
+  const raw = day?.closingSnapshot as { totalIncome: number; totalExpenses: number; spreadExpenses?: number; income?: IncomeByStream; expense?: ExpenseByKind } | null;
+  // Snapshots taken before the entities were separated included the pharmacy; re-total them the AED way.
+  const snapshot = raw ? { ...raw, totalIncome: raw.income ? totalIncome(raw.income) : raw.totalIncome, totalExpenses: raw.expense ? totalExpenses(raw.expense) : raw.totalExpenses } : null;
+  // Spread monthly expenses move between days of the month by design; only real day entries count as drift.
   const drift =
     day?.status === "CLOSED" && snapshot
-      ? { income: round2(figures.totalIncome - snapshot.totalIncome), expenses: round2(figures.totalExpenses - snapshot.totalExpenses) }
+      ? {
+          income: round2(figures.totalIncome - snapshot.totalIncome),
+          expenses: round2(figures.totalExpenses - figures.spreadExpenses - (snapshot.totalExpenses - (snapshot.spreadExpenses ?? 0))),
+        }
       : null;
   return {
     date,
@@ -209,10 +240,10 @@ export async function listDays(actor: Actor, from: ISODate, to: ISODate) {
     prisma.dailyAccount.findMany({ where: { date: { gte: toDbDate(from), lte: toDbDate(to) } }, include: { reconciliations: true } }),
     prisma.$queryRaw<{ date: Date; income: number; lines: bigint }[]>`
       SELECT date, SUM(amount)::float AS income, COUNT(*) AS lines FROM v_income_line
-       WHERE date BETWEEN ${toDbDate(from)} AND ${toDbDate(to)} GROUP BY date`,
+       WHERE date BETWEEN ${toDbDate(from)} AND ${toDbDate(to)} AND stream <> 'PHARMACY' GROUP BY date`,
   ]);
   const expenses = await prisma.$queryRaw<{ date: Date; amount: number }[]>`
-    SELECT date, SUM(amount)::float AS amount FROM v_expense_line WHERE date BETWEEN ${toDbDate(from)} AND ${toDbDate(to)} GROUP BY date`;
+    SELECT date, SUM(amount)::float AS amount FROM v_expense_line WHERE date BETWEEN ${toDbDate(from)} AND ${toDbDate(to)} AND kind <> 'PHARMACY_PURCHASE' GROUP BY date`;
   const out = [];
   for (let d = to; d >= from; d = addDays(d, -1)) {
     const day = days.find((x) => fromDbDate(x.date) === d);

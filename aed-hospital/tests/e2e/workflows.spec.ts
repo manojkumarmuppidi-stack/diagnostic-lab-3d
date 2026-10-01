@@ -60,8 +60,8 @@ test("historical Excel/CSV import: map, validate, confirm, see it in reports", a
 test("daily accounts show the statement and closing workflow", async ({ page }) => {
   await login(page);
   await page.goto("/daily-accounts");
-  await expect(page.getByRole("cell", { name: "TOTAL INCOME" })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "NET OPERATING RESULT" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "AED TOTAL INCOME" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "AED NET RESULT" })).toBeVisible();
   await expect(page.getByText("Payment modes & reconciliation")).toBeVisible();
 });
 
@@ -174,7 +174,7 @@ test("one-page daily summary: dashboard button, figures and print layout", async
   // Open without auto-print (the print dialog would block the test browser).
   await page.goto(href!.replace("&print=1", ""));
   await expect(page.getByText(/Daily summary — /)).toBeVisible();
-  await expect(page.getByText("Total income").first()).toBeVisible();
+  await expect(page.getByText("AED Hospital income").first()).toBeVisible();
   await page.getByRole("button", { name: "Previous day" }).click();
   await expect(page).toHaveURL(/date=\d{4}-\d{2}-\d{2}$/);
   await expect(page.getByText(/Daily summary — /)).toBeVisible();

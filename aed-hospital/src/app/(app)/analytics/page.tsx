@@ -4,7 +4,7 @@ import { FreshnessBanner } from "@/components/FreshnessBanner";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { qs, useApi } from "@/lib/client";
-import { INCOME_STREAMS, STREAM_LABELS, EXPENSE_LABELS, compare } from "@/lib/accounting";
+import { STREAM_LABELS, EXPENSE_LABELS, compare, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { addDays, addMonths, formatDayMonth, formatMonth } from "@/lib/dates";
 import { formatINR, formatNumber } from "@/lib/money";
 import type { Granularity } from "@/lib/periods";
@@ -143,13 +143,13 @@ function Inner() {
 
 type P = { d: any; g: Granularity; drill: (href: string, bucket?: string) => void };
 const grid6 = "grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6";
-const streamSeries = INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], color: STREAM_COLORS[s] }));
+const streamSeries = AED_INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], color: STREAM_COLORS[s] }));
 
 function Revenue({ d, g, drill, filtered }: P & { filtered: boolean }) {
   return (
     <>
       <div className={grid6}>
-        {INCOME_STREAMS.map((s) => (
+        {AED_INCOME_STREAMS.map((s) => (
           <Kpi key={s} label={STREAM_LABELS[s]} value={d.byStream[s]} swatch={STREAM_COLORS[s]} href={undefined} />
         ))}
       </div>
@@ -159,7 +159,7 @@ function Revenue({ d, g, drill, filtered }: P & { filtered: boolean }) {
       </ChartCard>
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Revenue mix" subtitle={`Total ${formatINR(d.total)}`}>
-          <DonutChart data={INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], value: Math.max(0, d.byStream[s]), color: STREAM_COLORS[s] }))} onSliceClick={(x) => x.key && drill(STREAM_HREF[x.key])} />
+          <DonutChart data={AED_INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], value: Math.max(0, d.byStream[s]), color: STREAM_COLORS[s] }))} onSliceClick={(x) => x.key && drill(STREAM_HREF[x.key])} />
         </ChartCard>
         <ChartCard title="OPD · IPD · Lab · Pharmacy trend" table={{ columns: [{ key: "bucket", label: "Period" }, ...streamSeries.slice(0, 4).map((s) => ({ key: s.key, label: s.label, format: "money" as const }))], rows: d.series }}>
           <TrendChart data={d.series} xKey="bucket" granularity={g} series={streamSeries.slice(0, 4)} onPointClick={(r) => drill("/daily-accounts", String(r.bucket))} />
@@ -660,7 +660,6 @@ function Expense({ d, g, drill }: P) {
       <div className={grid6}>
         <Kpi label="Total expenses" value={t.total} />
         <Kpi label={EXPENSE_LABELS.HOSPITAL} value={t.HOSPITAL} href={undefined} />
-        <Kpi label={EXPENSE_LABELS.PHARMACY_PURCHASE} value={t.PHARMACY_PURCHASE} />
         <Kpi label={EXPENSE_LABELS.OTHER} value={t.OTHER} />
         <Kpi label="Average daily expense" value={t.avgDaily} />
       </div>

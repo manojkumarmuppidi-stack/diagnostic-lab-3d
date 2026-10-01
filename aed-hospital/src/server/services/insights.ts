@@ -5,7 +5,7 @@
  * dashboard, so every number reconciles with Daily Accounts and Reports.
  */
 import { Prisma } from "@prisma/client";
-import { EXPENSE_LABELS, INCOME_STREAMS, STREAM_LABELS, totalExpenses, totalIncome } from "@/lib/accounting";
+import { EXPENSE_LABELS, STREAM_LABELS, totalExpenses, totalIncome, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { addMonths, endOfMonth, startOfMonth, todayISO, toDbDate, formatMonth } from "@/lib/dates";
 import { crossInsights, insightsFromComparison, insightsFromKpis, rankInsights, type Comparison, type Insight, type KpiCompare } from "@/lib/insights";
 import { round2, toNum } from "@/lib/money";
@@ -99,8 +99,8 @@ async function overview(cur: Range, prev: Range, prevLabel: string): Promise<Sec
     { key: "admissions", label: "IPD admissions", current: a.counts.admissions, previous: b.counts.admissions, unit: "int" },
   ];
   const comparisons: Comparison[] = [
-    { id: "income-stream", title: "Income by stream", noun: "stream", unit: "money", rows: INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], current: a.income[s], previous: b.income[s] })) },
-    { id: "expense-kind", title: "Expenditure", noun: "head", unit: "money", goodWhen: "down", rows: (["HOSPITAL", "PHARMACY_PURCHASE", "OTHER"] as const).map((k) => ({ key: k, name: EXPENSE_LABELS[k], current: a.expense[k], previous: b.expense[k] })) },
+    { id: "income-stream", title: "Income by stream", noun: "stream", unit: "money", rows: AED_INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], current: a.income[s], previous: b.income[s] })) },
+    { id: "expense-kind", title: "Expenditure", noun: "head", unit: "money", goodWhen: "down", rows: (["HOSPITAL", "OTHER"] as const).map((k) => ({ key: k, name: EXPENSE_LABELS[k], current: a.expense[k], previous: b.expense[k] })) },
     { id: "collections-mode", title: "Collections by payment mode", noun: "mode", unit: "money", goodWhen: "none", rows: ["CASH", "UPI", "CARD", "BANK", "OTHER"].map((k) => ({ key: k, name: k === "BANK" ? "Bank transfer" : k === "UPI" ? "UPI" : k[0] + k.slice(1).toLowerCase(), current: ma[k] ?? 0, previous: mb[k] ?? 0 })) },
   ];
   const cross = crossInsights({ incomeCur: totalIncome(a.income), incomePrev: totalIncome(b.income), expenseCur: totalExpenses(a.expense), expensePrev: totalExpenses(b.expense), prevLabel });

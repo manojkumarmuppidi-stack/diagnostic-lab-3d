@@ -60,7 +60,7 @@ async function computeAlerts(
     const unclosed = await prisma.$queryRaw<{ date: Date }[]>`
       SELECT DISTINCT v.date FROM v_income_line v
         LEFT JOIN "DailyAccount" d ON d.date = v.date
-       WHERE v.date BETWEEN ${toDbDate(lookFrom)} AND ${toDbDate(yesterday)} AND COALESCE(d.status::text, 'OPEN') <> 'CLOSED'
+       WHERE v.stream <> 'PHARMACY' AND v.date BETWEEN ${toDbDate(lookFrom)} AND ${toDbDate(yesterday)} AND COALESCE(d.status::text, 'OPEN') <> 'CLOSED'
        ORDER BY v.date`;
     if (unclosed.length) {
       alerts.push({

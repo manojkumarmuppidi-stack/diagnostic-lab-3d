@@ -9,7 +9,7 @@ import { Suspense, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, FileDown } from "lucide-react";
 import { useApi } from "@/lib/client";
-import { INCOME_STREAMS, STREAM_LABELS } from "@/lib/accounting";
+import { STREAM_LABELS, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { addDays, formatDate, formatDateTime, formatDayMonth, todayISO } from "@/lib/dates";
 import { formatINR, formatINRCompact, formatNumber } from "@/lib/money";
 import { ErrorState, Spinner } from "@/components/ui";
@@ -43,7 +43,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: React
 function Sheet({ d }: { d: any }) {
   const t = d.today;
   const lw = d.lastWeek;
-  const streams = INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], today: t.byStream[s], lastWeek: lw.byStream[s] })).filter((x) => x.today || x.lastWeek);
+  const streams = AED_INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], today: t.byStream[s], lastWeek: lw.byStream[s] })).filter((x) => x.today || x.lastWeek);
   const modes = Object.entries(d.modes as Record<string, number>)
     .filter(([, v]) => v > 0)
     .map(([k, v], i) => ({ key: k, name: MODE_LABELS[k] ?? k, value: v, color: k === "OTHER" ? "var(--other-slice)" : SLOT(i) }));
@@ -60,7 +60,7 @@ function Sheet({ d }: { d: any }) {
           </div>
         </div>
         <div className="ds-total">
-          <div className="ds-label">Total income</div>
+          <div className="ds-label">AED Hospital income</div>
           <div className="ds-big">{formatINR(t.income)}</div>
           <div className="ds-sub">
             vs {d.compare.lastWeekLabel}: <Delta cur={t.income} prev={lw.income} money /> · yesterday <Delta cur={t.income} prev={d.yesterday.income} money />
@@ -78,9 +78,13 @@ function Sheet({ d }: { d: any }) {
             <Stat label="Patients" value={formatNumber(t.counts.patients)} sub={<Delta cur={t.counts.patients} prev={lw.counts.patients} />} />
             <Stat label="Consultations" value={formatNumber(t.counts.consultations)} sub={<span>New {formatNumber(t.counts.newConsultations)} · Old {formatNumber(t.counts.oldConsultations)}</span>} />
             <Stat label="Lab tests" value={formatNumber(t.counts.labTests)} sub={<Delta cur={t.counts.labTests} prev={lw.counts.labTests} />} />
-            <Stat label="Pharmacy bills" value={t.pharmacyBills === null ? "—" : formatNumber(t.pharmacyBills)} sub={t.pharmacyMargin === null ? undefined : <span>Margin {formatINRCompact(t.pharmacyMargin)}</span>} />
+            <Stat
+              label="Hormonal Pharmacy (separate)"
+              value={formatINRCompact(t.pharmacySales ?? 0)}
+              sub={<span>{t.pharmacyBills === null ? "" : `${formatNumber(t.pharmacyBills)} bills · `}not in AED totals</span>}
+            />
             <Stat label="IPD admissions" value={formatNumber(t.counts.admissions)} sub={<Delta cur={t.counts.admissions} prev={lw.counts.admissions} />} />
-            <Stat label="Expenses · Net" value={formatINRCompact(t.expenses)} sub={<span>Net {formatINRCompact(t.net ?? t.income - t.expenses)}</span>} />
+            <Stat label="AED expenses · Net" value={formatINRCompact(t.expenses)} sub={<span>Net {formatINRCompact(t.net ?? t.income - t.expenses)}</span>} />
           </section>
 
           <section className="ds-row">
@@ -221,7 +225,7 @@ function Sheet({ d }: { d: any }) {
       )}
 
       <footer className="ds-foot">
-        Income = collections on the day (OPD + IPD collections + Lab + Pharmacy net sales + Diet + Other). Pharmacy margin = sale value − purchase cost of medicines sold, ex-GST. Generated {formatDateTime(d.generatedAt)}.
+        AED Hospital income = collections on the day (OPD + IPD collections + Lab + Diet + Other); Hormonal Pharmacy is a separate entity and is not included. Expenses include the day&apos;s share of monthly expenses. Generated {formatDateTime(d.generatedAt)}.
       </footer>
     </article>
   );

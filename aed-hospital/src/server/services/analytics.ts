@@ -151,7 +151,7 @@ export async function incomeByReconGroup(r: Range) {
   const rows = await prisma.$queryRaw<{ grp: string; amount: Prisma.Decimal; lines: bigint }[]>`
     SELECT COALESCE(pm."reconGroup"::text, 'OTHER') AS grp, COALESCE(SUM(v.amount), 0) AS amount, COUNT(*) AS lines
       FROM v_income_line v LEFT JOIN "PaymentMode" pm ON pm.id = v.payment_mode_id
-     WHERE v.date BETWEEN ${D(r.from)} AND ${D(r.to)}
+     WHERE v.date BETWEEN ${D(r.from)} AND ${D(r.to)} AND v.stream <> 'PHARMACY'
      GROUP BY 1`;
   const out: Record<string, number> = { CASH: 0, CARD: 0, UPI: 0, BANK: 0, OTHER: 0 };
   for (const row of rows) out[row.grp] = toNum(row.amount);
@@ -164,7 +164,7 @@ export async function expenseByReconGroup(r: Range) {
       FROM v_expense_line v LEFT JOIN "PaymentMode" pm ON pm.id = v.payment_mode_id
      WHERE v.date BETWEEN ${D(r.from)} AND ${D(r.to)}
        -- Monthly expenses spread over the month were not paid on each day: leave them out of cash paid.
-       AND NOT v.spread
+       AND NOT v.spread AND v.kind <> 'PHARMACY_PURCHASE'
      GROUP BY 1`;
   const out: Record<string, number> = { CASH: 0, CARD: 0, UPI: 0, BANK: 0, OTHER: 0 };
   for (const row of rows) out[row.grp] = toNum(row.amount);
@@ -186,9 +186,10 @@ export async function incomeSeries(r: Range, g: Granularity, f: IncomeFilters = 
   const rows = await prisma.$queryRaw<{ bucket: Date; stream: string; amount: Prisma.Decimal }[]>`
     SELECT ${bucketExpr(g)} AS bucket, stream, COALESCE(SUM(amount), 0) AS amount
       FROM v_income_line WHERE ${incomeWhere(r, f)} GROUP BY 1, 2 ORDER BY 1`;
+  // AED expenses only: pharmacy stock and staff are the Hormonal Pharmacy's.
   const expenseRows = await prisma.$queryRaw<{ bucket: Date; amount: Prisma.Decimal }[]>`
     SELECT ${bucketExpr(g)} AS bucket, COALESCE(SUM(amount), 0) AS amount
-      FROM v_expense_line WHERE date BETWEEN ${D(r.from)} AND ${D(r.to)} GROUP BY 1 ORDER BY 1`;
+      FROM v_expense_line WHERE date BETWEEN ${D(r.from)} AND ${D(r.to)} AND kind <> 'PHARMACY_PURCHASE' GROUP BY 1 ORDER BY 1`;
   type Bucket = IncomeByStream & { expenses: number };
   const map = new Map<ISODate, Bucket>();
   for (const b of bucketsFor(r, g)) map.set(b, { ...emptyIncome(), expenses: 0 });
@@ -600,7 +601,7 @@ export async function expenseAnalytics(r: Range, g: Granularity, f: { department
        WHERE e.status = 'ACTIVE' AND e.date BETWEEN ${D(r.from)} AND ${D(r.to)} ${ef} GROUP BY 1, 2 ORDER BY 3 DESC`,
     prisma.$queryRaw<{ bucket: Date; amount: Prisma.Decimal }[]>`
       SELECT date_trunc('month', date)::date AS bucket, SUM(amount) AS amount FROM v_expense_line
-       WHERE date BETWEEN ${D(r.from)} AND ${D(r.to)} GROUP BY 1 ORDER BY 1`,
+       WHERE date BETWEEN ${D(r.from)} AND ${D(r.to)} AND kind <> 'PHARMACY_PURCHASE' GROUP BY 1 ORDER BY 1`,
     incomeSeries(r, g),
     prisma.expense.findMany({
       where: { status: "ACTIVE", date: { gte: D(r.from), lte: D(r.to) } },

@@ -108,6 +108,9 @@ Gross Margin %    = Gross Margin ÷ Net Sales × 100          (undefined when Ne
 - Expenses entered by an approver and rows imported from Excel are `ACTIVE` immediately.
 - Payment mode default for new expenses (a suggestion; staff can change it): below ₹3,000 Cash, above ₹1,00,000 Bank Transfer, otherwise Card.
 
+## AED Hospital totals (0.11.0 — supersedes the consolidated definitions above)
+Every hospital total in the app is AED Hospital only: Total Income = OPD + IPD collections + Lab + Diet + Other; Total Expenses = HOSPITAL + OTHER expenses, excluding expenses booked to department "Pharmacy"; Net Result = Total Income − Total Expenses. Daily reconciliation compares AED collections only. The Hormonal Pharmacy (sales net of returns; stock purchases + pharmacy-department expenses) is a separate entity reported on its own.
+
 ## Entities: AED Hospital and Hormonal Pharmacy (supersedes "Segments" below)
 - AED Hospital income = OPD + Lab + IPD collections + Diet + Other income. Expenses = every expense not tagged to the Pharmacy department.
 - Hormonal Pharmacy income = pharmacy sales net of returns. Expenses = pharmacy purchases + expenses tagged to department "Pharmacy".

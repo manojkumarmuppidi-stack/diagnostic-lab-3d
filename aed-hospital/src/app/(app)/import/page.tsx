@@ -28,6 +28,11 @@ interface UploadedBatch {
   note?: string | null;
 }
 
+/** Admin historical backfill (rows may land on closed days), toggled on the page and kept in the URL. */
+function useBackfill() {
+  return useSearchParams().get("backfill") === "1";
+}
+
 // ─────────────────────────── step 1: upload ───────────────────────────
 
 function UploadStep({ onUploaded }: { onUploaded: (b: UploadedBatch[], fileName: string) => void }) {
@@ -111,6 +116,7 @@ function UploadStep({ onUploaded }: { onUploaded: (b: UploadedBatch[], fileName:
 // ─────────────────────────── step 2: mapping ───────────────────────────
 
 function MappingStep({ batch, onValidated }: { batch: UploadedBatch; onValidated: () => void }) {
+  const backfill = useBackfill();
   const [type, setType] = useState<ImportType>(batch.type);
   const fields = useMemo(() => importFieldsFor(type), [type]);
   const [mapping, setMapping] = useState<Mapping>(batch.suggestion.mapping);
@@ -137,7 +143,7 @@ function MappingStep({ batch, onValidated }: { batch: UploadedBatch; onValidated
     setBusy(true);
     setErr(null);
     try {
-      await apiFetch(`/api/import/${batch.id}/validate`, { method: "POST", json: { type, mapping } });
+      await apiFetch(`/api/import/${batch.id}/validate`, { method: "POST", json: { type, mapping, intoClosedDays: backfill } });
       onValidated();
     } catch (e) {
       setErr((e as ApiError).message);
@@ -247,6 +253,7 @@ function MappingStep({ batch, onValidated }: { batch: UploadedBatch; onValidated
 // ─────────────────────────── step 3: review & commit ───────────────────────────
 
 function ReviewStep({ batchId, onDone, onRemap }: { batchId: string; onDone: (r: any) => void; onRemap: () => void }) {
+  const backfill = useBackfill();
   const can = useCan();
   const toast = useToast();
   const { data, reload } = useApi<any>(`/api/import/${batchId}`);
@@ -270,7 +277,7 @@ function ReviewStep({ batchId, onDone, onRemap }: { batchId: string; onDone: (r:
     }
   };
   const commit = async () => {
-    const r = await apiFetch<any>(`/api/import/${batchId}/commit`, { method: "POST", json: { approveWarnings, duplicatePolicy: dupPolicy } });
+    const r = await apiFetch<any>(`/api/import/${batchId}/commit`, { method: "POST", json: { approveWarnings, duplicatePolicy: dupPolicy, intoClosedDays: backfill } });
     toast("success", `Imported ${r.imported} rows (${formatINR(r.amount)})`);
     onDone(r);
   };
@@ -449,6 +456,7 @@ type BulkRow = { id: string; name: string; rows: number; state: "pending" | "che
 
 function HmsBulkImport({ batches, onFinished, onReviewOne }: { batches: UploadedBatch[]; onFinished: (r: any) => void; onReviewOne: (id: string) => void }) {
   const toast = useToast();
+  const backfill = useBackfill();
   const [items, setItems] = useState<BulkRow[]>(() => batches.map((b) => ({ id: b.id, name: b.sheetName, rows: b.rows, state: "pending" })));
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState(false);
@@ -466,7 +474,7 @@ function HmsBulkImport({ batches, onFinished, onReviewOne }: { batches: Uploaded
       if (item?.state === "checked" || item?.state === "imported") continue;
       set(b.id, { state: "checking", error: undefined });
       try {
-        const v = await apiFetch<any>(`/api/import/${b.id}/validate`, { method: "POST", json: { type: b.type, mapping: b.suggestion.mapping } });
+        const v = await apiFetch<any>(`/api/import/${b.id}/validate`, { method: "POST", json: { type: b.type, mapping: b.suggestion.mapping, intoClosedDays: backfill } });
         set(b.id, { state: "checked", summary: v.summary });
       } catch (e) {
         set(b.id, { state: "failed", error: (e as Error).message });
@@ -482,7 +490,7 @@ function HmsBulkImport({ batches, onFinished, onReviewOne }: { batches: Uploaded
       if (x.state !== "checked") continue;
       set(x.id, { state: "importing" });
       try {
-        const r = await apiFetch<any>(`/api/import/${x.id}/commit`, { method: "POST", json: { approveWarnings: true, duplicatePolicy: "skip" } });
+        const r = await apiFetch<any>(`/api/import/${x.id}/commit`, { method: "POST", json: { approveWarnings: true, duplicatePolicy: "skip", intoClosedDays: backfill } });
         set(x.id, { state: "imported", result: r });
         sum.imported += r.imported;
         sum.rejected += r.rejected;
@@ -499,9 +507,10 @@ function HmsBulkImport({ batches, onFinished, onReviewOne }: { batches: Uploaded
 
   const label: Record<BulkRow["state"], string> = { pending: "Not checked", checking: "Checking…", checked: "Checked", importing: "Importing…", imported: "Imported", failed: "Failed" };
   return (
-    <Card title={`Hospital billing report recognised — ${items.length} monthly batch${items.length > 1 ? "es" : ""}, ${formatNumber(items.reduce((a, x) => a + x.rows, 0))} rows`}>
+    <Card title={`${batches[0]?.note ? "Hospital billing report recognised" : "All columns recognised"} — ${items.length} batch${items.length > 1 ? "es" : ""}, ${formatNumber(items.reduce((a, x) => a + x.rows, 0))} rows`}>
       <div className="space-y-3 text-sm">
-        <p className="muted">{batches[0]?.note}</p>
+        <p className="muted">{batches[0]?.note ?? "Every sheet's columns were matched automatically. Check all sheets, then import them together — or open one with “Review rows”."}</p>
+        {backfill && <p style={{ color: "var(--status-warning)" }}>Historical backfill is on: rows on closed days will be added and those days&apos; closing totals refreshed.</p>}
         <div className="overflow-x-auto">
           <table className="table">
             <thead>
@@ -677,6 +686,16 @@ function Inner() {
   const activeBatch = batches.find((b) => b.id === active);
   /** For recognised HMS reports the bulk panel is the default; this switches to the one-batch review. */
   const [reviewOne, setReviewOne] = useState(false);
+  // Bulk "check all / import all" for recognised reports and for any multi-sheet file whose columns all matched.
+  const bulkReady = batches.length > 0 && batches.every((b) => b.note || (batches.length > 1 && !b.suggestion.missingRequired.length));
+  const can = useCan();
+  const backfill = sp.get("backfill") === "1";
+  const setBackfill = (on: boolean) => {
+    const n = new URLSearchParams(sp.toString());
+    if (on) n.set("backfill", "1");
+    else n.delete("backfill");
+    router.replace(`${path}?${n.toString()}`);
+  };
 
   const continueBatch = async (id: string) => {
     const d = await apiFetch<any>(`/api/import/${id}`);
@@ -696,12 +715,21 @@ function Inner() {
     <>
       <PageHeader title="Excel Import Centre" subtitle="Bring historical AED data in — analytics use each row's transaction date, never the upload date" />
       <div className="space-y-4">
-        <Tabs<Tab> value={tab} onChange={(t) => router.replace(`${path}?tab=${t}`)} tabs={[{ key: "import", label: "Import" }, { key: "history", label: "Import history" }]} />
+        <Tabs<Tab> value={tab} onChange={(t) => router.replace(`${path}?tab=${t}${backfill ? "&backfill=1" : ""}`)} tabs={[{ key: "import", label: "Import" }, { key: "history", label: "Import history" }]} />
+        {tab === "import" && can("accounts.reopen") && (
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={backfill} onChange={(e) => setBackfill(e.target.checked)} />
+            <span>
+              Import into closed days (historical backfill — Admin)
+              <span className="block text-xs muted">For past months that are already closed: the rows are added, each day stays closed, its closing totals are refreshed and the backfill is recorded in the day&apos;s history and the audit log.</span>
+            </span>
+          </label>
+        )}
         {tab === "history" ? (
           <History onContinue={continueBatch} />
         ) : (
           <>
-            {batches.length > 1 && stage !== "upload" && (!batches.every((b) => b.note) || reviewOne) && (
+            {batches.length > 1 && stage !== "upload" && (!bulkReady || reviewOne) && (
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="muted">{fileName} — sheets:</span>
                 {batches.map((b) => (
@@ -729,7 +757,7 @@ function Inner() {
                 }}
               />
             )}
-            {stage === "map" && batches.length > 0 && batches.every((b) => b.note) && !reviewOne && (
+            {stage === "map" && batches.length > 0 && bulkReady && !reviewOne && (
               <HmsBulkImport
                 key={batches.map((b) => b.id).join()}
                 batches={batches}
@@ -745,7 +773,7 @@ function Inner() {
                 }}
               />
             )}
-            {stage === "map" && activeBatch && (!batches.every((b) => b.note) || reviewOne) && <MappingStep key={activeBatch.id} batch={activeBatch} onValidated={() => setStage("review")} />}
+            {stage === "map" && activeBatch && (!bulkReady || reviewOne) && <MappingStep key={activeBatch.id} batch={activeBatch} onValidated={() => setStage("review")} />}
             {stage === "review" && active && (
               <ReviewStep
                 key={active}

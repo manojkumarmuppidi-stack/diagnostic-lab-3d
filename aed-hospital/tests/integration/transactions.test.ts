@@ -3,7 +3,7 @@ import { prisma } from "@/server/db";
 import { AppError } from "@/server/errors";
 import { createTransaction, correctTransaction, listTransactions, reviewCorrection, voidTransaction } from "@/server/services/transactions";
 import { changeDayStatus, getDailyStatement, saveReconciliation } from "@/server/services/daily";
-import { expenseByKind, incomeByStream, operationalCounts, outstandingIpd, periodSummary, pharmacyAnalytics } from "@/server/services/analytics";
+import { expenseByKind, incomeByReconGroup, incomeByStream, operationalCounts, outstandingIpd, periodSummary, pharmacyAnalytics } from "@/server/services/analytics";
 import { seedFixture, type Fixture } from "../helpers/db";
 
 let f: Fixture;
@@ -191,10 +191,17 @@ describe("pharmacy & expenses", () => {
     const r = { from: D, to: D };
     expect((await incomeByStream(r)).PHARMACY).toBe(9200);
     expect(await expenseByKind(r)).toEqual({ HOSPITAL: 1200, PHARMACY_PURCHASE: 7000, OTHER: 100 });
+    // AED Hospital totals leave the Hormonal Pharmacy out entirely (separate entity).
     const s = await periodSummary(r);
-    expect(s.kpis.totalIncome).toBe(9200);
-    expect(s.kpis.totalExpenses).toBe(8300);
-    expect(s.kpis.netOperatingResult).toBe(900);
+    expect(s.kpis.totalIncome).toBe(0);
+    expect(s.kpis.totalExpenses).toBe(1300);
+    expect(s.kpis.netOperatingResult).toBe(-1300);
+    expect(await incomeByReconGroup(r)).toMatchObject({ CASH: 0 });
+    // Expenses booked to department "Pharmacy" are pharmacy costs, not AED expenses.
+    const dept = await prisma.department.create({ data: { name: "Pharmacy" } });
+    await createTransaction(f.admin, "expense", { date: D, categoryId: f.ids.otherExp, departmentId: dept.id, description: "Pharmacist salary", amount: 500, paymentModeId: f.ids.CASH });
+    expect(await expenseByKind(r)).toEqual({ HOSPITAL: 1200, PHARMACY_PURCHASE: 7500, OTHER: 100 });
+    expect((await periodSummary(r)).kpis.totalExpenses).toBe(1300);
     const ph = await pharmacyAnalytics(r, "day");
     expect(ph.totals.netSales).toBe(9200);
     expect(ph.totals.grossMargin).toBe(2200);

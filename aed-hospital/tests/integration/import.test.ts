@@ -347,3 +347,30 @@ describe("pharmacy daily totals vs bills", () => {
   });
 });
 
+
+describe("historical backfill into closed days", () => {
+  it("is refused by default, Admin-only when ticked, and keeps the day closed with refreshed totals", async () => {
+    const { getDailyStatement, saveReconciliation } = await import("@/server/services/daily");
+    const D = "2026-03-10";
+    await changeDayStatus(f.admin, D, { action: "review" });
+    const st = await getDailyStatement(f.admin, D);
+    await saveReconciliation(f.admin, D, { lines: st.reconciliation.map((l) => ({ group: l.group, actual: l.expected })) });
+    await changeDayStatus(f.admin, D, { action: "close" });
+    const csv = "Date,Category,Description,Amount,Payment Mode,Spread over month\n10-03-2026,Other,Old cash expense,700,Cash,\n31-03-2026,Other,Rent – Mar,31000,Bank Transfer,Yes\n";
+    const up = await uploadFile(f.admin, "backfill.csv", Buffer.from(csv), "expense");
+    const b = up.batches[0];
+    const plain = await validateBatch(f.admin, b.id, { type: "expense", mapping: b.suggestion.mapping });
+    expect(plain.summary.invalid).toBe(1); // 10 Mar is closed
+    await expect(validateBatch(f.accounts, b.id, { type: "expense", mapping: b.suggestion.mapping, intoClosedDays: true })).rejects.toThrow();
+    const v = await validateBatch(f.admin, b.id, { type: "expense", mapping: b.suggestion.mapping, intoClosedDays: true });
+    expect(v.summary).toMatchObject({ invalid: 0 });
+    const r = await commitBatch(f.admin, b.id, { approveWarnings: true, intoClosedDays: true });
+    expect(r.imported).toBe(2);
+    const day = await getDailyStatement(f.admin, D);
+    expect(day.status).toBe("CLOSED");
+    expect(day.totalExpenses).toBe(700 + 1000); // the old expense + this day's share of the spread rent
+    expect(day.closedDrift).toBeNull();
+    expect(day.events.some((e: any) => e.action === "BACKFILL")).toBe(true);
+    expect(await prisma.expense.count({ where: { spreadMonth: true } })).toBe(1);
+  });
+});

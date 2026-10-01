@@ -3,7 +3,7 @@
  * HTML (UI), Excel, CSV or PDF by src/server/exporters.ts — so all formats agree.
  */
 import { z } from "zod";
-import { EXPENSE_LABELS, STREAM_LABELS, INCOME_STREAMS, totalExpenses, totalIncome, compare, safeDiv } from "@/lib/accounting";
+import { EXPENSE_LABELS, STREAM_LABELS, totalExpenses, totalIncome, compare, safeDiv, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { addDays, addMonths, endOfMonth, formatDate, formatMonth, isISODate, startOfMonth, startOfWeek, todayISO, type ISODate } from "@/lib/dates";
 import { round2 } from "@/lib/money";
 import { defaultGranularity, precedingRange, type Granularity } from "@/lib/periods";
@@ -81,7 +81,7 @@ const EXPENSE_DEF = "Total Expenses = Hospital operating expenses + Pharmacy pur
 const NET_DEF = "Net Operating Result = Gross Income − Total Expenses (collections basis, transaction date).";
 
 function incomeTable(cur: PeriodSummary, prev?: PeriodSummary): ReportTable {
-  const rows = INCOME_STREAMS.map((s) => {
+  const rows = AED_INCOME_STREAMS.map((s) => {
     const c = compare(cur.income[s], prev?.income[s] ?? 0);
     return { head: STREAM_LABELS[s], amount: cur.income[s], ...(prev ? { previous: c.previous, diff: c.diff, pct: c.pct } : {}) };
   });
@@ -100,7 +100,8 @@ function incomeTable(cur: PeriodSummary, prev?: PeriodSummary): ReportTable {
 }
 
 function expenseTable(cur: PeriodSummary, prev?: PeriodSummary): ReportTable {
-  const kinds = ["HOSPITAL", "PHARMACY_PURCHASE", "OTHER"] as const;
+  // AED Hospital only; the Hormonal Pharmacy has its own report.
+  const kinds = ["HOSPITAL", "OTHER"] as const;
   const rows = kinds.map((k) => {
     const c = compare(cur.expense[k], prev?.expense[k] ?? 0);
     return { head: EXPENSE_LABELS[k], amount: cur.expense[k], ...(prev ? { previous: c.previous, diff: c.diff, pct: c.pct } : {}) };
@@ -157,13 +158,13 @@ async function seriesTable(from: ISODate, to: ISODate, g: Granularity, title = "
     title,
     columns: [
       { key: "period", label: g === "day" ? "Date" : "Period" },
-      ...INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], type: "money" as const })),
+      ...AED_INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], type: "money" as const })),
       { key: "income", label: "Total Income", type: "money" },
       { key: "expenses", label: "Expenses", type: "money" },
       { key: "net", label: "Net Result", type: "money" },
     ],
     rows,
-    totals: { period: "Total", ...Object.fromEntries(INCOME_STREAMS.map((s) => [s, sumKey(s)])), income: sumKey("income"), expenses: sumKey("expenses"), net: sumKey("net") },
+    totals: { period: "Total", ...Object.fromEntries(AED_INCOME_STREAMS.map((s) => [s, sumKey(s)])), income: sumKey("income"), expenses: sumKey("expenses"), net: sumKey("net") },
   };
 }
 
@@ -388,7 +389,7 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
             title: "Month-by-Month",
             columns: [
               { key: "period", label: "Month" },
-              ...INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], type: "money" as const })),
+              ...AED_INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], type: "money" as const })),
               { key: "income", label: "Total Income", type: "money" },
               { key: "momPct", label: "MoM %", type: "pct" },
               { key: "expenses", label: "Expenses", type: "money" },

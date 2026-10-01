@@ -9,7 +9,7 @@ import { FreshnessBanner } from "@/components/FreshnessBanner";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Expand, Minimize, Printer, Sparkles } from "lucide-react";
 import { qs, useApi } from "@/lib/client";
-import { INCOME_STREAMS, STREAM_LABELS } from "@/lib/accounting";
+import { STREAM_LABELS, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { formatDateTime } from "@/lib/dates";
 import { fmtValue, insightsFromComparison, rankInsights, type Comparison, type Insight, type KpiCompare } from "@/lib/insights";
 import type { ResolvedPeriod } from "@/lib/periods";
@@ -312,7 +312,7 @@ function buildSlides(p: Pack): SlideFn[] {
       <div className="grid gap-4 lg:grid-cols-5">
         <div className="lg:col-span-3">
           <Panel title="Income by stream, per month" h={320}>
-            <BarsChart data={p.trend} xKey="month" stacked granularity="month" series={INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], color: STREAM_COLORS[s] }))} />
+            <BarsChart data={p.trend} xKey="month" stacked granularity="month" series={AED_INCOME_STREAMS.map((s) => ({ key: s, label: STREAM_LABELS[s], color: STREAM_COLORS[s] }))} />
           </Panel>
         </div>
         <div className="lg:col-span-2">
