@@ -8,6 +8,7 @@ import { Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, CheckCircle2, Info, TrendingDown } from "lucide-react";
 import { useApi } from "@/lib/client";
+import { PdfButtons } from "@/components/PdfButtons";
 import { endOfMonth, todayISO } from "@/lib/dates";
 import { ENTITY_LABELS, ENTITY_SCOPE, mLabel, type EntityKey } from "@/lib/entities";
 import { formatINR, formatINRCompact } from "@/lib/money";
@@ -146,6 +147,7 @@ function Inner() {
   };
   const toDate = endOfMonth(`${to}-01`) < today ? endOfMonth(`${to}-01`) : today;
   const { data, error, loading, reload } = useApi<any>(`/api/entities?from=${from}-01&to=${toDate}`);
+  const pdfUrl = `/api/entities?from=${from}-01&to=${toDate}&format=pdf`;
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -169,6 +171,7 @@ function Inner() {
             ))}
           </select>
         </label>
+        {from <= to && <PdfButtons url={pdfUrl} title="AED Hospital vs Hormonal Pharmacy — P&L" />}
         {data && (
           <p className="text-sm muted">
             Both together: income {formatINRCompact(data.combined.income)} · expenses {formatINRCompact(data.combined.expenses)} ·{" "}

@@ -22,3 +22,13 @@ describe("entity P&L", () => {
     expect(text).toMatch(/Purchases exceeded sales in Jul 2026/);
   });
 });
+
+describe("a month still in progress", () => {
+  it("is not called the weakest month or compared with whole months", () => {
+    const m = [buildMonth("2026-08", 5000000, 3000000), buildMonth("2026-09", 4500000, 3000000), buildMonth("2026-10", 63000, 3000)];
+    const text = entityInsights("AED", m, [], "2026-10").map((i) => i.text).join("\n");
+    expect(text).toContain("Oct 2026 is still in progress");
+    expect(text).toContain("weakest Sep 2026");
+    expect(text).not.toMatch(/Oct 2026 vs the earlier average/);
+  });
+});

@@ -171,14 +171,18 @@ export function reportToPdf(report: Report): Promise<Buffer> {
     }
     if (report.notes.length) {
       if (doc.y > doc.page.height - 120) doc.addPage();
-      doc.moveDown(0.5).font("Helvetica-Bold").fontSize(9).fillColor("#000").text("Definitions", 36);
+      doc.moveDown(0.5).font("Helvetica-Bold").fontSize(9).fillColor("#000").text(report.notesTitle ?? "Definitions", 36);
       doc.font("Helvetica").fontSize(8).fillColor("#444");
-      for (const n of report.notes) doc.text(`• ${n}`, 36, undefined, { width: pageW });
+      for (const n of report.notes) doc.text(`• ${n.replace(/₹\s?/g, "Rs. ").replace(/−/g, "-")}`, 36, undefined, { width: pageW });
     }
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
+      // The footer sits inside the bottom margin; without lifting the margin pdfkit would start a blank page.
+      const bottomMargin = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
       doc.font("Helvetica").fontSize(7.5).fillColor("#888").text(`${report.hospital} · ${report.title} · Page ${i + 1} of ${range.count}`, 36, doc.page.height - 28, { width: pageW, align: "center", lineBreak: false });
+      doc.page.margins.bottom = bottomMargin;
     }
     doc.end();
   });

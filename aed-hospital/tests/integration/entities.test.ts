@@ -30,3 +30,34 @@ describe("AED Hospital vs Hormonal Pharmacy", () => {
     expect(r.combined.profit).toBe(1300 + 5000 - 1800 - 3900);
   });
 });
+
+describe("AED vs Hormonal Pharmacy P&L as a PDF", () => {
+  it("renders both entities on one page, with plain-text money and no blank page", async () => {
+    const { entityReport } = await import("@/server/services/entities");
+    const { reportToPdf } = await import("@/server/exporters");
+    for (const [d, n] of [["2026-08-10", 1], ["2026-09-10", 2]] as const) {
+      await createTransaction(f.admin, "lab", { date: d, patientCode: "P1", patientName: "DEMO A", investigationId: f.ids.ecg, quantity: n, paymentModeId: f.ids.CASH });
+      await createTransaction(f.admin, "pharmacy-sale", { date: d, invoiceNo: `S${n}`, grossAmount: 5000, discount: 0, paymentModeId: f.ids.CASH });
+      await createTransaction(f.admin, "pharmacy-purchase", { date: d, supplier: "Demo", invoiceNo: `P${n}`, amount: 3500 * n, paymentModeId: f.ids.BANK });
+      await createTransaction(f.admin, "expense", { date: d, categoryId: f.ids.otherExp, description: "Rent", amount: 100, paymentModeId: f.ids.CASH });
+    }
+    const r = await entityReport(f.admin, { from: "2026-08-01", to: "2026-09-30" });
+    expect(r.kpis.map((k) => k.value)).toEqual([900, 200, 700, 10000, 10500, -500]);
+    expect(r.tables.map((t) => t.title)).toEqual(["AED Hospital — month by month", "AED Hospital — where the money goes", "Hormonal Pharmacy — month by month", "Hormonal Pharmacy — where the money goes"]);
+    expect(r.notes.join(" ")).not.toMatch(/[₹−]/);
+    const pdf = (await reportToPdf(r)).toString("latin1");
+    expect(pdf.startsWith("%PDF")).toBe(true);
+    expect(pdf.match(/\/Type \/Page\b/g)?.length).toBe(1);
+  });
+});
+
+describe("income trend series", () => {
+  it("counts AED Hospital income only; pharmacy sales stay visible on their own", async () => {
+    const { incomeSeries } = await import("@/server/services/analytics");
+    const D = "2026-08-10";
+    await createTransaction(f.admin, "lab", { date: D, patientCode: "P1", patientName: "DEMO A", investigationId: f.ids.ecg, quantity: 1, paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "pharmacy-sale", { date: D, invoiceNo: "S1", grossAmount: 5000, discount: 0, paymentModeId: f.ids.CASH });
+    const [b] = await incomeSeries({ from: D, to: D }, "day");
+    expect(b).toMatchObject({ LAB: 300, PHARMACY: 5000, income: 300, net: 300 });
+  });
+});

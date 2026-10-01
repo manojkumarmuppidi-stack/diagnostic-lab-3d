@@ -2,6 +2,16 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.12.5: Analytics PDF; AED-only income trend
+- Analytics: Download PDF / Share for the open tab (Revenue → Income vs Expense report, OPD, IPD, Lab, Hormonal Pharmacy, Expenses, Profitability), for the selected period.
+- Fix: the income trend (Dashboard trend, Analytics Revenue and Profitability, daily summary, report trend tables) no longer adds Hormonal Pharmacy sales into AED income and net result.
+- Report definitions updated to the AED-only totals.
+
+## 0.12.4: Shareable P&L PDF
+- AED vs Pharmacy P&L: Download PDF (and Share on phones) — both entities, month by month, costs and insights.
+- Insights no longer treat a month still in progress as the weakest month.
+- Report PDFs no longer end with a blank page.
+
 ## 0.12.3: Dashboard explains spread expenses; doctor fees per visit
 - Dashboard shows the expenses entered in the period next to Total Expenses when monthly items (salaries, rent…) are counted as a daily share.
 - "Doctor fees" is a per-visit head: picking it no longer spreads the fee over the month; such October entries are put back on their day (migration `20261005020000_doctor_fees_per_visit`).

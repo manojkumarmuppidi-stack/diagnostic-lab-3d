@@ -11,6 +11,7 @@ import type { Granularity } from "@/lib/periods";
 import { STREAM_HREF, withRange } from "@/lib/drill";
 import { Card, ErrorState, PageHeader, Spinner, Tabs } from "@/components/ui";
 import { Guard } from "@/components/Guard";
+import { PdfButtons } from "@/components/PdfButtons";
 import { Kpi } from "@/components/Kpi";
 import { PeriodPicker, periodQuery, type PeriodValue } from "@/components/PeriodPicker";
 import { BarsChart, ChartCard, DonutChart, SLOT, STREAM_COLORS, TrendChart } from "@/components/charts/Charts";
@@ -18,6 +19,8 @@ import { masterOptions, useMasters } from "@/components/session";
 import { ModuleInsights } from "@/components/insights/ModuleInsights";
 
 type Tab = "revenue" | "opd" | "ipd" | "lab" | "pharmacy" | "expense" | "profitability";
+/** The printable report behind each tab (same period; doctor/specialty filters are not applied to the PDF). */
+const TAB_REPORT: Record<Tab, string> = { revenue: "income-vs-expense", opd: "opd", ipd: "ipd", lab: "lab", pharmacy: "pharmacy", expense: "expense", profitability: "profitability" };
 const TABS: { key: Tab; label: string }[] = [
   { key: "revenue", label: "Revenue" },
   { key: "opd", label: "OPD" },
@@ -62,7 +65,11 @@ function Inner() {
 
   return (
     <>
-      <PageHeader title="Analytics" subtitle={data ? `${data.period.current.label}` : undefined} />
+      <PageHeader
+        title="Analytics"
+        subtitle={data ? `${data.period.current.label}` : undefined}
+        actions={<PdfButtons url={from && to ? `/api/reports/${TAB_REPORT[tab]}?from=${from}&to=${to}&format=pdf` : null} title={`AED ${TABS.find((t) => t.key === tab)?.label} report`} />}
+      />
       <div className="space-y-4">
         <Tabs<Tab> tabs={TABS} value={tab} onChange={(t) => router.replace(`${path}?tab=${t}`)} />
         {data && <FreshnessBanner to={data.period.current.to} />}
@@ -161,7 +168,7 @@ function Revenue({ d, g, drill, filtered }: P & { filtered: boolean }) {
         <ChartCard title="Revenue mix" subtitle={`Total ${formatINR(d.total)}`}>
           <DonutChart data={AED_INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], value: Math.max(0, d.byStream[s]), color: STREAM_COLORS[s] }))} onSliceClick={(x) => x.key && drill(STREAM_HREF[x.key])} />
         </ChartCard>
-        <ChartCard title="OPD · IPD · Lab · Pharmacy trend" table={{ columns: [{ key: "bucket", label: "Period" }, ...streamSeries.slice(0, 4).map((s) => ({ key: s.key, label: s.label, format: "money" as const }))], rows: d.series }}>
+        <ChartCard title="OPD · IPD · Lab · Diet trend" table={{ columns: [{ key: "bucket", label: "Period" }, ...streamSeries.slice(0, 4).map((s) => ({ key: s.key, label: s.label, format: "money" as const }))], rows: d.series }}>
           <TrendChart data={d.series} xKey="bucket" granularity={g} series={streamSeries.slice(0, 4)} onPointClick={(r) => drill("/daily-accounts", String(r.bucket))} />
         </ChartCard>
       </div>

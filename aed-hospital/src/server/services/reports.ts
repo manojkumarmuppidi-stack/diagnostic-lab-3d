@@ -50,6 +50,8 @@ export interface Report {
   kpis: { label: string; value: number | null; type: ColType }[];
   tables: ReportTable[];
   notes: string[];
+  /** Heading for the notes section in PDFs (default "Definitions"). */
+  notesTitle?: string;
 }
 
 export const REPORT_TYPES = [
@@ -76,9 +78,9 @@ const q = z.object({
   granularity: z.enum(["day", "week", "month"]).optional(),
 });
 
-const INCOME_DEF = "Gross Income = OPD + IPD collections + Lab + Pharmacy net sales (after returns) + Diet + Other income.";
-const EXPENSE_DEF = "Total Expenses = Hospital operating expenses + Pharmacy purchases + Other expenses.";
-const NET_DEF = "Net Operating Result = Gross Income − Total Expenses (collections basis, transaction date).";
+const INCOME_DEF = "Total Income (AED Hospital) = OPD + IPD collections + Lab + Diet + Other income. Hormonal Pharmacy is a separate entity with its own report.";
+const EXPENSE_DEF = "Total Expenses (AED Hospital) = Hospital operating expenses + Other expenses. Pharmacy stock purchases and pharmacy staff are the Hormonal Pharmacy's.";
+const NET_DEF = "Net Operating Result = Total Income - Total Expenses (collections basis, transaction date). Monthly items such as salaries and rent are spread over the days of their month.";
 
 function incomeTable(cur: PeriodSummary, prev?: PeriodSummary): ReportTable {
   const rows = AED_INCOME_STREAMS.map((s) => {

@@ -91,6 +91,29 @@ export async function download(url: string) {
   }, 1000);
 }
 
+/**
+ * Share a generated file (e.g. a PDF) through the phone's share sheet — WhatsApp, email…
+ * Returns false where the browser cannot share files (most desktops); the caller then downloads instead.
+ */
+export async function shareFile(url: string, title: string): Promise<boolean> {
+  if (typeof navigator === "undefined" || !("canShare" in navigator)) return false;
+  const res = await fetch(url, { credentials: "same-origin" });
+  if (!res.ok) {
+    const b = await res.json().catch(() => ({ error: `Download failed (${res.status})` }));
+    throw new ApiError(res.status, b.error ?? "Download failed");
+  }
+  const blob = await res.blob();
+  const name = /filename="?([^"]+)"?/.exec(res.headers.get("content-disposition") ?? "")?.[1] ?? "report.pdf";
+  const file = new File([blob], name, { type: blob.type || "application/pdf" });
+  if (!navigator.canShare({ files: [file] })) return false;
+  try {
+    await navigator.share({ files: [file], title });
+  } catch (e) {
+    if ((e as Error).name !== "AbortError") throw e;
+  }
+  return true;
+}
+
 export function cn(...xs: (string | false | null | undefined)[]) {
   return xs.filter(Boolean).join(" ");
 }

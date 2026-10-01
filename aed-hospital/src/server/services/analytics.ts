@@ -202,7 +202,8 @@ export async function incomeSeries(r: Range, g: Granularity, f: IncomeFilters = 
     if (m) m.expenses = toNum(row.amount);
   }
   return [...map.entries()].map(([bucket, v]) => {
-    const income = round2(v.OPD + v.IPD + v.LAB + v.PHARMACY + v.DIET + v.OTHER);
+    // AED Hospital income only; PHARMACY stays in the bucket for charts that show the pharmacy on its own.
+    const income = round2(v.OPD + v.IPD + v.LAB + v.DIET + v.OTHER);
     return { bucket, ...v, income, net: round2(income - v.expenses) };
   });
 }

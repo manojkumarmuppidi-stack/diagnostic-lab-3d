@@ -51,10 +51,13 @@ export function totals(months: EntityMonth[]) {
 }
 
 /** Plain-language findings for one entity. `costs` = expense lines by category, largest first. */
-export function entityInsights(key: EntityKey, months: EntityMonth[], costs: { name: string; amount: number }[]): Insight[] {
+export function entityInsights(key: EntityKey, months: EntityMonth[], costs: { name: string; amount: number }[], partialMonth?: string | null): Insight[] {
   const out: Insight[] = [];
   const name = ENTITY_LABELS[key];
-  const complete = months.filter((m) => !m.incomeMissing && (m.income > 0 || m.expenses > 0));
+  // A month still in progress is not compared with whole months (it would always look like the weakest).
+  const partial = partialMonth ? months.find((m) => m.month === partialMonth && (m.income > 0 || m.expenses > 0)) : undefined;
+  if (partial) out.push({ tone: "info", text: `${mLabel(partial.month)} is still in progress — left out of the best/weakest month and the comparison below.` });
+  const complete = months.filter((m) => !m.incomeMissing && (m.income > 0 || m.expenses > 0) && m.month !== partial?.month);
   const missing = months.filter((m) => m.incomeMissing);
   const empty = months.filter((m) => m.income === 0 && m.expenses === 0);
   if (missing.length)
@@ -62,7 +65,7 @@ export function entityInsights(key: EntityKey, months: EntityMonth[], costs: { n
       tone: "warn",
       text: `${list(missing.map((m) => m.month))}: expenses are recorded (${money(missing.reduce((a, m) => a + m.expenses, 0))}) but no ${key === "AED" ? "OPD, lab or IPD" : "pharmacy sales"} income. Those months are left out of the result below — import their income first.`,
     });
-  if (empty.length && empty.length < months.length) out.push({ tone: "info", text: `${list(empty.map((m) => m.month))}: nothing recorded yet.` });
+  if (empty.length && empty.length < months.length && !(empty.length === 1 && empty[0].month === partialMonth)) out.push({ tone: "info", text: `${list(empty.map((m) => m.month))}: nothing recorded yet.` });
   if (!complete.length) {
     if (!missing.length) out.push({ tone: "info", text: `No ${name} figures for this period yet.` });
     return out;
