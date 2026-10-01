@@ -178,7 +178,7 @@ export default function UsersPage() {
   const roles = useApi<any>("/api/roles");
   return (
     <Guard perm="users.manage">
-      <PageHeader title="Users & Permissions" />
+      <PageHeader title="Logins & Permissions" subtitle="Add a login for each staff member, choose their role and set a first password — they must change it at first sign-in." />
       <div className="space-y-4">
         <Tabs value={tab} onChange={setTab} tabs={[{ key: "users", label: "Users" }, { key: "roles", label: "Roles & permissions" }]} />
         {!roles.data ? <Spinner /> : tab === "users" ? <Users roles={roles.data.roles} /> : <Roles data={roles.data} reload={roles.reload} />}

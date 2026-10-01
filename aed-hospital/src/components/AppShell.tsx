@@ -63,7 +63,7 @@ export const NAV: NavItem[] = [
   { href: "/import", label: "Excel Import", icon: Upload, perm: "import.run" },
   { href: "/export", label: "Excel Export", icon: Download, perm: "reports.export" },
   { href: "/masters", label: "Master Data", icon: Database, perm: "masters.manage" },
-  { href: "/users", label: "Users & Permissions", icon: Users, perm: "users.manage" },
+  { href: "/users", label: "Logins & Permissions", icon: Users, perm: "users.manage" },
   { href: "/audit", label: "Audit Log", icon: ShieldCheck, perm: "audit.view" },
   { href: "/settings", label: "Settings", icon: Settings, perm: "settings.manage" },
 ];
@@ -144,6 +144,12 @@ function Shell({ children }: { children: ReactNode }) {
         <div className="border-t p-3 text-xs" style={{ borderColor: "var(--border)" }}>
           <p className="font-medium">{user.name}</p>
           <p className="muted">{user.roleName}</p>
+          {/* Always visible (the menu above scrolls): where Admin / CEO creates staff logins. */}
+          {can("users.manage") && (
+            <Link href="/users" className="btn btn-secondary btn-sm mt-2 w-full">
+              <Users className="h-3.5 w-3.5" /> Staff logins
+            </Link>
+          )}
           <div className="mt-2 flex gap-2">
             <Link href="/change-password" className="btn btn-ghost btn-sm">
               Password

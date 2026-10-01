@@ -27,7 +27,7 @@ describe("team roles: reception books expenses, the accounts head approves", () 
     const mine = await createTransaction(rec, "expense", { date: D, categoryId: f.ids.groceries, subcategoryId: f.ids.veg, description: "Vegetables", amount: 400, paymentModeId: f.ids.CASH });
 
     const list = await listTransactions(rec, "expense", { from: "2026-09-01", to: "2026-09-30", status: "ALL" });
-    expect(list.rows.map((r: { description: string }) => r.description)).toEqual(["Vegetables"]);
+    expect(list.rows.map((r) => r.description)).toEqual(["Vegetables"]);
     await expect(expensePivot(rec, {})).rejects.toThrow();
     await expect(monthlyChecklist(rec)).rejects.toThrow();
     expect((await listTransactions(head, "expense", { from: "2026-09-01", to: "2026-09-30", status: "ALL" })).total).toBe(2);
