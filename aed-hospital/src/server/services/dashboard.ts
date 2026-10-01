@@ -103,7 +103,7 @@ async function computeAlerts(
   }
 
   // 5. Large expenses in the current period.
-  if (can(actor, "expense.view")) {
+  if (can(actor, "expense.view_all")) {
     const big = await prisma.expense.findMany({
       where: { status: "ACTIVE", amount: { gte: a.largeExpenseAmount }, date: { gte: toDbDate(current.range.from), lte: toDbDate(current.range.to) } },
       orderBy: { amount: "desc" },

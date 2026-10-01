@@ -58,7 +58,8 @@ function fillFromHead(head: MasterItem, v: Values, masters: NonNullable<ReturnTy
   v.subcategoryId = head.subcategoryId ? String(head.subcategoryId) : "";
   if (head.departmentId) v.departmentId = String(head.departmentId);
   if (head.vendor) v.vendor = String(head.vendor);
-  v.description = `${head.name} – ${monthLabel((v.date || new Date().toISOString()).slice(0, 7))}`;
+  // Monthly bills carry their month ("Rent – Cash – Sep 2026"); day-to-day buys just the head ("Vegetables").
+  v.description = head.monthly ? `${head.name} – ${monthLabel((v.date || new Date().toISOString()).slice(0, 7))}` : head.name;
   // Monthly heads (rent, salaries…) are spread over the month in daily figures.
   v.spreadMonth = head.monthly ? "true" : "";
   if (!keepAmount && typeof head.typicalAmount === "number" && head.typicalAmount > 0) v.amount = String(head.typicalAmount);
@@ -277,19 +278,22 @@ export function TransactionForm({ module, open, onClose, onSaved, correct, prese
 /** Type one word ("rent", "milk", "esi") to pick a recurring expense head and fill the form from it. */
 function HeadPicker({ heads, selectedId, onPick }: { heads: MasterItem[]; selectedId?: string; onPick: (h: MasterItem) => void }) {
   const [q, setQ] = useState("");
-  const hits = useMemo(() => searchHeads(heads as (MasterItem & { keywords?: string | null; vendor?: string | null; categoryName?: string | null })[], q, 8), [heads, q]);
+  const searched = useMemo(() => searchHeads(heads as (MasterItem & { keywords?: string | null; vendor?: string | null; categoryName?: string | null })[], q, 8), [heads, q]);
+  // Nothing typed yet: offer the monthly routine heads; one letter is enough to narrow them.
+  const routine = useMemo(() => heads.filter((h) => h.active && h.monthly), [heads]);
+  const hits = q.trim() ? searched : routine;
   const selected = selectedId ? heads.find((h) => h.id === selectedId) : undefined;
   if (!heads.some((h) => h.active)) return null;
   return (
     <div className="space-y-2">
-      <Field label="Quick pick — type one word" htmlFor="head-quick" help={selected ? `Filled from “${selected.name}”. Check the amount and mode.` : "e.g. rent, milk, electricity, esi, salary, oxygen"}>
+      <Field label="Quick pick — type one word" htmlFor="head-quick" help={selected ? `Filled from “${selected.name}”. Check the amount and mode.` : q.trim() ? "Tap one to fill the form" : "Type the first letter (r → Rent, m → Milk, v → Vegetables) or tap a monthly routine below"}>
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 muted" />
           <input id="head-quick" className="input !pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search expense heads…" autoComplete="off" />
         </div>
       </Field>
       {hits.length > 0 && (
-        <div className="flex flex-wrap gap-2" role="listbox" aria-label="Matching expense heads">
+        <div className={cn("flex flex-wrap gap-2", !q.trim() && "max-h-28 overflow-y-auto")} role="listbox" aria-label={q.trim() ? "Matching expense heads" : "Monthly routine expense heads"}>
           {hits.map((h) => (
             <button
               key={h.id}

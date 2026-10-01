@@ -27,8 +27,12 @@ function Inner() {
   const tabs: { key: Tab; label: React.ReactNode }[] = [
     { key: "list", label: "Expenses" },
     { key: "pending", label: `${can("expense.approve") ? "Waiting approval" : "My entries waiting"}${n ? ` (${n})` : ""}` },
-    { key: "checklist", label: "Monthly checklist" },
-    { key: "monthwise", label: "Month-wise" },
+    ...(can("expense.view_all")
+      ? [
+          { key: "checklist" as Tab, label: "Monthly checklist" },
+          { key: "monthwise" as Tab, label: "Month-wise" },
+        ]
+      : []),
   ];
   return (
     <div className="space-y-4">

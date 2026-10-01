@@ -17,6 +17,7 @@ import { MODULE_SCHEMAS, zodErrorMap } from "@/lib/schemas";
 import { audit } from "../audit";
 import { can, requirePermission, type Actor } from "../authz";
 import { getDayStatuses, onDayMutated } from "../closing";
+import { linkExpensesToHeads } from "../expense-heads";
 import { prisma, type Tx } from "../db";
 import { AppError, badRequest, conflict, notFound } from "../errors";
 import { readSpreadsheet, type SheetData } from "../spreadsheet";
@@ -838,6 +839,7 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
   const { touchedDates: dates, ...rest } = result;
   let backfilledClosedDays = 0;
   if (opts.intoClosedDays && dates.length) backfilledClosedDays = await refreshClosedDays(actor, dates, `Historical import: ${batch.fileName}${batch.sheetName ? ` (${batch.sheetName})` : ""}`);
+  if (batch.module === "expense") await linkExpensesToHeads(prisma, { importBatchId: batchId });
   return { ...rest, backfilledClosedDays };
 }
 

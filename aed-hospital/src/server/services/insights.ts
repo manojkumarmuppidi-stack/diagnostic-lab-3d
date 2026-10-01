@@ -266,7 +266,7 @@ const BUILDERS: Record<SectionKey, { perm: Parameters<typeof can>[1]; build: (c:
   lab: { perm: "lab.view", build: lab },
   pharmacy: { perm: "pharmacy.view", build: pharmacy },
   diet: { perm: "diet.view", build: diet },
-  expense: { perm: "expense.view", build: expense },
+  expense: { perm: "expense.view_all", build: expense },
 };
 export const SECTION_KEYS = Object.keys(BUILDERS) as SectionKey[];
 

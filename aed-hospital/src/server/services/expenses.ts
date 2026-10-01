@@ -93,7 +93,7 @@ export async function pendingExpenseCount(actor: Actor) {
  * and what was paid last month — so staff see at a glance what is still missing.
  */
 export async function monthlyChecklist(actor: Actor, monthRaw?: string) {
-  requirePermission(actor, "expense.view");
+  requirePermission(actor, "expense.view_all");
   const month = monthRaw && /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : todayISO().slice(0, 7);
   const from = `${month}-01` as ISODate;
   const to = endOfMonth(from);
@@ -142,7 +142,7 @@ export async function monthlyChecklist(actor: Actor, monthRaw?: string) {
  * pharmacy purchases as their own line so the grand total equals Total Expenses.
  */
 export async function expensePivot(actor: Actor, q: { from?: string; to?: string; by?: string }) {
-  requirePermission(actor, "expense.view");
+  requirePermission(actor, "expense.view_all");
   const to = q.to && isISODate(q.to) ? q.to : todayISO();
   const from = q.from && isISODate(q.from) ? q.from : startOfMonth(addMonths(to, -5));
   const by = q.by === "head" ? "head" : q.by === "subcategory" ? "subcategory" : q.by === "mode" ? "mode" : "category";

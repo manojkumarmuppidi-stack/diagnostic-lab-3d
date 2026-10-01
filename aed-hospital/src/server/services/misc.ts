@@ -81,7 +81,7 @@ export async function globalSearch(actor: Actor, qRaw: string) {
     );
   if (can(actor, "expense.view"))
     jobs.push(
-      prisma.expense.findMany({ where: { status: "ACTIVE", OR: [{ description: ci }, { vendor: ci }, { billNumber: ci }] }, include: { category: true }, take, orderBy: { date: "desc" } }).then((xs) => {
+      prisma.expense.findMany({ where: { status: "ACTIVE", ...(can(actor, "expense.view_all") ? {} : { createdById: actor.id }), OR: [{ description: ci }, { vendor: ci }, { billNumber: ci }] }, include: { category: true }, take, orderBy: { date: "desc" } }).then((xs) => {
         for (const x of xs) results.push({ type: "Expense", title: x.description, subtitle: `${x.category.name}${x.vendor ? ` · ${x.vendor}` : ""}${x.billNumber ? ` · ${x.billNumber}` : ""}`, href: `/expenses?q=${encodeURIComponent(q)}`, amount: toNum(x.amount), date: fromDbDate(x.date) });
       }),
     );
@@ -114,15 +114,23 @@ export async function addAttachment(actor: Actor, expenseId: string, fileName: s
   });
 }
 
-export async function listAttachments(actor: Actor, expenseId: string) {
+/** Staff without expense.view_all may only open bills of expenses they entered. */
+async function assertCanSeeExpense(actor: Actor, expenseId: string) {
   requirePermission(actor, "expense.view");
+  if (can(actor, "expense.view_all")) return;
+  const e = await prisma.expense.findUnique({ where: { id: expenseId }, select: { createdById: true } });
+  if (!e || e.createdById !== actor.id) throw notFound();
+}
+
+export async function listAttachments(actor: Actor, expenseId: string) {
+  await assertCanSeeExpense(actor, expenseId);
   return prisma.attachment.findMany({ where: { expenseId }, orderBy: { createdAt: "asc" }, select: { id: true, fileName: true, mimeType: true, size: true, createdAt: true } });
 }
 
 export async function readAttachment(actor: Actor, id: string) {
-  requirePermission(actor, "expense.view");
   const a = await prisma.attachment.findUnique({ where: { id } });
-  if (!a) throw notFound();
+  if (!a?.expenseId) throw notFound();
+  await assertCanSeeExpense(actor, a.expenseId);
   return { meta: a, data: await getFile(a.storageKey) };
 }
 

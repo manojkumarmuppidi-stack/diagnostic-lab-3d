@@ -61,3 +61,40 @@ export function monthLabel(ym: string): string {
   const [y, m] = ym.split("-");
   return `${M[Number(m) - 1]} ${y}`;
 }
+
+export interface HeadRule {
+  id: string;
+  name: string;
+  keywords: string;
+  categoryId: string;
+  subcategoryId: string | null;
+  departmentId: string | null;
+  sortOrder: number;
+}
+
+const STOP = new Set(["and", "the", "of", "for", "to", "bill", "fees", "fee"]);
+
+/**
+ * Which routine head an expense belongs to, from its category and wording — used to link
+ * imported expenses (cash book, register) so the monthly checklist and "last month" know them.
+ * Only heads of the same category (and subcategory, if the head has one) are candidates; a
+ * department-specific head (Wellness, Pharmacy) only takes expenses of that department. Returns
+ * null when the wording does not single one out.
+ */
+export function matchHead<T extends HeadRule>(heads: T[], e: { description: string; vendor?: string | null; categoryId: string; subcategoryId?: string | null; departmentId?: string | null }): T | null {
+  let cands = heads.filter((h) => h.categoryId === e.categoryId && (!h.subcategoryId || h.subcategoryId === (e.subcategoryId ?? null)));
+  const sameDept = cands.filter((h) => h.departmentId && h.departmentId === e.departmentId);
+  cands = sameDept.length ? sameDept : cands.filter((h) => !h.departmentId);
+  if (!cands.length) return null;
+  const text = ` ${norm(`${e.description} ${e.vendor ?? ""}`)} `;
+  const hasWord = (w: string) => text.includes(` ${w} `);
+  const scored = cands
+    .map((h) => {
+      const words = norm(h.name).split(" ").filter((w) => w.length > 1 && !STOP.has(w));
+      const keys = (h.keywords ?? "").split(",").map((k) => norm(k)).filter(Boolean);
+      return { h, score: words.filter(hasWord).length * 2 + keys.filter(hasWord).length };
+    })
+    .sort((a, b) => b.score - a.score || a.h.sortOrder - b.h.sortOrder);
+  if (scored[0].score > 0) return scored[0].h;
+  return cands.length === 1 ? cands[0] : null;
+}

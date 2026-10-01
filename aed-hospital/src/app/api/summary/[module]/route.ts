@@ -9,7 +9,7 @@ import { expenseAnalytics, incomeByStream, ipdAnalytics, labAnalytics, opdAnalyt
 /** Compact per-module summary shown above each transaction list (needs only the module's view permission). */
 export const GET = api<{ module: string }>(async ({ actor, params, url }) => {
   if (!isModuleKey(params.module)) throw badRequest("Unknown module");
-  requirePermission(actor, viewPerm(params.module));
+  requirePermission(actor, params.module === "expense" ? "expense.view_all" : viewPerm(params.module));
   const today = todayISO();
   const from = isISODate(url.searchParams.get("from")) ? url.searchParams.get("from")! : startOfMonth(today);
   const to = isISODate(url.searchParams.get("to")) ? url.searchParams.get("to")! : today;

@@ -264,6 +264,8 @@ export async function listTransactions(actor: Actor, module: ModuleKey, f: ListF
   const where: Record<string, unknown> = { ...a.filterWhere(f) };
   if (f.status !== "ALL") where.status = f.status && f.status !== "ACTIVE" ? f.status : "ACTIVE";
   if (f.q?.trim()) where.OR = a.searchWhere(f.q.trim());
+  // Staff without expense.view_all see only the expenses they entered.
+  if (module === "expense" && !can(actor, "expense.view_all")) where.createdById = actor.id;
   const del = a.delegate(prisma);
   const orderBy = [{ [a.dateField]: f.sort === "asc" ? "asc" : "desc" }, { createdAt: "desc" }];
   const [records, total, agg] = await Promise.all([
@@ -293,7 +295,7 @@ export async function getTransaction(actor: Actor, module: ModuleKey, id: string
   requirePermission(actor, viewPerm(module));
   const a = ADAPTERS[module];
   const r = await a.delegate(prisma).findUnique({ where: { id }, include: a.include });
-  if (!r) throw notFound();
+  if (!r || (module === "expense" && !can(actor, "expense.view_all") && (r as { createdById: string }).createdById !== actor.id)) throw notFound();
   const mask = !can(actor, "patients.view_identity");
   // Walk the correction chain in both directions.
   const chain: { id: string; status: string; createdAt: Date }[] = [];

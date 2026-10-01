@@ -25,7 +25,8 @@ export const PERMISSIONS = {
   "diet.write": { group: "Diet & Nutrition", description: "Create / correct / void diet transactions" },
   "income.view": { group: "Other Income", description: "View other income" },
   "income.write": { group: "Other Income", description: "Create / correct / void other income" },
-  "expense.view": { group: "Expenses", description: "View expenses" },
+  "expense.view": { group: "Expenses", description: "View expenses they entered themselves" },
+  "expense.view_all": { group: "Expenses", description: "See everyone's expenses, totals, month-wise and the monthly checklist" },
   "expense.write": { group: "Expenses", description: "Create / correct / void expenses, attach bills" },
   "expense.approve": { group: "Expenses", description: "Approve or reject expenses entered by staff (entries by approvers count immediately)" },
 
@@ -52,7 +53,7 @@ export const PERMISSIONS = {
 export type PermissionCode = keyof typeof PERMISSIONS;
 export const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as PermissionCode[];
 
-const viewAllTx: PermissionCode[] = ["opd.view", "ipd.view", "lab.view", "pharmacy.view", "diet.view", "income.view", "expense.view"];
+const viewAllTx: PermissionCode[] = ["opd.view", "ipd.view", "lab.view", "pharmacy.view", "diet.view", "income.view", "expense.view", "expense.view_all"];
 
 export const ROLE_DEFS: Record<string, { name: string; description: string; permissions: PermissionCode[] }> = {
   ADMIN: {
@@ -71,10 +72,26 @@ export const ROLE_DEFS: Record<string, { name: string; description: string; perm
       "import.run", "audit.view", "patients.view_identity",
     ],
   },
+  ACCOUNTS_HEAD: {
+    name: "Accounts head",
+    description: "Runs the accounts: everything Accounts does, plus approving expenses entered by staff",
+    permissions: [
+      "dashboard.view", "analytics.view", "reports.view", "reports.export", "search.use",
+      ...viewAllTx,
+      "opd.write", "ipd.write", "lab.write", "pharmacy.write", "diet.write", "income.write", "expense.write", "expense.approve",
+      "accounts.view", "accounts.reconcile", "accounts.close", "corrections.approve",
+      "import.run", "audit.view", "patients.view_identity",
+    ],
+  },
   RECEPTION: {
     name: "Reception",
     description: "OPD and consultation transactions",
     permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "diet.view", "diet.write", "patients.view_identity"],
+  },
+  RECEPTION_EXPENSES: {
+    name: "Reception + expenses",
+    description: "Reception work, and entering day-to-day expenses (they wait for the accounts head's approval; staff see only their own)",
+    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "diet.view", "diet.write", "expense.view", "expense.write", "patients.view_identity"],
   },
   IPD_STAFF: {
     name: "IPD Staff",

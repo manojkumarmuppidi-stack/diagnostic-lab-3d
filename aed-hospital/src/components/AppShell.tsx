@@ -36,6 +36,7 @@ import { apiFetch, cn } from "@/lib/client";
 import { MastersProvider, SessionProvider, useCan, useSession, type SessionUser } from "./session";
 import { ToastProvider } from "./ui";
 import { TransactionForm } from "./TransactionForm";
+import { NotificationBell } from "./NotificationBell";
 
 interface NavItem {
   href: string;
@@ -172,6 +173,7 @@ function Shell({ children }: { children: ReactNode }) {
               </div>
             </form>
           )}
+          <NotificationBell className={can("search.use") ? "" : "ml-auto"} />
           {quick.length > 0 && (
             <div className="relative hidden lg:block">
               <button className="btn btn-primary" onClick={() => setQuickOpen((o) => !o)} aria-expanded={quickOpen}>

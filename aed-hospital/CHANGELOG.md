@@ -2,6 +2,13 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.12.0: Team logins, routine expenses, notifications; tap-to-see entries
+- **Daily Accounts:** tap any figure (IPD, Lab, Hospital expenses, …) to list the entries behind it on that day, with mode and reference; spread monthly items show as the day's share of the month.
+- **New roles** (created on the next deploy): *Accounts head* (everything Accounts does, plus approving staff expenses) and *Reception + expenses* (reception work plus entering expenses, which wait for approval). Admin / CEO creates logins and sets first passwords under Users & Permissions; each person must change the password at first sign-in.
+- **Expense privacy:** new permission `expense.view_all`. Without it a person sees only the expenses they entered (no salaries, totals, month-wise or checklist). Every role that could see expenses before keeps seeing all of them (migration `20261004000000_expense_view_all_and_heads`).
+- **Routine expenses:** new heads found in the Jan–Sep 2026 books (visiting doctors by specialty, vegetables, provisions, consumables, glucose strips, medicines, Sunday duty, transport, refunds, uniforms, utensils, foot care, miscellaneous). Imported and older expenses are linked to their head automatically, so the monthly checklist and "last month" know them. The quick pick lists the monthly routine heads before anything is typed; one letter narrows them. Day-to-day heads fill the description without a month.
+- **Notifications:** a bell in the top bar with what needs attention: expenses waiting for approval, your rejected entries, monthly bills not booked by the 5th, accounts not updated, days to reconcile and close. New items pop up in the app and, once allowed on the device, as phone/desktop notifications while the app is open.
+
 ## 0.11.0: AED Hospital and Hormonal Pharmacy fully separated
 - Every hospital total is now **AED Hospital only**: Total Income = OPD + IPD + Lab + Diet + Other; Total Expenses = hospital + other expenses; Net Result = the difference. This applies to the Dashboard, Daily Accounts, the daily PDF, Analytics, Reports, insights and the Board Meeting pack.
 - Hormonal Pharmacy sales, stock purchases and **expenses booked to department "Pharmacy"** (pharmacy staff) are reported only in the pharmacy's own places: Daily Accounts' separate "Hormonal Pharmacy — separate entity" card, Hormonal Pharmacy → accounts, Analytics → Hormonal Pharmacy and the AED vs Pharmacy P&L.

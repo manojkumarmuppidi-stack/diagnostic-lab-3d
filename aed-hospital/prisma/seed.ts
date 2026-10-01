@@ -12,6 +12,7 @@ import { round2 } from "../src/lib/money";
 import { classifyLabItem } from "../src/lib/import/lab-category";
 import { fingerprintFor } from "../src/server/services/modules";
 import { DEFAULT_SETTINGS } from "../src/server/settings";
+import { linkExpensesToHeads } from "../src/server/expense-heads";
 
 const prisma = new PrismaClient();
 const DEMO = process.env.SEED_DEMO_DATA === "true";
@@ -106,7 +107,7 @@ const EXPENSE_HEADS: [string, string, string | null, string, string | null, bool
   ["Newspaper", "Administrative", null, "newspaper,news", "CASH", true],
   ["Gas cylinders", "Kitchen", "Gas", "gas,cylinder,lpg", null, true],
   ["Drinking water cans", "Water", "Drinking water cans", "water,cans,bottles", null, true],
-  ["Oxygen cylinders", "Medical supplies", "Consumables", "oxygen,o2,cylinder", null, true],
+  ["Oxygen cylinders", "Medical supplies", "Consumables", "oxygen,o2,cylinder,cylinders,nitrous", null, true],
   ["Lab reagents", "Medical supplies", "Lab reagents", "reagent,stock,diagnostics,lab", null, true],
   ["Outsourced lab tests", "Outsourced lab tests", null, "outside,outsource,sample,lab", null, true],
   ["Tissue rolls & toiletries", "Toiletries", null, "tissue,toilet,hand wash", "CASH", true],
@@ -115,7 +116,7 @@ const EXPENSE_HEADS: [string, string, string | null, string, string | null, bool
   ["TV subscription", "Administrative", "Internet & Phone", "tv,dth,tata sky", null, true],
   ["Hospital software & SMS", "Administrative", "Software", "software,sms,hms,oneglance", null, true],
   ["Digital marketing", "Marketing", "Digital", "marketing,digital,seo,ads", null, true],
-  ["Online listings", "Marketing", "Digital", "practo,justdial,listing", null, false],
+  ["Online listings", "Marketing", "Digital", "practo,justdial,just dial,listing", null, false],
   ["Bio-medical waste", "Housekeeping", "Bio-medical waste", "biomedical,bio waste,waste", null, true],
   ["ESI", "Taxes & compliance", null, "esi,esic", "BANK", true],
   ["PF", "Taxes & compliance", null, "pf,epf,provident fund", "BANK", true],
@@ -123,8 +124,25 @@ const EXPENSE_HEADS: [string, string, string | null, string, string | null, bool
   ["TDS", "Taxes & compliance", null, "tds,194c,194j,192b", "BANK", true],
   ["GST", "Taxes & compliance", null, "gst", "BANK", true],
   ["Accountant fees", "Taxes & compliance", null, "accounts,accountant,ca", null, true],
-  ["Audit & ROC filing", "Taxes & compliance", null, "audit,roc,filing", null, false],
+  ["Audit & ROC filing", "Taxes & compliance", null, "audit,auditing,auditor,roc,filing", null, false],
   ["GHMC / trade licence", "Taxes & compliance", null, "ghmc,trade licence,property tax,license", null, false],
+  // Paid every month in 2026 (from the Jan–Sep books): visiting specialists, named by specialty.
+  ["Visiting doctor – 2D Echo", "Doctor & consultant fees", null, "echo,2d echo,cardio", null, true],
+  ["Visiting doctor – Ophthalmology", "Doctor & consultant fees", null, "eye,ophthalmology,ophthal,retina", null, true],
+  // Bought several times a month, every month: routine, but day-to-day (not spread over the month).
+  ["Vegetables", "Groceries", "Vegetables", "vegetables,veg,veggies,sabzi", "CASH", false],
+  ["Groceries & provisions", "Groceries", "Provisions", "grocery,groceries,provisions,rice,dal,oil,sugar", "CASH", false],
+  ["Medical consumables", "Medical supplies", "Consumables", "consumables,gloves,syringe,cotton,surgical,surgicals,vijaya", null, false],
+  ["Foot care supplies", "Medical supplies", "Consumables", "footright,foot care,foot", null, false],
+  ["Glucose strips & lancets", "Medical supplies", "Consumables", "accu,accu check,strips,lancet,glucometer", null, false],
+  ["Medicines for patients (IP / OT)", "Medical supplies", "Consumables", "medicines,medicine,tablets,injection,gel", null, false],
+  ["Sunday & extra duty", "Salaries & Wages", "Support staff", "sunday,duty,extra duty,ot charges,overtime", "CASH", false],
+  ["Cleaning materials", "Cleaning materials", null, "cleaning,phenyl,detergent,mop,harpic", "CASH", false],
+  ["Transport & auto", "Transport", null, "auto,transport,petrol,diesel,fuel,cab,courier,travel", "CASH", false],
+  ["Patient refunds", "Patient refunds", null, "refund,refunded,return", "CASH", false],
+  ["Staff uniforms", "Housekeeping", "Uniforms", "uniform,uniforms,apron", null, false],
+  ["Kitchen utensils", "Kitchen", "Utensils", "utensils,vessels,plates,glasses", "CASH", false],
+  ["Miscellaneous", "Other", null, "misc,miscellaneous,sundry", "CASH", false],
 ];
 const PAYMENT_MODES: [string, string, "CASH" | "CARD" | "UPI" | "BANK" | "OTHER"][] = [
   ["CASH", "Cash", "CASH"],
@@ -204,6 +222,10 @@ async function seedMasters() {
     const sub = subName ? await prisma.expenseCategory.findFirst({ where: { name: subName, parentId: cat.id } }) : null;
     const dept = deptName ? await prisma.department.findUnique({ where: { name: deptName } }) : null;
     if (existing) {
+      // New search words are added to a head; words the Admin added are kept.
+      const have = new Set(existing.keywords.split(",").map((k) => k.trim()).filter(Boolean));
+      const add = keywords.split(",").filter((k) => !have.has(k));
+      if (add.length) await prisma.expenseHead.update({ where: { id: existing.id }, data: { keywords: [...have, ...add].join(",") } });
       // Fill structure added later (subcategory, department) without overwriting Admin edits.
       if ((sub && !existing.subcategoryId && existing.categoryId === cat.id) || (dept && !existing.departmentId)) {
         await prisma.expenseHead.update({
@@ -449,6 +471,9 @@ async function seedDemo() {
 async function main() {
   await seedSecurity();
   await seedMasters();
+  // Expenses imported before their routine head existed are linked to it (only unlinked ones).
+  const linked = await linkExpensesToHeads(prisma);
+  if (linked) console.log(`✔ linked ${linked} expenses to routine heads`);
   console.log("✔ roles, permissions, master data and settings");
   if (DEMO) await seedDemo();
 }
