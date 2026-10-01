@@ -108,6 +108,11 @@ Gross Margin %    = Gross Margin ÷ Net Sales × 100          (undefined when Ne
 - Expenses entered by an approver and rows imported from Excel are `ACTIVE` immediately.
 - Payment mode default for new expenses (a suggestion; staff can change it): below ₹3,000 Cash, above ₹1,00,000 Bank Transfer, otherwise Card.
 
+## Entities: AED Hospital and Hormonal Pharmacy (supersedes "Segments" below)
+- AED Hospital income = OPD + Lab + IPD collections + Diet + Other income. Expenses = every expense not tagged to the Pharmacy department.
+- Hormonal Pharmacy income = pharmacy sales net of returns. Expenses = pharmacy purchases + expenses tagged to department "Pharmacy".
+- Profit = income − expenses per entity; margin = profit ÷ income. Months with expenses but no income are reported as "income not recorded" and excluded from the profit figure shown.
+
 ## Segments: Hospital and Hormonal Pharmacy
 - **Hormonal Pharmacy** = pharmacy net sales (after discount and returns) and pharmacy purchases (supplier invoices). Profit = Net sales − Purchases; Profit % = Profit ÷ Net sales. This is AED's monthly measure; it moves with stock build-up and sell-down, so the margin on medicines sold (taxable value − cost, ex-GST, from medicine lines) is shown beside it.
 - **Hospital (without Hormonal Pharmacy)** = all other income streams − hospital and other expenses.

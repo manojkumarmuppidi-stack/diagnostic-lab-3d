@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Info, OctagonAlert } from "lucide-react";
 import { useApi, qs } from "@/lib/client";
-import { compare, EXPENSE_LABELS, INCOME_STREAMS, pctOf, STREAM_LABELS, type Change, type Counts, type ExpenseByKind, type IncomeByStream } from "@/lib/accounting";
+import { EXPENSE_LABELS, INCOME_STREAMS, STREAM_LABELS, type Change, type Counts, type ExpenseByKind, type IncomeByStream } from "@/lib/accounting";
 import { addDays } from "@/lib/dates";
 import { formatINR, formatNumber, formatPct } from "@/lib/money";
 import type { Granularity, ResolvedPeriod } from "@/lib/periods";
@@ -268,46 +268,38 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /**
- * The two businesses side by side: the hospital without the Hormonal Pharmacy, and the pharmacy
- * on its own (Sale − Purchase). Together they add up to the Financial result above.
+ * The two entities side by side, from the same calculation as the AED vs Pharmacy P&L page:
+ * AED Hospital (OPD, lab, IPD, diet, other) and Hormonal Pharmacy (sales; purchases + pharmacy-department costs).
  */
-function Segments({ cur, prev, from, to }: { cur: Summary; prev: Summary; from: string; to: string }) {
-  const seg = (x: Summary) => {
-    const hospIncome = INCOME_STREAMS.filter((s) => s !== "PHARMACY").reduce((a, s) => a + x.income[s], 0);
-    const hospExp = x.expense.HOSPITAL + x.expense.OTHER;
-    const phSales = x.income.PHARMACY;
-    const phBuy = x.expense.PHARMACY_PURCHASE;
-    return { hospIncome, hospExp, hospNet: hospIncome - hospExp, phSales, phBuy, phProfit: phSales - phBuy, phPct: pctOf(phSales - phBuy, phSales) };
-  };
-  const a = seg(cur);
-  const b = seg(prev);
-  return (
-    <Section title="By segment">
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="card p-3 sm:p-4">
-          <h3 className="mb-2 text-sm font-semibold">Hospital (without Hormonal Pharmacy)</h3>
-          <div className="grid grid-cols-3 gap-2">
-            <Kpi label="Income" value={a.hospIncome} change={compare(a.hospIncome, b.hospIncome)} href={withRange("/daily-accounts", from, to)} />
-            <Kpi label="Expenses" value={a.hospExp} change={compare(a.hospExp, b.hospExp)} goodWhen="down" href={withRange("/expenses", from, to)} />
-            <Kpi label="Net" value={a.hospNet} change={compare(a.hospNet, b.hospNet)} emphasis />
-          </div>
+function Segments({ from, to }: { cur: Summary; prev: Summary; from: string; to: string }) {
+  const { data } = useApi<{ entities: Record<"AED" | "HP", { totals: { income: number; expenses: number; profit: number; marginPct: number | null } }> }>(`/api/entities?from=${from}&to=${to}`);
+  if (!data) return null;
+  const card = (k: "AED" | "HP", title: string) => {
+    const t = data.entities[k].totals;
+    return (
+      <div className="card p-3 sm:p-4">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <Link href={`/entities?from=${from.slice(0, 7)}&to=${to.slice(0, 7)}`} className="text-xs underline">
+            P&amp;L and insights
+          </Link>
         </div>
-        <div className="card p-3 sm:p-4">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">Hormonal Pharmacy (Sale − Purchase)</h3>
-            <Link href="/hormonal-pharmacy" className="text-xs underline">
-              Monthly accounts
-            </Link>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <Kpi label="Net sales" value={a.phSales} change={compare(a.phSales, b.phSales)} href="/hormonal-pharmacy" />
-            <Kpi label="Purchases" value={a.phBuy} change={compare(a.phBuy, b.phBuy)} goodWhen="down" href={withRange("/pharmacy?tab=purchases", from, to)} />
-            <Kpi label={`Profit${a.phPct === null ? "" : ` · ${a.phPct.toFixed(1)}%`}`} value={a.phProfit} change={compare(a.phProfit, b.phProfit)} emphasis />
-          </div>
+        <div className="grid grid-cols-3 gap-2">
+          <Kpi label="Income" value={t.income} />
+          <Kpi label="Expenses" value={t.expenses} />
+          <Kpi label={`${t.profit < 0 ? "Loss" : "Profit"}${t.marginPct === null ? "" : ` · ${t.marginPct.toFixed(1)}%`}`} value={t.profit} emphasis />
         </div>
       </div>
+    );
+  };
+  return (
+    <Section title="By entity">
+      <div className="grid gap-3 md:grid-cols-2">
+        {card("AED", "AED Hospital (OPD · Lab · IPD)")}
+        {card("HP", "Hormonal Pharmacy")}
+      </div>
       <p className="mt-2 text-xs muted">
-        Wellness: the partner&apos;s revenue share and wellness salaries are booked as hospital expenses (department Wellness). Wellness package receipts are manual and not recorded here.
+        Wellness: the partner&apos;s revenue share and wellness salaries are booked as AED expenses (department Wellness). Wellness package receipts are manual and not recorded here.
       </p>
     </Section>
   );

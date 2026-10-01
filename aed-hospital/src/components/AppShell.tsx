@@ -28,6 +28,7 @@ import {
   X,
   Database,
   Presentation,
+  Scale,
 } from "lucide-react";
 import type { PermissionCode } from "@/lib/permissions";
 import type { ModuleKey } from "@/lib/modules";
@@ -45,6 +46,7 @@ interface NavItem {
 
 export const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
+  { href: "/entities", label: "AED vs Pharmacy P&L", icon: Scale, perm: "dashboard.view" },
   { href: "/daily-accounts", label: "Daily Accounts", icon: CalendarCheck, perm: "accounts.view" },
   { href: "/opd", label: "OPD", icon: Stethoscope, perm: "opd.view" },
   { href: "/ipd", label: "IPD", icon: BedDouble, perm: "ipd.view" },

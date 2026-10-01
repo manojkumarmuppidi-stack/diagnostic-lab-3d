@@ -2,6 +2,13 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.10.0: AED Hospital and Hormonal Pharmacy as separate entities
+- New page **AED vs Pharmacy P&L** (`/entities`): for any range of months, income, expenses, profit/loss and margin of each entity, month by month, with a chart, the biggest cost lines and plain-language insights.
+  - **AED Hospital** = consultations (OPD), laboratory and IPD, plus diet and other hospital income; all hospital expenses.
+  - **Hormonal Pharmacy** = pharmacy sales net of returns; stock purchases plus expenses tagged to the Pharmacy department.
+- A month with expenses but no income is marked "income not recorded" and left out of the profit figure, so missing imports are not mistaken for losses.
+- Dashboard "By entity" cards use the same calculation and link to the page.
+
 ## 0.9.5: "Accounts not up to date" warning
 - For OPD, Laboratory, Hormonal Pharmacy sales, Expenses, pharmacy purchases, IPD collections and Diet, the app finds the last date with entries. When it is older than allowed (2 days for OPD/lab/pharmacy, 3 for expenses, 7 for purchases/IPD/diet), a warning banner lists it with the number of missing days and a link to fix it.
 - Shown on the Dashboard, Analytics, Board Meeting, Hormonal Pharmacy and printed on the daily summary PDF. For a past period it checks up to the end of that period, so a complete February shows no warning.

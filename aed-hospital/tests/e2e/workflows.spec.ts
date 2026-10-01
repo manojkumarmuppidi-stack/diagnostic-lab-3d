@@ -103,6 +103,18 @@ test("staff enter an expense with one word; it waits for Admin approval", async 
   await expect(page.getByRole("row").filter({ hasText: /^Milk/ }).first()).toBeVisible();
 });
 
+test("AED Hospital vs Hormonal Pharmacy P&L shows both entities with insights", async ({ page }) => {
+  const crashes: string[] = [];
+  page.on("pageerror", (e) => crashes.push(e.message));
+  await login(page);
+  await page.getByRole("link", { name: "AED vs Pharmacy P&L" }).first().click();
+  await expect(page.getByRole("heading", { name: "AED Hospital", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Hormonal Pharmacy", exact: true })).toBeVisible();
+  await expect(page.getByText("What the numbers say")).toHaveCount(2);
+  await expect(page.getByText(/Both together: income/)).toBeVisible();
+  expect(crashes).toEqual([]);
+});
+
 test("audit log records activity", async ({ page }) => {
   await login(page);
   await page.goto("/audit");
