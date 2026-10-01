@@ -99,6 +99,9 @@ const EXPENSE_HEADS: [string, string, string | null, string, string | null, bool
   // Wellness programme: its two costs, both tagged to the Wellness department so they can be read against wellness income.
   ["Wellness – revenue share", "MOU partners", "Revenue share", "wellness,jj wellness,revenue share,mou,partner", null, true, "Wellness"],
   ["Wellness – staff salaries", "Salaries & Wages", "Support staff", "wellness,salary,salaries", null, true, "Wellness"],
+  // Hormonal Pharmacy is a separate entity: its people are booked to department "Pharmacy" so they count against the pharmacy.
+  ["Hormonal Pharmacy – remuneration", "Salaries & Wages", "Support staff", "pharmacy,remuneration,hp", null, true, "Pharmacy"],
+  ["Hormonal Pharmacy – staff salary", "Salaries & Wages", "Support staff", "pharmacy,salary,salaries,hp", null, true, "Pharmacy"],
   ["Milk", "Groceries", "Milk & Dairy", "milk,curd,dairy", "CASH", true],
   ["Newspaper", "Administrative", null, "newspaper,news", "CASH", true],
   ["Gas cylinders", "Kitchen", "Gas", "gas,cylinder,lpg", null, true],
