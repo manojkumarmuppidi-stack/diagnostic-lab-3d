@@ -76,14 +76,14 @@ function Users({ roles }: { roles: any[] }) {
         <div className="space-y-3">
           {!edit?.id && (
             <Field label="Username" required error={errs.username} htmlFor="u-username">
-              <input id="u-username" className="input" autoCapitalize="none" value={v.username ?? ""} onChange={(e) => setV({ ...v, username: e.target.value })} />
+              <input id="u-username" name="staff-username" className="input" autoCapitalize="none" autoComplete="off" value={v.username ?? ""} onChange={(e) => setV({ ...v, username: e.target.value })} />
             </Field>
           )}
           <Field label="Full name" required error={errs.name} htmlFor="u-name">
-            <input id="u-name" className="input" value={v.name ?? ""} onChange={(e) => setV({ ...v, name: e.target.value })} />
+            <input id="u-name" name="staff-name" className="input" autoComplete="off" value={v.name ?? ""} onChange={(e) => setV({ ...v, name: e.target.value })} />
           </Field>
           <Field label="Email" error={errs.email} htmlFor="u-email">
-            <input id="u-email" className="input" type="email" value={v.email ?? ""} onChange={(e) => setV({ ...v, email: e.target.value })} />
+            <input id="u-email" name="staff-email" className="input" type="email" autoComplete="off" value={v.email ?? ""} onChange={(e) => setV({ ...v, email: e.target.value })} />
           </Field>
           <Field label="Role" required htmlFor="u-role">
             <select id="u-role" className="input" value={v.roleId ?? ""} onChange={(e) => setV({ ...v, roleId: e.target.value })} disabled={edit?.id === me.id}>
@@ -95,7 +95,7 @@ function Users({ roles }: { roles: any[] }) {
             </select>
           </Field>
           <Field label={edit?.id ? "Reset password (optional)" : "Initial password"} required={!edit?.id} error={errs.password ?? errs.resetPassword} help="User must change it at next sign-in. Min 8 characters with letters and numbers." htmlFor="u-password">
-            <input id="u-password" className="input" type="password" autoComplete="new-password" value={v.password ?? ""} onChange={(e) => setV({ ...v, password: e.target.value })} />
+            <input id="u-password" name="staff-new-password" className="input" type="password" autoComplete="new-password" data-lpignore="true" value={v.password ?? ""} onChange={(e) => setV({ ...v, password: e.target.value })} />
           </Field>
           {edit?.id && edit.id !== me.id && (
             <label className="flex items-center gap-2 text-sm">
