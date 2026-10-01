@@ -2,6 +2,9 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.12.2: Reception bills and imports lab
+- Reception roles may view, enter and import laboratory transactions (migration `20261005010000_reception_lab`).
+
 ## 0.12.1: Reception and pharmacy can import their own reports
 - Import is limited to the modules a role may enter by hand: Reception → OPD and Diet; Pharmacy → pharmacy sales, returns, purchases, medicine lines and supplier payments. Importing expenses needs approval rights (imported expenses count at once). The type list on Excel Import shows only what the person may import.
 - Staff who cannot see the accounts see only the import files they uploaded (history, rows, error sheet).

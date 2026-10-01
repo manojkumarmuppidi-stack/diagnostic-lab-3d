@@ -85,13 +85,13 @@ export const ROLE_DEFS: Record<string, { name: string; description: string; perm
   },
   RECEPTION: {
     name: "Reception",
-    description: "OPD and consultation transactions",
-    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "diet.view", "diet.write", "import.run", "patients.view_identity"],
+    description: "OPD, lab billing and diet transactions",
+    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "lab.view", "lab.write", "diet.view", "diet.write", "import.run", "patients.view_identity"],
   },
   RECEPTION_EXPENSES: {
     name: "Reception + expenses",
     description: "Reception work, and entering day-to-day expenses (they wait for the accounts head's approval; staff see only their own)",
-    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "diet.view", "diet.write", "expense.view", "expense.write", "import.run", "patients.view_identity"],
+    permissions: ["dashboard.view", "search.use", "opd.view", "opd.write", "lab.view", "lab.write", "diet.view", "diet.write", "expense.view", "expense.write", "import.run", "patients.view_identity"],
   },
   IPD_STAFF: {
     name: "IPD Staff",
