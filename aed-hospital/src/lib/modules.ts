@@ -389,6 +389,7 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
       { key: "amount", label: "Amount", type: "money", required: true, aliases: ["amount", "amt", "expense", "value", "total", "paid", "debit"] },
       payField,
       remarksField,
+      { key: "spreadMonth", label: "Spread over month", type: "text", importOnly: true, aliases: ["spread over month", "spread", "monthly expense"], help: "Yes for rent, salaries and other monthly payments: spread over the days of the month in daily figures" },
     ],
     columns: [
       { key: "date", label: "Date", type: "date", mobile: true },
@@ -402,7 +403,7 @@ export const MODULES: Record<ModuleKey, ModuleDef> = {
       { key: "paymentMode", label: "Mode" },
       { key: "attachments", label: "Bill", type: "int" },
     ],
-    template: ["Date", "Department", "Category", "Subcategory", "Description", "Vendor", "Bill Number", "Amount", "Payment Mode", "Remarks"],
+    template: ["Date", "Department", "Category", "Subcategory", "Description", "Vendor", "Bill Number", "Amount", "Payment Mode", "Remarks", "Spread over month"],
     sample: [["09-09-2026", "Administration", "Stationery", "Printer paper", "A4 paper 10 reams (demo)", "Demo Stationers", "DS-101", 2600, "Cash", ""]],
   },
 };

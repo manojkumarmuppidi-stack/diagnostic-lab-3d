@@ -167,6 +167,8 @@ export const expenseSchema = z.object({
   remarks: zOptText(500),
   /** Monthly expense head picked in the form (optional). */
   headId: zOptId,
+  /** Spread over the days of its month in daily figures (rent, salaries, monthly bills). Accepts Yes/No from Excel. */
+  spreadMonth: z.preprocess((v) => (typeof v === "string" ? /^(y|yes|true|1|monthly)$/i.test(v.trim()) : !!v), z.boolean()).optional(),
 });
 
 export const MODULE_SCHEMAS = {

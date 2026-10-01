@@ -733,6 +733,8 @@ model Expense {
   /// Monthly head this expense was entered against (quick pick), if any.
   headId        String?
   head          ExpenseHead?     @relation(fields: [headId], references: [id])
+  /// Monthly expense (rent, payroll…) spread over the days of its month in day-level figures.
+  spreadMonth   Boolean          @default(false)
   /// Set when an approver approves a PENDING expense (status becomes ACTIVE).
   approvedById  String?
   approvedAt    DateTime?

@@ -2,6 +2,11 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.10.1: Monthly expenses spread over the month
+- Expenses can be marked **Spread over the month** (form checkbox, ticked automatically for monthly heads such as rent and salaries; import column "Spread over month" = Yes). In every day-level figure (Daily Accounts, daily PDF, day trends, week ranges) such an expense is split evenly over the days of its month; month and year totals are unchanged.
+- Spread expenses are left out of "expenses paid" by payment mode in daily reconciliation, since their real payment day is not known.
+- Migration `20261003000000_expense_spread_month` adds the flag and marks the month-end lines already imported from the monthly register (`REG-…`, `HP-REM-…`, `HP-SAL-…`). On AED's data, 30 Sep fell from ₹29.46 L of expenses to ₹98,187 (every September day now carries its share).
+
 ## 0.10.0: AED Hospital and Hormonal Pharmacy as separate entities
 - New page **AED vs Pharmacy P&L** (`/entities`): for any range of months, income, expenses, profit/loss and margin of each entity, month by month, with a chart, the biggest cost lines and plain-language insights.
   - **AED Hospital** = consultations (OPD), laboratory and IPD, plus diet and other hospital income; all hospital expenses.

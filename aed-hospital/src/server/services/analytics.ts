@@ -163,6 +163,8 @@ export async function expenseByReconGroup(r: Range) {
     SELECT COALESCE(pm."reconGroup"::text, 'OTHER') AS grp, COALESCE(SUM(v.amount), 0) AS amount
       FROM v_expense_line v LEFT JOIN "PaymentMode" pm ON pm.id = v.payment_mode_id
      WHERE v.date BETWEEN ${D(r.from)} AND ${D(r.to)}
+       -- Monthly expenses spread over the month were not paid on each day: leave them out of cash paid.
+       AND NOT v.spread
      GROUP BY 1`;
   const out: Record<string, number> = { CASH: 0, CARD: 0, UPI: 0, BANK: 0, OTHER: 0 };
   for (const row of rows) out[row.grp] = toNum(row.amount);

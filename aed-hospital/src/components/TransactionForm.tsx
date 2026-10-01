@@ -59,6 +59,8 @@ function fillFromHead(head: MasterItem, v: Values, masters: NonNullable<ReturnTy
   if (head.departmentId) v.departmentId = String(head.departmentId);
   if (head.vendor) v.vendor = String(head.vendor);
   v.description = `${head.name} – ${monthLabel((v.date || new Date().toISOString()).slice(0, 7))}`;
+  // Monthly heads (rent, salaries…) are spread over the month in daily figures.
+  v.spreadMonth = head.monthly ? "true" : "";
   if (!keepAmount && typeof head.typicalAmount === "number" && head.typicalAmount > 0) v.amount = String(head.typicalAmount);
   const code = (head.defaultMode as string | null) || suggestModeCode(Number(v.amount) || null);
   const mode = code ? masters.paymentModes.find((m) => m.code === code && m.active) : undefined;
@@ -235,6 +237,15 @@ export function TransactionForm({ module, open, onClose, onSaved, correct, prese
             <span className="muted">{module === "ipd" ? "Net bill" : "Net amount"}</span>
             <span className="text-lg font-semibold tabular-nums">{formatINR(net, { paise: true })}</span>
           </div>
+        )}
+        {module === "expense" && (
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={values.spreadMonth === "true"} onChange={(e) => set("spreadMonth", e.target.checked ? "true" : "")} />
+            <span>
+              Spread over the month
+              <span className="block text-xs muted">For rent, salaries and other monthly payments: each day of the month carries its share in daily figures. Month totals are the same either way.</span>
+            </span>
+          </label>
         )}
         {module === "expense" && !correct && (
           <div className="space-y-2">

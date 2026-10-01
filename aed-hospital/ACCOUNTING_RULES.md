@@ -118,3 +118,6 @@ Gross Margin %    = Gross Margin ÷ Net Sales × 100          (undefined when Ne
 - **Hospital (without Hormonal Pharmacy)** = all other income streams − hospital and other expenses.
 - The two segments add up to the consolidated Net Operating Result.
 
+## Monthly expenses spread over the month
+An expense flagged `spreadMonth` (rent, payroll, monthly register lines with no day) appears in `v_expense_line` as one line per day of its month: amount ÷ days, rounded to paise, with the last day taking the remainder. Month totals are unchanged. Such expenses are excluded from expenses paid by payment mode in daily reconciliation.
+

@@ -629,6 +629,7 @@ const expense: Adapter = {
         paymentModeId: input.paymentModeId,
         remarks: input.remarks ?? null,
         headId: input.headId ?? null,
+        spreadMonth: input.spreadMonth ?? false,
       },
     };
   },
