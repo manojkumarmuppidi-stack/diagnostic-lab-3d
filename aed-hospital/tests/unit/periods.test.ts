@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultGranularity, precedingRange, resolvePeriod, startOfQuarter, startOfYear } from "@/lib/periods";
+import { recentMonths, wholeMonths } from "@/lib/periods";
 import { addMonths, daysBetweenInclusive, startOfWeek, todayISO } from "@/lib/dates";
 
 const today = "2026-09-24"; // a Thursday
@@ -80,3 +81,22 @@ describe("date helpers", () => {
     expect(defaultGranularity("2025-10-01", "2026-09-30")).toBe("month");
   });
 });
+
+describe("whole months", () => {
+  it("February compares with all of January, labelled by name", () => {
+    const r = resolvePeriod({ preset: "custom", today: "2026-10-01", from: "2026-02-01", to: "2026-02-28" });
+    expect(r.current).toMatchObject({ from: "2026-02-01", to: "2026-02-28", label: "February 2026" });
+    expect(r.previous).toMatchObject({ from: "2026-01-01", to: "2026-01-31", label: "January 2026" });
+  });
+  it("a quarter of whole months compares with the three months before", () => {
+    const r = resolvePeriod({ preset: "custom", today: "2026-10-01", from: "2026-01-01", to: "2026-03-31" });
+    expect(r.current.label).toBe("Jan – Mar 2026");
+    expect(r.previous).toMatchObject({ from: "2025-10-01", to: "2025-12-31" });
+  });
+  it("lists recent months newest first; partial ranges are not months", () => {
+    const m = recentMonths("2026-10-01", 3);
+    expect(m.map((x) => x.label)).toEqual(["October 2026", "September 2026", "August 2026"]);
+    expect(wholeMonths("2026-02-01", "2026-02-27")).toBe(0);
+  });
+});
+

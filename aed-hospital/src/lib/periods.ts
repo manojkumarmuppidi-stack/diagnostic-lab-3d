@@ -187,6 +187,13 @@ export function resolvePeriod(opts: {
       }
       current = range(opts.from, opts.to);
       previous = precedingRange(current);
+      // Whole calendar months (e.g. "February 2026") compare with the same number of whole months before.
+      const months = wholeMonths(opts.from, opts.to);
+      if (months) {
+        const ps = addMonths(opts.from, -months);
+        current.label = monthRangeLabel(opts.from, opts.to);
+        previous = range(ps, addDays(opts.from, -1), monthRangeLabel(ps, addDays(opts.from, -1)));
+      }
       break;
     }
     default:
@@ -199,6 +206,27 @@ export function resolvePeriod(opts: {
   }
 
   return { preset, current: clip(current!, maxDate(today, current!.to)), previous: previous! };
+}
+
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** Number of whole calendar months from..to, or 0 when the range does not start and end on month boundaries. */
+export function wholeMonths(from: ISODate, to: ISODate): number {
+  if (from !== startOfMonth(from) || to !== endOfMonth(to) || to < from) return 0;
+  return (Number(to.slice(0, 4)) - Number(from.slice(0, 4))) * 12 + Number(to.slice(5, 7)) - Number(from.slice(5, 7)) + 1;
+}
+/** "February 2026", or "Jan – Mar 2026" for several months. */
+export function monthRangeLabel(from: ISODate, to: ISODate): string {
+  const a = `${MONTH_NAMES[Number(from.slice(5, 7)) - 1]} ${from.slice(0, 4)}`;
+  if (from.slice(0, 7) === to.slice(0, 7)) return a;
+  const b = `${MONTH_NAMES[Number(to.slice(5, 7)) - 1].slice(0, 3)} ${to.slice(0, 4)}`;
+  return from.slice(0, 4) === to.slice(0, 4) ? `${a.slice(0, 3)} – ${b}` : `${a.slice(0, 3)} ${from.slice(0, 4)} – ${b}`;
+}
+/** The last `n` calendar months up to the one containing `today`, newest first, as {value: "2026-02", label}. */
+export function recentMonths(today: ISODate, n = 18): { value: string; label: string; from: ISODate; to: ISODate }[] {
+  const out = [];
+  let m = startOfMonth(today);
+  for (let i = 0; i < n; i++, m = addMonths(m, -1)) out.push({ value: m.slice(0, 7), label: monthRangeLabel(m, m), from: m, to: endOfMonth(m) });
+  return out;
 }
 
 function minDate(a: ISODate, b: ISODate) {

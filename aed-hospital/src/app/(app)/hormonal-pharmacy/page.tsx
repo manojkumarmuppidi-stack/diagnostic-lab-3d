@@ -4,6 +4,7 @@
  * Hormonal Pharmacy — its own accounts, apart from the hospital: monthly Sale − Purchase profit
  * and profit %, the margin on medicines actually sold, and a day-by-day running month-to-date view.
  */
+import { FreshnessBanner } from "@/components/FreshnessBanner";
 import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -88,6 +89,9 @@ function Body({ d, tab, setTab, loading }: { d: any; tab: Tab; setTab: (t: Tab) 
             {c.bills ? <Kpi label="Average bill" value={c.netSales / c.bills} /> : null}
           </div>
         )}
+        <div className="mt-3">
+          <FreshnessBanner to={d.range.to} />
+        </div>
         {d.notes.length > 0 && (
           <ul className="mt-3 space-y-1 text-sm">
             {d.notes.map((n: string) => (

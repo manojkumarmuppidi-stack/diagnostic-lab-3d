@@ -1,4 +1,5 @@
 "use client";
+import { FreshnessBanner } from "@/components/FreshnessBanner";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -66,6 +67,7 @@ export default function DashboardPage() {
       {loading && !data && <Spinner />}
       {data && (
         <div className="space-y-5" style={{ opacity: loading ? 0.6 : 1 }}>
+          <FreshnessBanner to={data.period.current.to} />
           {data.alerts.length > 0 && (
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {data.alerts.map((a) => {

@@ -1,5 +1,7 @@
 "use client";
-import { PERIOD_PRESETS, type CompareMode, type PeriodPreset } from "@/lib/periods";
+import { PERIOD_PRESETS, recentMonths, wholeMonths, type CompareMode, type PeriodPreset } from "@/lib/periods";
+import { isISODate } from "@/lib/dates";
+import { useSession } from "./session";
 
 export interface PeriodValue {
   preset: PeriodPreset;
@@ -10,20 +12,40 @@ export interface PeriodValue {
 
 /** Period selector used by every dashboard: presets, custom range, comparison mode. */
 export function PeriodPicker({ value, onChange, showCompare = true, presets }: { value: PeriodValue; onChange: (v: PeriodValue) => void; showCompare?: boolean; presets?: PeriodPreset[] }) {
+  const { today } = useSession();
   const list = PERIOD_PRESETS.filter((p) => !presets || presets.includes(p.key));
+  // A whole calendar month is a custom range underneath; the menu shows it by name ("February 2026").
+  const months = list.some((p) => p.key === "custom") ? recentMonths(today) : [];
+  const isMonth = value.preset === "custom" && isISODate(value.from) && isISODate(value.to) && wholeMonths(value.from, value.to) === 1;
+  const selected = isMonth ? `month:${value.from!.slice(0, 7)}` : value.preset;
+  const pick = (v: string) => {
+    if (v.startsWith("month:")) {
+      const m = months.find((x) => x.value === v.slice(6));
+      if (m) onChange({ ...value, preset: "custom", from: m.from, to: m.to });
+    } else onChange({ ...value, preset: v as PeriodPreset });
+  };
   return (
     <div className="flex flex-wrap items-end gap-2">
       <label className="flex flex-col gap-1 text-xs text-2">
         Period
-        <select aria-label="Period" className="input !w-auto" value={value.preset} onChange={(e) => onChange({ ...value, preset: e.target.value as PeriodPreset })}>
+        <select aria-label="Period" className="input !w-auto" value={selected} onChange={(e) => pick(e.target.value)}>
           {list.map((p) => (
             <option key={p.key} value={p.key}>
               {p.label}
             </option>
           ))}
+          {months.length > 0 && (
+            <optgroup label="Month">
+              {months.map((m) => (
+                <option key={m.value} value={`month:${m.value}`}>
+                  {m.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </select>
       </label>
-      {value.preset === "custom" && (
+      {value.preset === "custom" && !isMonth && (
         <>
           <label className="flex flex-col gap-1 text-xs text-2">
             From

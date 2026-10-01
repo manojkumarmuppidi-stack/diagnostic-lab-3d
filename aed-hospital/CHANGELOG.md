@@ -2,6 +2,13 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.9.5: "Accounts not up to date" warning
+- For OPD, Laboratory, Hormonal Pharmacy sales, Expenses, pharmacy purchases, IPD collections and Diet, the app finds the last date with entries. When it is older than allowed (2 days for OPD/lab/pharmacy, 3 for expenses, 7 for purchases/IPD/diet), a warning banner lists it with the number of missing days and a link to fix it.
+- Shown on the Dashboard, Analytics, Board Meeting, Hormonal Pharmacy and printed on the daily summary PDF. For a past period it checks up to the end of that period, so a complete February shows no warning.
+
+## 0.9.4: Pick a month by name
+- Every Period menu has a **Month** group: the last 18 months by name (October 2026, September 2026 … ). A month compares with the whole previous month (February vs January), and any range of whole months compares with the same number of months before.
+
 ## 0.9.3: OneGlance pharmacy bill collection (bill-wise)
 - The bill-wise pharmacy collection export (Bill No, Bill Date, Patientid, Total/Bill/Paid Amount, Cash, Card, Cheque, Online, Phone Pay, G Pay…) is recognised: one Hormonal Pharmacy sale per bill (`PHB-<bill no>`) with its exact payment mode — PhonePe and GPay kept apart. Bills paid from an IPD deposit are reduced by that part (already IPD income); bills paid fully from deposit are skipped.
 - A day already held as pharmacy daily totals is not imported again as bills (and the reverse): those rows are flagged as duplicates.

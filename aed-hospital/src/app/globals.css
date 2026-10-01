@@ -613,3 +613,6 @@ body {
     background: #fff !important;
   }
 }
+
+/* "Not up to date" line on the printed daily summary */
+.ds-stale { margin: 6px 0 0; padding: 6px 10px; border: 1px solid #d97706; border-radius: 6px; background: #fffbeb; color: #78350f; font-size: 11px; }

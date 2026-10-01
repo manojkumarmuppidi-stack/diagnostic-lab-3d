@@ -4,6 +4,7 @@
  * "Today at AED" — a one-page A4 daily summary designed to be saved as PDF (browser print).
  * Always printed on white paper, whatever the screen theme.
  */
+import { FreshnessBanner } from "@/components/FreshnessBanner";
 import { Suspense, useEffect, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, FileDown } from "lucide-react";
@@ -67,6 +68,7 @@ function Sheet({ d }: { d: any }) {
           {d.typical !== null && <div className="ds-sub ds-muted">Typical {d.weekday}: {formatINRCompact(d.typical)} (avg of last {d.compare.typicalOver})</div>}
         </div>
       </header>
+      <FreshnessBanner to={d.date} print />
 
       {empty ? (
         <p className="ds-empty">No income or activity is recorded for this day yet. Upload the day&apos;s OneGlance reports (Excel Import) or enter bills, then download again.</p>

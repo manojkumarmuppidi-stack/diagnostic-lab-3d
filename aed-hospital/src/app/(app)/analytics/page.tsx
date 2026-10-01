@@ -1,5 +1,6 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { FreshnessBanner } from "@/components/FreshnessBanner";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { qs, useApi } from "@/lib/client";
@@ -64,6 +65,7 @@ function Inner() {
       <PageHeader title="Analytics" subtitle={data ? `${data.period.current.label}` : undefined} />
       <div className="space-y-4">
         <Tabs<Tab> tabs={TABS} value={tab} onChange={(t) => router.replace(`${path}?tab=${t}`)} />
+        {data && <FreshnessBanner to={data.period.current.to} />}
         <div className="card flex flex-wrap items-end gap-3 p-3">
           <PeriodPicker value={period} onChange={setPeriod} showCompare={false} />
           <label className="flex flex-col gap-1 text-xs text-2">

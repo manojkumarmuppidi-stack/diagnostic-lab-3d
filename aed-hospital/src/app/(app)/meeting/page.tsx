@@ -5,6 +5,7 @@
  * comparison bars for every department. Works as a scrolling page, as a full-screen
  * slideshow (← → keys) and prints one slide per page (Save as PDF).
  */
+import { FreshnessBanner } from "@/components/FreshnessBanner";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Expand, Minimize, Printer, Sparkles } from "lucide-react";
 import { qs, useApi } from "@/lib/client";
@@ -221,6 +222,11 @@ export default function MeetingPage() {
       </div>
       <ErrorState error={error} onRetry={reload} />
       {loading && !data && <Spinner label="Preparing the meeting pack…" />}
+      {data && (
+        <div className="no-print mb-4">
+          <FreshnessBanner to={data.period.current.to} />
+        </div>
+      )}
       {data && (
         <div ref={deckRef} className={`present-root ${presenting ? "is-presenting" : ""}`} style={{ opacity: loading ? 0.6 : 1 }}>
           {presenting ? (
