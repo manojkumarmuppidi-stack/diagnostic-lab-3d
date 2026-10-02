@@ -179,7 +179,8 @@ export async function updateUser(actor: Actor, id: string, raw: unknown) {
   return prisma.$transaction(async (tx) => {
     const before = await tx.user.findUnique({ where: { id }, select: userSelect });
     if (!before) throw notFound();
-    if (before.role.code === "ADMIN" && (d.active === false || (d.roleId && d.roleId !== before.role.id))) {
+    // Only taking away an *active* Admin can leave the system without one; a disabled Admin may be changed freely.
+    if (before.role.code === "ADMIN" && before.active && (d.active === false || (d.roleId && d.roleId !== before.role.id))) {
       const admins = await tx.user.count({ where: { active: true, role: { code: "ADMIN" } } });
       if (admins <= 1) throw badRequest("At least one active Admin is required");
     }

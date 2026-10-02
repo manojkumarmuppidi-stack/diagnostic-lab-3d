@@ -50,3 +50,17 @@ describe("team roles: reception books expenses, the accounts head approves", () 
     expect(await linkExpensesToHeads(prisma)).toBe(0);
   });
 });
+
+describe("changing logins", () => {
+  it("a disabled Admin can be given another role; the last active Admin is still protected", async () => {
+    const { updateUser } = await import("@/server/services/misc");
+    const admin = await prisma.role.findUniqueOrThrow({ where: { code: "ADMIN" } });
+    const pharmacy = await prisma.role.findUniqueOrThrow({ where: { code: "PHARMACY" } });
+    const old = await prisma.user.create({ data: { username: "old.admin", name: "Old Admin", passwordHash: "x", roleId: admin.id, active: false } });
+    const r = await updateUser(f.admin, old.id, { name: "Old Admin", email: "", roleId: pharmacy.id, active: true });
+    expect(r).toMatchObject({ active: true, role: { code: "PHARMACY" } });
+    const other = await prisma.user.create({ data: { username: "admin2", name: "Admin Two", passwordHash: "x", roleId: admin.id } });
+    await prisma.user.update({ where: { id: f.admin.id }, data: { active: false } });
+    await expect(updateUser(f.admin, other.id, { name: "Admin Two", email: "", roleId: pharmacy.id })).rejects.toThrow(/At least one active Admin/);
+  });
+});

@@ -83,7 +83,7 @@ function Users({ roles }: { roles: any[] }) {
             <input id="u-name" name="staff-name" className="input" autoComplete="off" value={v.name ?? ""} onChange={(e) => setV({ ...v, name: e.target.value })} />
           </Field>
           <Field label="Email" error={errs.email} htmlFor="u-email">
-            <input id="u-email" name="staff-email" className="input" type="email" autoComplete="off" value={v.email ?? ""} onChange={(e) => setV({ ...v, email: e.target.value })} />
+            <input id="u-email" name="staff-contact" className="input" type="text" inputMode="email" autoComplete="off" data-lpignore="true" data-form-type="other" value={v.email ?? ""} onChange={(e) => setV({ ...v, email: e.target.value })} />
           </Field>
           <Field label="Role" required htmlFor="u-role">
             <select id="u-role" className="input" value={v.roleId ?? ""} onChange={(e) => setV({ ...v, roleId: e.target.value })} disabled={edit?.id === me.id}>
