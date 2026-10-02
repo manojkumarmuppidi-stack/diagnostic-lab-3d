@@ -253,3 +253,24 @@ describe("OneGlance pharmacy bill collection (bill-wise)", () => {
   });
 });
 
+
+describe("OneGlance Purchase/Sales Report, drug-wise summary", () => {
+  const headers = ["Drug Name", "HSNcode", "Total Qty", "Total Value", "Discount", "GST(%)", "Sales Value", "Taxable Value", "Tax Amount", "CGST", "SGST", "Purchase Value", "Profit"];
+  const row = (n: number, v: (string | number)[]) => ({ rowNumber: n, values: Object.fromEntries(headers.map((h, i) => [h, v[i] ?? null])) });
+  const rows = [
+    row(5, ["ACCU-CHEK LANCET 200", "90183990", 1, 600, 49.98, 18, 550.02, 466.12, 83.9, 41.95, 41.95, 474.3, 75.72]),
+    row(6, ["BD EMG.SYG.10ML", "90183100", 3, 67.5, 4.16, 5, 63.34, 60.33, 3.01, 1.5, 1.5, 21.75, 41.59]),
+    row(7, ["Total", "", 4, 667.5, 54.14, "", 613.36, 526.45, 86.91, "", "", 496.05, 117.31]),
+  ];
+  it("reads the period from the heading and dates the lines on its last day, cost ex-GST", () => {
+    const [b] = convertHmsSheet({ name: "Sheet1", headerRow: 4, headers, rows, preamble: ["Advanced Endocrine and Diabetes Hospital", "Period:01/09/2026  - To:30/09/2026"] })!;
+    expect(b.type).toBe("pharmacy-items");
+    expect(b.rows).toHaveLength(2);
+    expect(b.rows[0].values).toMatchObject({ Type: "Sale", Date: "30/09/2026", Medicine: "ACCU-CHEK LANCET 200", Quantity: 1, Amount: 550.02, Taxable: 466.12, Cost: 401.95 });
+    expect(b.rows[0].values["Bill / Invoice No."]).toBe("SUM-20260901-20260930");
+  });
+  it("refuses a summary without its period, or spanning months", () => {
+    expect(() => convertHmsSheet({ name: "S", headerRow: 1, headers, rows })).toThrow(/Period/);
+    expect(() => convertHmsSheet({ name: "S", headerRow: 3, headers, rows, preamble: ["Period:01/04/2026 - To:30/09/2026"] })).toThrow(/one calendar month/);
+  });
+});

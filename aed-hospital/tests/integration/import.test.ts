@@ -395,3 +395,30 @@ describe("import by reception and pharmacy staff", () => {
     expect((await importHistory(f.admin, {})).total).toBe(2);
   });
 });
+
+describe("OneGlance drug-wise summary", () => {
+  it("imports as medicine lines for the month, not income", async () => {
+    const buf = await workbook({
+      Sheet1: [
+        ["Advanced Endocrine and Diabetes Hospital"],
+        [" Period:01/09/2026  - To:30/09/2026"],
+        ["Drug Name", "HSNcode", "Total Qty", "Total Value", "Discount", "GST(%)", "Sales Value", "Taxable Value", "Tax Amount", "CGST", "SGST", "Purchase Value", "Profit"],
+        ["ACCU-CHEK LANCET 200", "90183990", 1, 600, 49.98, 18, 550.02, 466.12, 83.9, 41.95, 41.95, 474.3, 75.72],
+        ["BD ULTRA FINE NANO NEEDLE", "32041399", 30, 606.5, 33.47, 5, 573.03, 545.74, 27.29, 13.64, 13.64, 504, 69.03],
+      ],
+    });
+    const up = await uploadFile(f.admin, "Purchase_Sales_Report.xlsx", buf);
+    const b = up.batches[0];
+    expect(b.type).toBe("pharmacy-items");
+    const v = await validateBatch(f.admin, b.id, { type: "pharmacy-items", mapping: b.suggestion.mapping });
+    expect(v.summary.valid).toBe(2);
+    const c = await commitBatch(f.admin, b.id, { approveWarnings: true });
+    expect(c.imported).toBe(2);
+    const lines = await prisma.pharmacyItemLine.findMany({ orderBy: { taxable: "asc" } });
+    expect(lines.map((l) => [l.kind, l.date.toISOString().slice(0, 10), Number(l.taxable), Number(l.cost)])).toEqual([
+      ["SALE", "2026-09-30", 466.12, 401.95],
+      ["SALE", "2026-09-30", 545.74, 480],
+    ]);
+    expect((await incomeByStream({ from: "2026-09-01", to: "2026-09-30" })).PHARMACY).toBe(0);
+  });
+});

@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.12.6: OneGlance drug-wise Purchase/Sales summary
+- The drug-wise summary version of the OneGlance Purchase/Sales Report (Drug Name, Total Qty, Sales Value, Taxable Value, Purchase Value, Profit — no bill numbers or dates) is recognised. The period is read from the report heading ("Period: … To: …"); one calendar month per file; lines are dated on the last day; cost is taken ex-GST so the margin matches OneGlance's profit.
+- A disabled Admin can be given another role.
+
 ## 0.12.5: Analytics PDF; AED-only income trend
 - Analytics: Download PDF / Share for the open tab (Revenue → Income vs Expense report, OPD, IPD, Lab, Hormonal Pharmacy, Expenses, Profitability), for the selected period.
 - Fix: the income trend (Dashboard trend, Analytics Revenue and Profitability, daily summary, report trend tables) no longer adds Hormonal Pharmacy sales into AED income and net result.

@@ -15,6 +15,8 @@ export interface SheetData {
   name: string;
   headerRow: number; // 1-based row number of the detected header
   headers: string[];
+  /** Text of the rows above the header (report title, "Period: …"), one entry per row. */
+  preamble?: string[];
   rows: { rowNumber: number; values: Record<string, Cell> }[];
 }
 
@@ -98,7 +100,11 @@ function gridToSheet(name: string, grid: Cell[][]): SheetData | null {
   // Drop unnamed columns that are completely empty.
   const used = headers.filter((hd) => !hd.startsWith("Column ") || rows.some((r) => r.values[hd] !== null));
   for (const r of rows) for (const hd of headers) if (!used.includes(hd)) delete r.values[hd];
-  return { name, headerRow: h + 1, headers: used, rows };
+  const preamble = grid
+    .slice(0, h)
+    .map((r) => (r ?? []).filter((c) => c !== null && c !== "").map(String).join(" ").trim())
+    .filter(Boolean);
+  return { name, headerRow: h + 1, headers: used, rows, preamble };
 }
 
 async function readXlsx(buf: Buffer): Promise<SheetData[]> {

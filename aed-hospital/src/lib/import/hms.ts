@@ -29,6 +29,8 @@ export interface RawSheet {
   headerRow: number;
   headers: string[];
   rows: { rowNumber: number; values: Record<string, Cell> }[];
+  /** Lines above the header row, e.g. OneGlance's "Period:01/09/2026 - To:30/09/2026". */
+  preamble?: string[];
 }
 export interface ConvertedSheet extends RawSheet {
   type: ImportType;
@@ -36,7 +38,7 @@ export interface ConvertedSheet extends RawSheet {
   note: string;
   source: HmsReport;
 }
-export type HmsReport = "oneglance-opd" | "oneglance-opd-collection" | "oneglance-pharmacy-bills" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book";
+export type HmsReport = "oneglance-opd" | "oneglance-opd-collection" | "oneglance-pharmacy-bills" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-summary" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book";
 
 export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-opd": "OneGlance · Outpatient Collection Report",
@@ -46,6 +48,7 @@ export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-pharmacy-daily": "OneGlance · Pharmacy Collection Report (daily totals)",
   "oneglance-lab-bills": "OneGlance · Lab Bill Collection",
   "oneglance-pharmacy-item-sales": "OneGlance · Purchase/Sales Report (medicines sold)",
+  "oneglance-pharmacy-item-summary": "OneGlance · Purchase/Sales Report (drug-wise summary)",
   "oneglance-pharmacy-item-purchases": "OneGlance · Purchase/Sales Report (purchase invoices)",
   "oneglance-supplier-payments": "OneGlance · Pharmacy Invoice Report (supplier payments)",
   "cash-book": "Cash book (Date · Description · Debit · Credit · Balance)",
@@ -64,6 +67,7 @@ export function detectHmsReport(headers: string[]): HmsReport | null {
   if (has(headers, "BillNo", "RefLab", "RefferedBY", "PaidAmount", "Cash")) return "oneglance-lab-bills";
   if (has(headers, "Bill No", "Bill Date", "Patientid", "Total Amount", "Bill Amount", "Paid Amount", "Phone Pay", "G Pay")) return "oneglance-pharmacy-bills";
   if (has(headers, "Bill No", "Drug Name", "Qty", "Total", "Sales Amount", "Purchase Amount")) return "oneglance-pharmacy-item-sales";
+  if (has(headers, "Drug Name", "Total Qty", "Sales Value", "Taxable Value", "Purchase Value")) return "oneglance-pharmacy-item-summary";
   if (has(headers, "Invoice No", "Invoice Date", "Stockiest Name", "Drug Name", "Purchase Value")) return "oneglance-pharmacy-item-purchases";
   if (has(headers, "BillNo", "Paid date", "Stockiest Name", "Details", "Paid Amount")) return "oneglance-supplier-payments";
   if (has(headers, "Description", "Debit", "Credit", "Balance") && (has(headers, "Cheque No.") || has(headers, "Ledger"))) return "cash-book";
@@ -536,6 +540,67 @@ function convertPharmacyItemSales(sheet: RawSheet): ConvertedSheet[] {
   return byMonth("oneglance-pharmacy-item-sales", sheet.name, "pharmacy-items", "Medicines sold", ITEM_HEADERS, out, note);
 }
 
+/** "Period:01/09/2026  - To:30/09/2026" (or "From 01-09-2026 To 30-09-2026") in the lines above the header. */
+export function reportPeriod(preamble: string[] = []): { from: string; to: string } | null {
+  const text = preamble.join(" ");
+  const d = /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/g;
+  const found = [...text.matchAll(d)].map((m) => `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`);
+  if (found.length < 2 || !/period|from|to/i.test(text)) return null;
+  return { from: found[0], to: found[1] };
+}
+
+/**
+ * Purchase/Sales Report, drug-wise summary: one line per medicine for the whole period, no bills or
+ * dates. The period comes from the report heading; the lines are dated on its last day. One month at
+ * a time, so each month keeps its own medicine figures.
+ */
+function convertPharmacyItemSummary(sheet: RawSheet): ConvertedSheet[] {
+  const p = reportPeriod(sheet.preamble);
+  if (!p)
+    throw new HmsReportError(
+      'This is OneGlance "Purchase/Sales Report" as a drug-wise summary, but the "Period: … To: …" line at the top is missing, so the dates are unknown. ' +
+        "Export it again with its heading (do not delete the top rows), or export the bill-wise version of the same report.",
+    );
+  if (p.from.slice(0, 7) !== p.to.slice(0, 7))
+    throw new HmsReportError(
+      `This drug-wise summary covers ${p.from.split("-").reverse().join("/")} to ${p.to.split("-").reverse().join("/")}. ` +
+        "A summary has no dates per sale, so export one calendar month (or one day) at a time and upload each file.",
+    );
+  const date = p.to.split("-").reverse().join("/");
+  const doc = `SUM-${p.from.replace(/-/g, "")}-${p.to.replace(/-/g, "")}`;
+  const out: Out[] = [];
+  const seen = new Map<string, number>();
+  for (const r of sheet.rows) {
+    const g = getter(r.values);
+    const name = cleanText(g("Drug Name"));
+    if (!name || /^(grand\s*)?total/i.test(name)) continue;
+    const n = (seen.get(norm(name)) ?? 0) + 1;
+    seen.set(norm(name), n);
+    out.push({
+      rowNumber: r.rowNumber,
+      values: {
+        Type: "Sale",
+        Date: date,
+        "Bill / Invoice No.": `${doc}${n > 1 ? `/${n}` : ""}`,
+        Medicine: name,
+        Quantity: num(g("Total Qty")),
+        Amount: num(g("Sales Value")),
+        Taxable: num(g("Taxable Value")),
+        GST: num(g("Tax Amount")),
+        // OneGlance's Profit = Sales Value − Purchase Value, both with GST; the app's margin is ex-GST
+        // (Taxable − Cost), so the purchase value is taken back to ex-GST at the line's GST rate.
+        Cost: r2(num(g("Purchase Value")) / (1 + num(g("GST(%)") || g("GST %") || g("GST")) / 100)),
+      },
+    });
+  }
+  const sales = out.reduce((a, r) => a + Number(r.values.Amount), 0);
+  const note =
+    `${out.length.toLocaleString("en-IN")} medicines sold ${p.from.split("-").reverse().join("/")}–${date} (₹${Math.round(sales).toLocaleString("en-IN")} after discount), dated ${date}. ` +
+    `Gives medicine-wise units, value and cost for the month and the margin on medicines sold; NOT added to income again ` +
+    `(pharmacy income stays the Pharmacy Collection Report). Do not also upload the bill-wise version for the same month.`;
+  return byMonth("oneglance-pharmacy-item-summary", sheet.name, "pharmacy-items", "Medicines sold", ITEM_HEADERS, out, note);
+}
+
 const PURCHASE_HEADERS = ["Date", "Supplier", "Invoice", "Purchase Amount", "Payment Mode", "Remarks"];
 
 /**
@@ -752,6 +817,8 @@ export function convertHmsSheet(sheet: RawSheet): ConvertedSheet[] | null {
       return convertPharmacyBills(sheet);
     case "oneglance-pharmacy-item-sales":
       return convertPharmacyItemSales(sheet);
+    case "oneglance-pharmacy-item-summary":
+      return convertPharmacyItemSummary(sheet);
     case "oneglance-pharmacy-item-purchases":
       return convertPharmacyItemPurchases(sheet);
     case "oneglance-supplier-payments":
