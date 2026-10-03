@@ -13,6 +13,7 @@ import { classifyLabItem } from "../src/lib/import/lab-category";
 import { fingerprintFor } from "../src/server/services/modules";
 import { DEFAULT_SETTINGS } from "../src/server/settings";
 import { linkExpensesToHeads } from "../src/server/expense-heads";
+import { isScpName } from "../src/lib/scp";
 
 const prisma = new PrismaClient();
 const DEMO = process.env.SEED_DEMO_DATA === "true";
@@ -183,7 +184,7 @@ async function seedSecurity() {
 async function seedMasters() {
   for (const [i, name] of SPECIALTIES.entries()) await prisma.specialty.upsert({ where: { name }, create: { name, sortOrder: i }, update: {} });
   for (const name of DEPARTMENTS) await prisma.department.upsert({ where: { name }, create: { name }, update: {} });
-  for (const [name, rate] of CONSULT_TYPES) await prisma.consultationType.upsert({ where: { name }, create: { name, defaultRate: DEMO ? rate : 0 }, update: {} });
+  for (const [name, rate] of CONSULT_TYPES) await prisma.consultationType.upsert({ where: { name }, create: { name, defaultRate: DEMO ? rate : 0, scp: isScpName(name) }, update: {} });
   for (const name of ADMISSION_TYPES) await prisma.admissionType.upsert({ where: { name }, create: { name }, update: {} });
   for (const [name, type, rate] of PACKAGES) {
     const t = await prisma.admissionType.findUniqueOrThrow({ where: { name: type } });

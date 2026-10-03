@@ -5,6 +5,7 @@ export const STREAM_HREF: Record<string, string> = {
   LAB: "/lab",
   PHARMACY: "/pharmacy",
   DIET: "/diet",
+  SCP: "/opd",
   OTHER: "/other-income",
 };
 

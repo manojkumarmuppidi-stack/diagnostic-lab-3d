@@ -17,8 +17,8 @@ import { formatINR, round2, sum } from "@/lib/money";
 
 describe("income, expense and net result", () => {
   it("AED income sums the hospital streams and leaves out the Hormonal Pharmacy (separate entity)", () => {
-    const i = { OPD: 1000, IPD: 5000, LAB: 2500.5, PHARMACY: 3000, DIET: 500, OTHER: 100 };
-    expect(totalIncome(i)).toBe(9100.5);
+    const i = { OPD: 1000, SCP: 400, IPD: 5000, LAB: 2500.5, PHARMACY: 3000, DIET: 500, OTHER: 100 };
+    expect(totalIncome(i)).toBe(9500.5);
   });
   it("AED expenses = hospital + other; pharmacy stock and staff belong to the pharmacy", () => {
     expect(totalExpenses({ HOSPITAL: 700, PHARMACY_PURCHASE: 2000, OTHER: 300 })).toBe(1000);

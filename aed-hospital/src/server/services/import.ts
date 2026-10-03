@@ -18,6 +18,7 @@ import { audit } from "../audit";
 import { can, requirePermission, type Actor } from "../authz";
 import { getDayStatuses, onDayMutated } from "../closing";
 import { linkExpensesToHeads } from "../expense-heads";
+import { isScpName } from "@/lib/scp";
 import { prisma, type Tx } from "../db";
 import { AppError, badRequest, conflict, notFound } from "../errors";
 import { readSpreadsheet, type SheetData } from "../spreadsheet";
@@ -703,7 +704,7 @@ async function createNewMasters(tx: Tx, actor: Actor, placeholders: Set<string>)
         created = (await find(tx.doctor, { kind: "DIETICIAN" })) ?? (await make(tx.doctor.create({ data: { name, kind: "DIETICIAN" } })));
         break;
       case "consultationTypes":
-        created = (await find(tx.consultationType)) ?? (await make(tx.consultationType.create({ data: { name } })));
+        created = (await find(tx.consultationType)) ?? (await make(tx.consultationType.create({ data: { name, scp: isScpName(name) } })));
         break;
       case "admissionTypes":
         created = (await find(tx.admissionType)) ?? (await make(tx.admissionType.create({ data: { name } })));

@@ -33,6 +33,7 @@ export const STREAM_COLORS: Record<string, string> = {
   LAB: "var(--series-3)",
   PHARMACY: "var(--series-4)",
   DIET: "var(--series-5)",
+  SCP: "var(--series-6)",
   OTHER: "var(--series-6)",
 };
 export const SLOT = (i: number) => `var(--series-${(i % 8) + 1})`;

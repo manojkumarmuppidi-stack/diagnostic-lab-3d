@@ -31,7 +31,15 @@ const DEFS: Record<string, { label: string; fields: F[]; show: string[] }> = {
     show: ["name", "kind", "specialtyName", "departmentName"],
   },
   departments: { label: "Departments", fields: [{ key: "name", label: "Name", type: "text", required: true }, { key: "code", label: "Code", type: "text" }], show: ["name", "code"] },
-  consultationTypes: { label: "Consultation Types", fields: [{ key: "name", label: "Name", type: "text", required: true }, { key: "defaultRate", label: "Default rate (₹)", type: "money" }], show: ["name", "defaultRate"] },
+  consultationTypes: {
+    label: "Consultation Types",
+    fields: [
+      { key: "name", label: "Name (as billed in OneGlance)", type: "text", required: true },
+      { key: "defaultRate", label: "Default rate (₹)", type: "money" },
+      { key: "scp", label: "SCP — Sugar Control Plan / short admission (counted as SCP income, not OPD)", type: "bool" },
+    ],
+    show: ["name", "defaultRate", "scp"],
+  },
   admissionTypes: { label: "IPD Admission Types", fields: [{ key: "name", label: "Name", type: "text", required: true }], show: ["name"] },
   ipdPackages: {
     label: "IPD Packages",
@@ -104,7 +112,7 @@ export default function MastersPage() {
 
   const open = (row: any | null) => {
     setEdit(row ?? {});
-    setValues(row ? { ...row } : { kind: "DOCTOR", group: "HOSPITAL", reconGroup: "OTHER", category: "General", monthly: true });
+    setValues(row ? { ...row } : { kind: "DOCTOR", group: "HOSPITAL", reconGroup: "OTHER", category: "General", monthly: true, scp: false });
     setErrs({});
   };
   const save = async () => {

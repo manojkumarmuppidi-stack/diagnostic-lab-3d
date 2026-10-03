@@ -154,7 +154,7 @@ function kpisOf(s: PeriodSummary): Report["kpis"] {
 async function seriesTable(from: ISODate, to: ISODate, g: Granularity, title = "Trend"): Promise<ReportTable> {
   const series = await incomeSeries({ from, to }, g);
   const label = (b: string) => (g === "month" ? formatMonth(b) : g === "week" ? `Wk of ${formatDate(b)}` : formatDate(b));
-  const rows = series.map((s) => ({ period: label(s.bucket), OPD: s.OPD, IPD: s.IPD, LAB: s.LAB, PHARMACY: s.PHARMACY, DIET: s.DIET, OTHER: s.OTHER, income: s.income, expenses: s.expenses, net: s.net }));
+  const rows = series.map((s) => ({ period: label(s.bucket), OPD: s.OPD, SCP: s.SCP, IPD: s.IPD, LAB: s.LAB, PHARMACY: s.PHARMACY, DIET: s.DIET, OTHER: s.OTHER, income: s.income, expenses: s.expenses, net: s.net }));
   const sumKey = (k: keyof (typeof rows)[number]) => round2(rows.reduce((a, r) => a + (r[k] as number), 0));
   return {
     title,

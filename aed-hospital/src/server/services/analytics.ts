@@ -87,14 +87,15 @@ export async function operationalCounts(r: Range): Promise<Counts> {
     { new_c: bigint; old_c: bigint; adm: bigint; tests: bigint | null; pharm: bigint; patients: bigint }[]
   >`
     SELECT
-      (SELECT COUNT(*) FROM "Consultation" WHERE status = 'ACTIVE' AND "visitType" = 'NEW' AND date BETWEEN ${D(r.from)} AND ${D(r.to)}) AS new_c,
-      (SELECT COUNT(*) FROM "Consultation" WHERE status = 'ACTIVE' AND "visitType" = 'OLD' AND date BETWEEN ${D(r.from)} AND ${D(r.to)}) AS old_c,
+      -- SCP bills are not consultations.
+      (SELECT COUNT(*) FROM "Consultation" c LEFT JOIN "ConsultationType" ct ON ct.id = c."consultationTypeId" WHERE c.status = 'ACTIVE' AND NOT COALESCE(ct.scp, false) AND c."visitType" = 'NEW' AND c.date BETWEEN ${D(r.from)} AND ${D(r.to)}) AS new_c,
+      (SELECT COUNT(*) FROM "Consultation" c LEFT JOIN "ConsultationType" ct ON ct.id = c."consultationTypeId" WHERE c.status = 'ACTIVE' AND NOT COALESCE(ct.scp, false) AND c."visitType" = 'OLD' AND c.date BETWEEN ${D(r.from)} AND ${D(r.to)}) AS old_c,
       (SELECT COUNT(*) FROM "IpdAdmission" WHERE status = 'ACTIVE' AND "admissionDate" BETWEEN ${D(r.from)} AND ${D(r.to)}) AS adm,
       (SELECT COALESCE(SUM(quantity), 0) FROM "LabTransaction" WHERE status = 'ACTIVE' AND date BETWEEN ${D(r.from)} AND ${D(r.to)}) AS tests,
       (SELECT COUNT(*) FROM "PharmacySale" WHERE status = 'ACTIVE' AND date BETWEEN ${D(r.from)} AND ${D(r.to)}) AS pharm,
       (SELECT COUNT(DISTINCT k) FROM (
           SELECT patient_key AS k FROM v_income_line
-           WHERE stream IN ('OPD', 'LAB', 'DIET') AND patient_key IS NOT NULL AND date BETWEEN ${D(r.from)} AND ${D(r.to)}
+           WHERE stream IN ('OPD', 'SCP', 'LAB', 'DIET') AND patient_key IS NOT NULL AND date BETWEEN ${D(r.from)} AND ${D(r.to)}
           UNION
           SELECT COALESCE("patientId", 'name:' || lower(trim("patientName"))) FROM "IpdAdmission"
            WHERE status = 'ACTIVE' AND "admissionDate" BETWEEN ${D(r.from)} AND ${D(r.to)}
@@ -126,6 +127,7 @@ export function compareSummaries(cur: PeriodSummary, prev: PeriodSummary) {
     totalExpenses: [totalExpenses(cur.expense), totalExpenses(prev.expense)],
     netOperatingResult: [cur.kpis.netOperatingResult, prev.kpis.netOperatingResult],
     opd: [cur.income.OPD, prev.income.OPD],
+    scp: [cur.income.SCP, prev.income.SCP],
     ipd: [cur.income.IPD, prev.income.IPD],
     lab: [cur.income.LAB, prev.income.LAB],
     pharmacy: [cur.income.PHARMACY, prev.income.PHARMACY],
@@ -203,15 +205,37 @@ export async function incomeSeries(r: Range, g: Granularity, f: IncomeFilters = 
   }
   return [...map.entries()].map(([bucket, v]) => {
     // AED Hospital income only; PHARMACY stays in the bucket for charts that show the pharmacy on its own.
-    const income = round2(v.OPD + v.IPD + v.LAB + v.DIET + v.OTHER);
+    const income = round2(v.OPD + v.SCP + v.IPD + v.LAB + v.DIET + v.OTHER);
     return { bucket, ...v, income, net: round2(income - v.expenses) };
   });
 }
 
 // ─────────────────────────── module analytics ───────────────────────────
 
+/** SCP income by the name it was billed under in OneGlance, month by month. */
+export async function scpByBilledName(r: Range) {
+  const rows = await prisma.$queryRaw<{ name: string; month: string; n: bigint; amount: Prisma.Decimal }[]>`
+    SELECT t.name, to_char(c.date, 'YYYY-MM') AS month, COUNT(*) AS n, COALESCE(SUM(c."netAmount"), 0) AS amount
+      FROM "Consultation" c JOIN "ConsultationType" t ON t.id = c."consultationTypeId"
+     WHERE t.scp AND c.status = 'ACTIVE' AND c.date BETWEEN ${D(r.from)} AND ${D(r.to)}
+     GROUP BY 1, 2`;
+  const months = [...new Set(rows.map((x) => x.month))].sort();
+  const names = new Map<string, { name: string; count: number; total: number; byMonth: Record<string, number> }>();
+  for (const x of rows) {
+    const e = names.get(x.name) ?? { name: x.name, count: 0, total: 0, byMonth: {} };
+    e.count += Number(x.n);
+    e.total = round2(e.total + toNum(x.amount));
+    e.byMonth[x.month] = round2((e.byMonth[x.month] ?? 0) + toNum(x.amount));
+    names.set(x.name, e);
+  }
+  const lines = [...names.values()].sort((a, b) => b.total - a.total);
+  const totals: Record<string, number> = {};
+  for (const m of months) totals[m] = round2(lines.reduce((a, l) => a + (l.byMonth[m] ?? 0), 0));
+  return { months, lines, totals, total: round2(lines.reduce((a, l) => a + l.total, 0)), count: lines.reduce((a, l) => a + l.count, 0) };
+}
+
 export async function revenueAnalytics(r: Range, g: Granularity, f: IncomeFilters) {
-  const [series, byStream, byDoctor, bySpecialty] = await Promise.all([
+  const [series, byStream, byDoctor, bySpecialty, scp] = await Promise.all([
     incomeSeries(r, g, f),
     incomeByStream(r, f),
     prisma.$queryRaw<{ id: string | null; name: string | null; amount: Prisma.Decimal }[]>`
@@ -220,10 +244,12 @@ export async function revenueAnalytics(r: Range, g: Granularity, f: IncomeFilter
     prisma.$queryRaw<{ id: string | null; name: string | null; amount: Prisma.Decimal }[]>`
       SELECT v.specialty_id AS id, s.name, SUM(v.amount) AS amount FROM v_income_line v LEFT JOIN "Specialty" s ON s.id = v.specialty_id
        WHERE ${incomeWhere(r, f)} AND v.specialty_id IS NOT NULL GROUP BY 1, 2 ORDER BY 3 DESC`,
+    scpByBilledName(r),
   ]);
   return {
     series,
     byStream,
+    scp,
     total: totalIncome(byStream),
     byDoctor: byDoctor.map((x) => ({ id: x.id, name: x.name ?? "—", amount: toNum(x.amount) })),
     bySpecialty: bySpecialty.map((x) => ({ id: x.id, name: x.name ?? "—", amount: toNum(x.amount) })),
@@ -235,7 +261,9 @@ export async function opdAnalytics(r: Range, g: Granularity, f: IncomeFilters = 
     f.doctorId ? Prisma.sql`AND c."doctorId" = ${f.doctorId}` : Prisma.empty,
     f.specialtyId ? Prisma.sql`AND c."specialtyId" = ${f.specialtyId}` : Prisma.empty,
   ];
-  const base = Prisma.sql`c.status = 'ACTIVE' AND c.date BETWEEN ${D(r.from)} AND ${D(r.to)} ${extra[0]} ${extra[1]}`;
+  // SCP bills (Sugar Control Plans, short admissions) are billed in the OPD report but are not consultations.
+  const notScp = Prisma.sql`AND NOT EXISTS (SELECT 1 FROM "ConsultationType" x WHERE x.id = c."consultationTypeId" AND x.scp)`;
+  const base = Prisma.sql`c.status = 'ACTIVE' AND c.date BETWEEN ${D(r.from)} AND ${D(r.to)} ${extra[0]} ${extra[1]} ${notScp}`;
   const [bySpecialty, byDoctor, byType, trend] = await Promise.all([
     prisma.$queryRaw<{ id: string; name: string; new_c: bigint; old_c: bigint; revenue: Prisma.Decimal }[]>`
       SELECT s.id, s.name,

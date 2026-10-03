@@ -11,7 +11,7 @@ import { requirePermission, type Actor } from "../authz";
 import { prisma } from "../db";
 import { badRequest } from "../errors";
 
-export const DAY_LINE_KEYS = ["OPD", "IPD", "LAB", "DIET", "OTHER", "PHARMACY", "EXP_HOSPITAL", "EXP_OTHER", "EXP_PHARMACY"] as const;
+export const DAY_LINE_KEYS = ["OPD", "SCP", "IPD", "LAB", "DIET", "OTHER", "PHARMACY", "EXP_HOSPITAL", "EXP_OTHER", "EXP_PHARMACY"] as const;
 export type DayLineKey = (typeof DAY_LINE_KEYS)[number];
 
 export interface DayLine {

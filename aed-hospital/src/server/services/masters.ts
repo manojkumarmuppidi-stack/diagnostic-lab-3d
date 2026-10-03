@@ -8,6 +8,7 @@ import { z } from "zod";
 import { toNum } from "@/lib/money";
 import { audit } from "../audit";
 import { requirePermission, type Actor } from "../authz";
+import { isScpName } from "@/lib/scp";
 import { prisma, type Tx } from "../db";
 import { badRequest, conflict, notFound } from "../errors";
 
@@ -39,7 +40,7 @@ export const MASTER_TYPES = {
   consultationTypes: {
     label: "Consultation Types",
     model: (tx: Tx) => tx.consultationType,
-    schema: z.object({ name, defaultRate: money, active }),
+    schema: z.object({ name, defaultRate: money, scp: z.boolean().optional(), active }),
     orderBy: { name: "asc" },
   },
   admissionTypes: {
@@ -170,6 +171,8 @@ export async function createMaster(actor: Actor, type: MasterType, raw: unknown)
   requirePermission(actor, "masters.manage");
   const def: any = MASTER_TYPES[type];
   const data = def.schema.parse(raw);
+  // A new billing name that is plainly SCP is flagged as such unless the Admin chose otherwise.
+  if (type === "consultationTypes" && data.scp === undefined) data.scp = isScpName(data.name);
   return prisma.$transaction(async (tx) => {
     await validateRefs(tx, type, data);
     const created = await def.model(tx).create({ data });

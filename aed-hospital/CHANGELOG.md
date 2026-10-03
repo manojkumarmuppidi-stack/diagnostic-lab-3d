@@ -2,6 +2,11 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.13.0: SCP as its own income
+- SCP (Sugar Control Plans and short admissions) is a separate AED income line everywhere: Dashboard, Daily Accounts, AED vs Pharmacy P&L, Analytics, reports and PDFs. SCP bills come from the OneGlance OPD report; the billing name ("Sugar Control Plan", "f/u by bhagya" …) is kept and flagged SCP, so every past month moves automatically (migration `20261006000000_scp_income_stream`).
+- SCP bills are not consultations: consultation counts, OPD analytics and averages leave them out; patients still count.
+- Analytics → Revenue: SCP by billing name, month by month. Master Data → Consultation Types: SCP tick per billing name.
+
 ## 0.12.6: OneGlance drug-wise Purchase/Sales summary
 - The drug-wise summary version of the OneGlance Purchase/Sales Report (Drug Name, Total Qty, Sales Value, Taxable Value, Purchase Value, Profit — no bill numbers or dates) is recognised. The period is read from the report heading ("Period: … To: …"); one calendar month per file; lines are dated on the last day; cost is taken ex-GST so the margin matches OneGlance's profit.
 - A disabled Admin can be given another role.

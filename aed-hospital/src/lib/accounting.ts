@@ -5,7 +5,7 @@
  */
 import { round2, sum } from "./money";
 
-export const INCOME_STREAMS = ["OPD", "IPD", "LAB", "PHARMACY", "DIET", "OTHER"] as const;
+export const INCOME_STREAMS = ["OPD", "SCP", "IPD", "LAB", "PHARMACY", "DIET", "OTHER"] as const;
 export type IncomeStream = (typeof INCOME_STREAMS)[number];
 
 export const EXPENSE_KINDS = ["HOSPITAL", "PHARMACY_PURCHASE", "OTHER"] as const;
@@ -13,6 +13,7 @@ export type ExpenseKind = (typeof EXPENSE_KINDS)[number];
 
 export const STREAM_LABELS: Record<IncomeStream, string> = {
   OPD: "OPD",
+  SCP: "SCP (Sugar Control Plans)",
   IPD: "IPD",
   LAB: "Laboratory",
   PHARMACY: "Hormonal Pharmacy",
@@ -30,20 +31,20 @@ export const EXPENSE_LABELS: Record<ExpenseKind, string> = {
  * AED Hospital and Hormonal Pharmacy are separate entities. Every hospital total in the app
  * (income, expenses, net result, reconciliation) is AED only; the pharmacy is reported on its own.
  */
-export const AED_INCOME_STREAMS = ["OPD", "IPD", "LAB", "DIET", "OTHER"] as const satisfies readonly IncomeStream[];
+export const AED_INCOME_STREAMS = ["OPD", "SCP", "IPD", "LAB", "DIET", "OTHER"] as const satisfies readonly IncomeStream[];
 export const AED_EXPENSE_KINDS = ["HOSPITAL", "OTHER"] as const satisfies readonly ExpenseKind[];
 
 export type IncomeByStream = Record<IncomeStream, number>;
 export type ExpenseByKind = Record<ExpenseKind, number>;
 
 export function emptyIncome(): IncomeByStream {
-  return { OPD: 0, IPD: 0, LAB: 0, PHARMACY: 0, DIET: 0, OTHER: 0 };
+  return { OPD: 0, SCP: 0, IPD: 0, LAB: 0, PHARMACY: 0, DIET: 0, OTHER: 0 };
 }
 export function emptyExpense(): ExpenseByKind {
   return { HOSPITAL: 0, PHARMACY_PURCHASE: 0, OTHER: 0 };
 }
 
-/** AED Hospital income = OPD + IPD + Lab + Diet + Other (the Hormonal Pharmacy is a separate entity). */
+/** AED Hospital income = OPD + SCP + IPD + Lab + Diet + Other (the Hormonal Pharmacy is a separate entity). */
 export function totalIncome(i: IncomeByStream): number {
   return sum(AED_INCOME_STREAMS.map((s) => i[s]));
 }

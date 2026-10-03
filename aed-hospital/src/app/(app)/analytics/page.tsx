@@ -168,7 +168,7 @@ function Revenue({ d, g, drill, filtered }: P & { filtered: boolean }) {
         <ChartCard title="Revenue mix" subtitle={`Total ${formatINR(d.total)}`}>
           <DonutChart data={AED_INCOME_STREAMS.map((s) => ({ key: s, name: STREAM_LABELS[s], value: Math.max(0, d.byStream[s]), color: STREAM_COLORS[s] }))} onSliceClick={(x) => x.key && drill(STREAM_HREF[x.key])} />
         </ChartCard>
-        <ChartCard title="OPD · IPD · Lab · Diet trend" table={{ columns: [{ key: "bucket", label: "Period" }, ...streamSeries.slice(0, 4).map((s) => ({ key: s.key, label: s.label, format: "money" as const }))], rows: d.series }}>
+        <ChartCard title="OPD · SCP · IPD · Lab trend" table={{ columns: [{ key: "bucket", label: "Period" }, ...streamSeries.slice(0, 4).map((s) => ({ key: s.key, label: s.label, format: "money" as const }))], rows: d.series }}>
           <TrendChart data={d.series} xKey="bucket" granularity={g} series={streamSeries.slice(0, 4)} onPointClick={(r) => drill("/daily-accounts", String(r.bucket))} />
         </ChartCard>
       </div>
@@ -180,6 +180,24 @@ function Revenue({ d, g, drill, filtered }: P & { filtered: boolean }) {
           <BarsChart data={d.bySpecialty} xKey="name" horizontal series={[{ key: "amount", label: "Revenue", color: SLOT(0) }]} onBarClick={(r) => drill(`/opd?specialtyId=${r.id}`)} />
         </ChartCard>
       </div>
+      {d.scp?.lines.length > 0 && (
+        <ChartCard
+          title="SCP — Sugar Control Plans & short admissions, by billing name"
+          subtitle={`${formatINR(d.scp.total)} from ${formatNumber(d.scp.count)} bills · names exactly as billed in OneGlance · not counted as consultations`}
+          table={{
+            columns: [
+              { key: "name", label: "Billed as" },
+              { key: "count", label: "Bills", format: "int" as const },
+              ...d.scp.months.map((m: string) => ({ key: m, label: formatMonth(`${m}-01`), format: "money" as const })),
+              { key: "total", label: "Total", format: "money" as const },
+            ],
+            rows: [...d.scp.lines.map((l: any) => ({ ...l, ...l.byMonth })), { name: "Total", count: d.scp.count, ...d.scp.totals, total: d.scp.total }],
+          }}
+          height={Math.max(180, d.scp.lines.length * 34)}
+        >
+          <BarsChart data={d.scp.lines} xKey="name" horizontal series={[{ key: "total", label: "SCP income", color: STREAM_COLORS.SCP }]} />
+        </ChartCard>
+      )}
     </>
   );
 }

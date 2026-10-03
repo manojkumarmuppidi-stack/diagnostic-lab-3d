@@ -214,6 +214,8 @@ model ConsultationType {
   id            String         @id @default(cuid())
   name          String         @unique
   defaultRate   Decimal        @default(0) @db.Decimal(12, 2)
+  /// SCP (Sugar Control Plan / short admission) billing: counted as SCP income, not OPD consultations.
+  scp           Boolean        @default(false)
   active        Boolean        @default(true)
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt

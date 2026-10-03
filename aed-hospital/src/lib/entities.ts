@@ -13,7 +13,7 @@ export const ENTITY_SCOPE: Record<EntityKey, string> = {
   AED: "Consultations (OPD), Laboratory, IPD — with diet and other hospital income",
   HP: "Pharmacy sales net of returns; stock purchases and pharmacy-department expenses",
 };
-export const AED_STREAMS = ["OPD", "LAB", "IPD", "DIET", "OTHER"] as const;
+export const AED_STREAMS = ["OPD", "SCP", "LAB", "IPD", "DIET", "OTHER"] as const;
 
 export interface EntityMonth {
   month: string; // YYYY-MM
@@ -118,7 +118,7 @@ export function entityInsights(key: EntityKey, months: EntityMonth[], costs: { n
     const parts = Object.entries(streams)
       .filter(([, v]) => v > 0 && Math.round((v / inc) * 100) >= 1)
       .sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => `${({ OPD: "Consultations", LAB: "Laboratory", IPD: "IPD", DIET: "Diet", OTHER: "Other" } as Record<string, string>)[k] ?? k} ${Math.round((v / inc) * 100)}%`);
+      .map(([k, v]) => `${({ OPD: "Consultations", SCP: "SCP", LAB: "Laboratory", IPD: "IPD", DIET: "Diet", OTHER: "Other" } as Record<string, string>)[k] ?? k} ${Math.round((v / inc) * 100)}%`);
     if (parts.length) out.push({ tone: "info", text: `Income mix: ${parts.join(", ")}.` });
   }
   return out;
