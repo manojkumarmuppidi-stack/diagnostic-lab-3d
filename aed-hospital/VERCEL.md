@@ -68,3 +68,14 @@ Sign in as `admin` → change the password → Master Data (rates, doctors) → 
 - **PDF reports**: font files are bundled explicitly for the serverless function.
 - **Releases with schema changes**: run `npm run db:migrate` from your computer with `DIRECT_URL` before
   (or right after) deploying. The build itself does not touch the database.
+
+## Locked out of the `admin` login
+
+The password cannot be read back (only a one-way hash is stored). If another Admin / CEO can sign in, they reset it under **Staff logins → Edit → Reset password**. If nobody can:
+
+1. Vercel → your project → **Settings → Environment Variables** → add `ADMIN_RESET_PASSWORD` with a temporary password (at least 8 characters), for Production.
+2. **Deployments → ⋯ → Redeploy** the latest deployment.
+3. Sign in as `admin` with that temporary password; the app makes you choose a new one immediately.
+4. **Delete `ADMIN_RESET_PASSWORD`** from Vercel. (Each value is applied only once, so leaving it does not keep resetting the password — but it should not stay stored.)
+
+The reset re-enables the `admin` login, signs it out everywhere and is written to the Audit Log.

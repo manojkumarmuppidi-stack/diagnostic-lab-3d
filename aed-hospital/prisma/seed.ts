@@ -6,6 +6,7 @@
  */
 import { PrismaClient, type Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { createHash } from "node:crypto";
 import { ALL_PERMISSIONS, PERMISSIONS, ROLE_DEFS } from "../src/lib/permissions";
 import { addDays, todayISO, toDbDate, fromDbDate } from "../src/lib/dates";
 import { round2 } from "../src/lib/money";
@@ -179,6 +180,38 @@ async function seedSecurity() {
     await prisma.user.create({ data: { username: "admin", name: "Administrator", passwordHash: bcrypt.hashSync(pw, 12), roleId: admin.id, mustChangePassword: !DEMO } });
     console.log("✔ admin user created (username: admin) — you can now remove SEED_ADMIN_PASSWORD");
   }
+  await resetAdminPassword(admin.id);
+}
+
+/**
+ * Locked out of the "admin" login? Set ADMIN_RESET_PASSWORD (min 8 characters) in Vercel → Settings →
+ * Environment Variables and redeploy: the admin password becomes that value (to be changed at the next
+ * sign-in), the login is re-enabled and every admin session is signed out. Each value is applied once,
+ * so later deploys do not reset it again; delete the variable afterwards.
+ */
+async function resetAdminPassword(adminRoleId: string) {
+  const pw = process.env.ADMIN_RESET_PASSWORD;
+  if (!pw) return;
+  if (pw.length < 8) throw new Error("ADMIN_RESET_PASSWORD must be at least 8 characters.");
+  const fingerprint = createHash("sha256").update(`aed-admin-reset:${pw}`).digest("hex");
+  const done = await prisma.setting.findUnique({ where: { key: "adminPasswordReset" } });
+  if ((done?.value as { fingerprint?: string } | null)?.fingerprint === fingerprint) {
+    console.log("• ADMIN_RESET_PASSWORD was already applied — delete the variable in Vercel");
+    return;
+  }
+  const user = await prisma.user.findUnique({ where: { username: "admin" } });
+  if (!user) return;
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: user.id }, data: { passwordHash: bcrypt.hashSync(pw, 12), mustChangePassword: true, active: true, roleId: adminRoleId } }),
+    prisma.session.deleteMany({ where: { userId: user.id } }),
+    prisma.auditLog.create({ data: { userName: "Deployment (ADMIN_RESET_PASSWORD)", action: "USER_PASSWORD_RESET", entityType: "User", entityId: user.id, reason: "Admin password reset from the hosting environment" } }),
+    prisma.setting.upsert({
+      where: { key: "adminPasswordReset" },
+      create: { key: "adminPasswordReset", value: { fingerprint, at: new Date().toISOString() } },
+      update: { value: { fingerprint, at: new Date().toISOString() } },
+    }),
+  ]);
+  console.log("✔ admin password reset from ADMIN_RESET_PASSWORD (must be changed at next sign-in) — now delete the variable");
 }
 
 async function seedMasters() {

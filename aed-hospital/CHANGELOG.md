@@ -2,6 +2,9 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.13.1: Admin password reset from Vercel
+- `ADMIN_RESET_PASSWORD` (Vercel environment variable + redeploy) resets the `admin` login once, forces a new password at sign-in and is logged. See VERCEL.md.
+
 ## 0.13.0: SCP as its own income
 - SCP (Sugar Control Plans and short admissions) is a separate AED income line everywhere: Dashboard, Daily Accounts, AED vs Pharmacy P&L, Analytics, reports and PDFs. SCP bills come from the OneGlance OPD report; the billing name ("Sugar Control Plan", "f/u by bhagya" …) is kept and flagged SCP, so every past month moves automatically (migration `20261006000000_scp_income_stream`).
 - SCP bills are not consultations: consultation counts, OPD analytics and averages leave them out; patients still count.
