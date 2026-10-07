@@ -32,6 +32,8 @@ describe("Hormonal Pharmacy accounts", () => {
     expect(r.days.at(-1)).toMatchObject({ cumNetSales: 99000, cumProfit: 25000 });
     expect(r.current.soldMargin).toBeNull();
 
-    await expect(hormonalPharmacy(f.reception, "2026-08")).rejects.toBeInstanceOf(AppError);
+    // Reception uploads pharmacy reports, so it may see the pharmacy; a role without pharmacy access may not.
+    await expect(hormonalPharmacy(f.reception, "2026-08")).resolves.toBeTruthy();
+    await expect(hormonalPharmacy({ ...f.reception, permissions: new Set(["dashboard.view", "opd.view"]) }, "2026-08")).rejects.toBeInstanceOf(AppError);
   });
 });

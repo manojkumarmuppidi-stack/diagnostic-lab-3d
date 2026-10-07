@@ -2,7 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
-## 0.13.2: Board Meeting — every lab test
+## 0.13.3: Reception imports pharmacy reports
+- Reception and Reception + expenses may view, enter and import Hormonal Pharmacy records (migration `20261007000000_reception_pharmacy`). Pharmacy logins already could.
+
+&
 - The Laboratory test-by-test slides list every test performed in either period (not only the top 16), with tests and amount for both periods, the change, and totals; as many slides as needed (18 tests each).
 
 &
