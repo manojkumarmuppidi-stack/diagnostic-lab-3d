@@ -33,6 +33,17 @@ export interface Section {
   kpis: KpiCompare[];
   comparisons: Comparison[];
   insights: Insight[];
+  /** Laboratory: every investigation with tests and amount, both periods (board-meeting test-by-test slides). */
+  labTests?: LabTestRow[];
+}
+
+export interface LabTestRow {
+  key: string;
+  name: string;
+  tests: number;
+  prevTests: number;
+  amount: number;
+  prevAmount: number;
 }
 
 export interface PeriodQuery {
@@ -142,7 +153,16 @@ async function lab(cur: Range, prev: Range, prevLabel: string): Promise<Section>
     { id: "lab-volume", title: "Tests by investigation", noun: "investigation", unit: "int", rows: top(rowsFrom(a.investigations, b.investigations, (x) => x.id, (x) => x.name, (x) => x.tests), 16), href: "/lab?investigationId={key}" },
     { id: "lab-category", title: "Revenue by category", noun: "category", unit: "money", rows: rowsFrom(a.byCategory, b.byCategory, (x) => x.category, (x) => x.category, (x) => x.revenue), href: "/lab?category={key}" },
   ];
-  return finish("lab", "Laboratory & diagnostics", kpis, comparisons, prevLabel);
+  const all = new Map<string, LabTestRow>();
+  for (const x of a.investigations) all.set(x.id, { key: x.id, name: x.name, tests: x.tests, prevTests: 0, amount: round2(x.revenue), prevAmount: 0 });
+  for (const x of b.investigations) {
+    const e = all.get(x.id) ?? { key: x.id, name: x.name, tests: 0, prevTests: 0, amount: 0, prevAmount: 0 };
+    e.prevTests = x.tests;
+    e.prevAmount = round2(x.revenue);
+    all.set(x.id, e);
+  }
+  const labTests = [...all.values()].filter((r) => r.tests || r.prevTests).sort((x, y) => y.tests - x.tests || y.amount - x.amount || x.name.localeCompare(y.name));
+  return { ...finish("lab", "Laboratory & diagnostics", kpis, comparisons, prevLabel), labTests };
 }
 
 async function ipd(cur: Range, prev: Range, prevLabel: string): Promise<Section> {

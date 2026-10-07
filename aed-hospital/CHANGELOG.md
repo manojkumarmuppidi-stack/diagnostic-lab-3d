@@ -2,7 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
-## 0.13.1: Admin password reset from Vercel
+## 0.13.2: Board Meeting — every lab test
+- The Laboratory test-by-test slides list every test performed in either period (not only the top 16), with tests and amount for both periods, the change, and totals; as many slides as needed (18 tests each).
+
+&
 - `ADMIN_RESET_PASSWORD` (Vercel environment variable + redeploy) resets the `admin` login once, forces a new password at sign-in and is logged. See VERCEL.md.
 
 ## 0.13.0: SCP as its own income

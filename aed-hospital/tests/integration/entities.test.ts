@@ -61,3 +61,19 @@ describe("income trend series", () => {
     expect(b).toMatchObject({ LAB: 300, PHARMACY: 5000, income: 300, net: 300 });
   });
 });
+
+describe("board meeting: every lab test with count and amount", () => {
+  it("lists all tests performed in either period, not just the top ones", async () => {
+    const { getSectionInsights } = await import("@/server/services/insights");
+    const invs = [];
+    for (let i = 0; i < 20; i++) invs.push((await prisma.labInvestigation.create({ data: { name: `Test ${String(i).padStart(2, "0")}`, category: "Pathology", rate: 100 + i } })).id);
+    for (const [i, id] of invs.entries())
+      await createTransaction(f.admin, "lab", { date: "2026-09-10", patientCode: "P1", patientName: "DEMO A", investigationId: id, quantity: (i % 3) + 1, paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "lab", { date: "2026-08-10", patientCode: "P1", patientName: "DEMO A", investigationId: f.ids.ecg, quantity: 2, paymentModeId: f.ids.CASH });
+    const { section: s } = await getSectionInsights(f.admin, "lab", { from: "2026-09-01", to: "2026-09-30", compareFrom: "2026-08-01", compareTo: "2026-08-31" });
+    expect(s.labTests).toHaveLength(21);
+    const t19 = s.labTests!.find((r) => r.name === "Test 19")!;
+    expect(t19).toMatchObject({ tests: 2, prevTests: 0, amount: 238, prevAmount: 0 });
+    expect(s.labTests!.find((r) => r.name === "ECG")).toMatchObject({ tests: 0, prevTests: 2, amount: 0, prevAmount: 600 });
+  });
+});

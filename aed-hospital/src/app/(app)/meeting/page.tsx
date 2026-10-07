@@ -51,6 +51,74 @@ const PRIMARY: Record<string, [string, string]> = {
   expense: ["expense-category", "expense-category"],
 };
 
+type LabRow = NonNullable<SectionData["labTests"]>[number];
+const LAB_ROWS_PER_SLIDE = 18;
+
+/** Every lab test with tests performed and amount, both periods; the last page carries the totals. */
+function LabTestsSlide({ n, total, rows, page, pages, all, curLabel, prevLabel }: { n: number; total: number; rows: LabRow[]; page: number; pages: number; all: LabRow[]; curLabel: string; prevLabel: string }) {
+  const offset = page * LAB_ROWS_PER_SLIDE;
+  const sum = (f: keyof LabRow) => all.reduce((a, r) => a + Number(r[f]), 0);
+  const change = (c: number, p: number, money: boolean) => {
+    const d = c - p;
+    return (
+      <span style={{ color: d > 0 ? "var(--status-good)" : d < 0 ? "var(--status-critical)" : undefined }}>
+        {d > 0 ? "+" : d < 0 ? "−" : ""}
+        {money ? fmtValue(Math.abs(d), "money") : Math.abs(d)}
+        {p > 0 && <span className="text-xs"> ({d >= 0 ? "+" : ""}{Math.round((d / p) * 100)}%)</span>}
+      </span>
+    );
+  };
+  const th = "py-1.5 text-right whitespace-nowrap";
+  return (
+    <Slide n={n} total={total} kicker="Department review" title="Laboratory — every test, count and amount" subtitle={`${curLabel} vs ${prevLabel} · ${all.length} tests${pages > 1 ? ` · page ${page + 1} of ${pages}` : ""}`}>
+      <div className="panel-present overflow-x-auto rounded-2xl border p-3">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-2">
+              <th className="py-1.5">Test</th>
+              <th className={th}>Tests · {curLabel}</th>
+              <th className={th}>Tests · {prevLabel}</th>
+              <th className={th}>Change</th>
+              <th className={th}>Amount · {curLabel}</th>
+              <th className={th}>Amount · {prevLabel}</th>
+              <th className={th}>Change</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.key} className="border-t" style={{ borderColor: "var(--border)" }}>
+                <td className="py-1.5">
+                  <span className="text-xs text-2">{offset + i + 1}. </span>
+                  {r.name}
+                </td>
+                <td className="py-1.5 text-right font-semibold tabular-nums">{r.tests}</td>
+                <td className="py-1.5 text-right tabular-nums text-2">{r.prevTests}</td>
+                <td className="py-1.5 text-right tabular-nums">{change(r.tests, r.prevTests, false)}</td>
+                <td className="py-1.5 text-right font-semibold tabular-nums">{fmtValue(r.amount, "money")}</td>
+                <td className="py-1.5 text-right tabular-nums text-2">{fmtValue(r.prevAmount, "money")}</td>
+                <td className="py-1.5 text-right tabular-nums">{change(r.amount, r.prevAmount, true)}</td>
+              </tr>
+            ))}
+          </tbody>
+          {page === pages - 1 && (
+            <tfoot>
+              <tr className="border-t-2 font-semibold" style={{ borderColor: "var(--border)" }}>
+                <td className="py-1.5">All {all.length} tests</td>
+                <td className="py-1.5 text-right tabular-nums">{sum("tests")}</td>
+                <td className="py-1.5 text-right tabular-nums text-2">{sum("prevTests")}</td>
+                <td className="py-1.5 text-right tabular-nums">{change(sum("tests"), sum("prevTests"), false)}</td>
+                <td className="py-1.5 text-right tabular-nums">{fmtValue(sum("amount"), "money")}</td>
+                <td className="py-1.5 text-right tabular-nums text-2">{fmtValue(sum("prevAmount"), "money")}</td>
+                <td className="py-1.5 text-right tabular-nums">{change(sum("amount"), sum("prevAmount"), true)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </Slide>
+  );
+}
+
 /** Item-by-item table slide: tests performed, medicines sold … this period, previous, change, per week. */
 function TopItemsSlide({ n, total, c, period, curLabel, prevLabel, title, itemLabel }: { n: number; total: number; c: Comparison; period: { current: { from: string; to: string } }; curLabel: string; prevLabel: string; title: string; itemLabel: string }) {
   const days = Math.max(1, Math.round((Date.parse(period.current.to) - Date.parse(period.current.from)) / 86_400_000) + 1);
@@ -420,8 +488,13 @@ function buildSlides(p: Pack): SlideFn[] {
         </div>
       </Slide>
     ));
-    const volume = s.key === "lab" ? cmp(s, "lab-volume") : undefined;
-    if (volume && volume.rows.length) slides.push((n, t) => <TopItemsSlide n={n} total={t} c={volume as Comparison} period={p.period} curLabel={cur} prevLabel={prev} title="Laboratory — tests performed, test by test" itemLabel="Test" />);
+    // Laboratory: every test with its count and amount, as many slides as it takes.
+    const labRows = s.key === "lab" ? (s as SectionData).labTests ?? [] : [];
+    const labPages = Math.ceil(labRows.length / LAB_ROWS_PER_SLIDE);
+    for (let pg = 0; pg < labPages; pg++) {
+      const rows = labRows.slice(pg * LAB_ROWS_PER_SLIDE, (pg + 1) * LAB_ROWS_PER_SLIDE);
+      slides.push((n, t) => <LabTestsSlide n={n} total={t} rows={rows} page={pg} pages={labPages} all={labRows} curLabel={cur} prevLabel={prev} />);
+    }
     const meds = s.key === "pharmacy" ? cmp(s, "pharmacy-medicine-revenue") : undefined;
     const medUnits = s.key === "pharmacy" ? cmp(s, "pharmacy-medicine-units") : undefined;
     if (meds && meds.rows.length) slides.push((n, t) => <TopItemsSlide n={n} total={t} c={meds as Comparison} period={p.period} curLabel={cur} prevLabel={prev} title="Pharmacy — top medicines by sales value" itemLabel="Medicine" />);

@@ -290,6 +290,8 @@ export interface SectionData {
   kpis: KpiCompare[];
   comparisons: Comparison[];
   insights: Insight[];
+  /** Laboratory only: every test with count and amount, both periods. */
+  labTests?: { key: string; name: string; tests: number; prevTests: number; amount: number; prevAmount: number }[];
 }
 
 /** Full insight section: KPI deltas, key findings, then every breakdown as bars + pie. */
