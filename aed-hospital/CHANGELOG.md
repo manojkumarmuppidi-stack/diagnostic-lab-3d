@@ -2,7 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
-## 0.13.3: Reception imports pharmacy reports
+## 0.13.4: Reception enters IPD
+- Reception and Reception + expenses may view, enter and import IPD admissions and payments (migration `20261010000000_reception_ipd`).
+
+&
 - Reception and Reception + expenses may view, enter and import Hormonal Pharmacy records (migration `20261007000000_reception_pharmacy`). Pharmacy logins already could.
 
 &

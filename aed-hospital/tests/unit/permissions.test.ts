@@ -27,7 +27,7 @@ describe("role matrix", () => {
   it("reception and pharmacy import only what they can enter; expenses need approval rights", () => {
     const types = (role: string) => importTypesFor((p) => has(role, p));
     const pharmacy = ["pharmacy-sale", "pharmacy-return", "pharmacy-purchase", "pharmacy-items", "supplier-payments"];
-    expect(types("RECEPTION")).toEqual(["opd", "lab", ...pharmacy.slice(0, 3), "diet", ...pharmacy.slice(3)]);
+    expect(types("RECEPTION")).toEqual(["opd", "ipd", "lab", ...pharmacy.slice(0, 3), "diet", ...pharmacy.slice(3)]);
     expect(types("RECEPTION_EXPENSES")).toEqual(types("RECEPTION"));
     expect(types("PHARMACY")).toEqual(["pharmacy-sale", "pharmacy-return", "pharmacy-purchase", "pharmacy-items", "supplier-payments"]);
     expect(types("ACCOUNTS_HEAD")).toContain("expense");
