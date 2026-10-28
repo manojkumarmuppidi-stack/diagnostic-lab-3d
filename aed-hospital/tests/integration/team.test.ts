@@ -64,3 +64,20 @@ describe("changing logins", () => {
     await expect(updateUser(f.admin, other.id, { name: "Admin Two", email: "", roleId: pharmacy.id })).rejects.toThrow(/At least one active Admin/);
   });
 });
+
+describe("daily reminder for pharmacy staff", () => {
+  it("pops up once a day when pharmacy sales are more than 2 days behind", async () => {
+    const { addDays, todayISO } = await import("@/lib/dates");
+    const ph = await actor("t_pharmacy", "PHARMACY");
+    const today = todayISO();
+    await createTransaction(f.admin, "pharmacy-sale", { date: addDays(today, -5), invoiceNo: "S-OLD", grossAmount: 1000, discount: 0, paymentModeId: f.ids.CASH });
+    const n = await notificationsFor(ph);
+    const r = n.items.find((i) => i.id.startsWith("pharmacy-upload:"));
+    expect(r).toMatchObject({ id: `pharmacy-upload:${today}`, tone: "bad", href: "/import" });
+    expect(r!.title).toContain("4 days");
+    // Reception and accounts do not get this reminder; nor does pharmacy once it is up to date.
+    expect((await notificationsFor(f.reception)).items.some((i) => i.id.startsWith("pharmacy-upload:"))).toBe(false);
+    await createTransaction(f.admin, "pharmacy-sale", { date: addDays(today, -1), invoiceNo: "S-NEW", grossAmount: 1000, discount: 0, paymentModeId: f.ids.CASH });
+    expect((await notificationsFor(ph)).items.some((i) => i.id.startsWith("pharmacy-upload:"))).toBe(false);
+  });
+});

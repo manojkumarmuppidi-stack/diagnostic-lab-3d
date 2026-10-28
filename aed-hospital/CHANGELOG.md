@@ -2,7 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
-## 0.13.4: Reception enters IPD
+## 0.13.5: Daily pharmacy upload reminder
+- Pharmacy staff get a bell reminder (and phone notification, if allowed) once a day while pharmacy sales are more than 2 days behind, naming the dates to export from OneGlance.
+
+&
 - Reception and Reception + expenses may view, enter and import IPD admissions and payments (migration `20261010000000_reception_ipd`).
 
 &

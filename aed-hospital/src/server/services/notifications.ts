@@ -3,7 +3,7 @@
  * a phone/desktop notification when allowed) while the app is open. Each item's id changes when
  * its content changes (e.g. the count), so the same reminder pops up only once until it changes.
  */
-import { addDays, formatDayMonth, todayISO } from "@/lib/dates";
+import { addDays, daysBetweenInclusive, formatDayMonth, fromDbDate, todayISO, toDbDate } from "@/lib/dates";
 import { formatINR } from "@/lib/money";
 import { monthLabel } from "@/lib/expenses";
 import { can, type Actor } from "../authz";
@@ -19,6 +19,9 @@ export interface Notice {
   detail?: string;
   href: string;
 }
+
+/** Pharmacy staff are reminded once sales are more than this many days behind. */
+export const PHARMACY_UPLOAD_ALLOWANCE = 2;
 
 /** Monthly routine bills are flagged from this day of the month on. */
 export const ROUTINE_REMINDER_DAY = 5;
@@ -39,6 +42,26 @@ export async function notificationsFor(actor: Actor): Promise<{ items: Notice[];
     jobs.push(
       prisma.expense.findMany({ where: { createdById: actor.id, status: "VOIDED", voidReason: { startsWith: "Rejected:" }, updatedAt: { gte: new Date(Date.now() - 7 * 86400000) } }, orderBy: { updatedAt: "desc" }, take: 5 }).then((rs) => {
         for (const r of rs) items.push({ id: `rejected:${r.id}`, tone: "bad", title: `Expense not approved: ${r.description}`, detail: r.voidReason!.replace(/^Rejected:\s*/, ""), href: "/expenses?tab=list" });
+      }),
+    );
+
+  // Pharmacy staff: a daily reminder once pharmacy sales are more than 2 days behind (the id carries
+  // today's date, so it pops up once each day until the missing days are uploaded).
+  if (actor.roleCode === "PHARMACY")
+    jobs.push(
+      prisma.pharmacySale.aggregate({ where: { status: "ACTIVE", date: { lte: toDbDate(today) } }, _max: { date: true } }).then((r) => {
+        const last = r._max.date ? fromDbDate(r._max.date) : null;
+        const behind = last ? daysBetweenInclusive(last, today) - 1 : null;
+        if (last && behind !== null && behind <= PHARMACY_UPLOAD_ALLOWANCE) return;
+        const from = last ? addDays(last, 1) : null;
+        items.push({
+          id: `pharmacy-upload:${today}`,
+          tone: "bad",
+          // Today is not counted: its sales are uploaded tomorrow.
+          title: last ? `Pharmacy sales missing for ${behind! - 1} days — last uploaded day ${formatDayMonth(last)}` : "No pharmacy sales uploaded yet",
+          detail: from ? `Export the OneGlance Pharmacy Collection Report for ${formatDayMonth(from)} – ${formatDayMonth(addDays(today, -1))} and upload it in Excel Import.` : "Export the OneGlance Pharmacy Collection Report and upload it in Excel Import.",
+          href: "/import",
+        });
       }),
     );
 
