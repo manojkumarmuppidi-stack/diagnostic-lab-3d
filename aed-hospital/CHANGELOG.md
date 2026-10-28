@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.14.0: Department accounts
+- New **Department accounts** page: AED income (pharmacy excluded) per department and month, with the billed services behind each department, bills/tests counts, share of AED income and a "Not in any department" list.
+- Nine default departments (USG scan room; Foot exam, neuropathy & physiotherapy; Cardiac; JJ Wellness skin/hair/BMI; Ophthalmology; Diet; SCP; Short admissions; JJ Wellness MMP admissions), matched by keywords in the billed service name. Editable in Master Data → Income departments (migration `20261028000000_service_departments`).
+
 ## 0.13.5: Daily pharmacy upload reminder
 - Pharmacy staff get a bell reminder (and phone notification, if allowed) once a day while pharmacy sales are more than 2 days behind, naming the dates to export from OneGlance.
 

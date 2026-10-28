@@ -1,6 +1,6 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { apiFetch, useApi } from "@/lib/client";
 import { formatINR } from "@/lib/money";
@@ -19,6 +19,15 @@ interface F {
 }
 
 const DEFS: Record<string, { label: string; fields: F[]; show: string[] }> = {
+  serviceDepartments: {
+    label: "Income departments",
+    fields: [
+      { key: "name", label: "Department", type: "text", required: true },
+      { key: "keywords", label: "Billed names containing (comma-separated words; stream:DIET takes a whole stream)", type: "text" },
+      { key: "sortOrder", label: "Order (lower is checked first)", type: "int" },
+    ],
+    show: ["name", "keywords", "sortOrder"],
+  },
   specialties: { label: "Specialties", fields: [{ key: "name", label: "Name", type: "text", required: true }, { key: "sortOrder", label: "Sort order", type: "int" }], show: ["name"] },
   doctors: {
     label: "Doctors & Dieticians",
@@ -101,6 +110,11 @@ const DEFS: Record<string, { label: string; fields: F[]; show: string[] }> = {
 
 export default function MastersPage() {
   const [type, setType] = useState("investigations");
+  // Deep link: /masters?type=serviceDepartments opens that tab.
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("type");
+    if (t && t in DEFS) setType(t);
+  }, []);
   const def = DEFS[type];
   const { data, error, loading, reload } = useApi<any[]>(`/api/masters/${type}`);
   const { masters, reload: reloadMasters } = useMasters();

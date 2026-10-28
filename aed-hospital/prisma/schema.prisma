@@ -935,3 +935,17 @@ model Setting {
   updatedAt   DateTime @updatedAt
   updatedById String?
 }
+
+/// Income departments for department-wise accounts (USG scan room, Cardiac, SCP …). A billed item —
+/// consultation type, lab test, diet service or IPD admission type — belongs to the first department
+/// whose keywords appear in its name; "stream:XYZ" takes a whole income stream (e.g. stream:DIET).
+model ServiceDepartment {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  /// Comma-separated words or phrases matched against the billed name, e.g. "usg, doppler, fnac".
+  keywords  String   @default("")
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

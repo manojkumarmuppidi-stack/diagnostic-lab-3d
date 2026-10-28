@@ -15,6 +15,7 @@ import { fingerprintFor } from "../src/server/services/modules";
 import { DEFAULT_SETTINGS } from "../src/server/settings";
 import { linkExpensesToHeads } from "../src/server/expense-heads";
 import { isScpName } from "../src/lib/scp";
+import { DEFAULT_DEPARTMENTS } from "../src/lib/departments";
 
 const prisma = new PrismaClient();
 const DEMO = process.env.SEED_DEMO_DATA === "true";
@@ -271,6 +272,9 @@ async function seedMasters() {
     }
     await prisma.expenseHead.create({ data: { name, keywords, categoryId: cat.id, subcategoryId: sub?.id ?? null, departmentId: dept?.id ?? null, defaultMode, monthly, sortOrder: i * 10 } });
   }
+  // Income departments: created once; the Admin edits names and keywords afterwards.
+  for (const [i, [name, keywords]] of DEFAULT_DEPARTMENTS.entries())
+    await prisma.serviceDepartment.upsert({ where: { name }, create: { name, keywords, sortOrder: (i + 1) * 10 }, update: {} });
   if (!(await prisma.setting.findUnique({ where: { key: "app" } }))) {
     await prisma.setting.create({ data: { key: "app", value: DEFAULT_SETTINGS } });
   }

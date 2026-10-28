@@ -18,6 +18,12 @@ const optId = z.preprocess((v) => (v === "" ? null : v), z.string().nullable().o
 const active = z.boolean().optional();
 
 export const MASTER_TYPES = {
+  serviceDepartments: {
+    label: "Income departments",
+    model: (tx: Tx) => tx.serviceDepartment,
+    schema: z.object({ name, keywords: z.string().trim().max(1000).default(""), sortOrder: z.coerce.number().int().optional(), active }),
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+  },
   departments: {
     label: "Departments",
     model: (tx: Tx) => tx.department,

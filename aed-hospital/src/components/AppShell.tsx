@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import {
+  Building2,
   Activity,
   BarChart3,
   BedDouble,
@@ -48,6 +49,7 @@ interface NavItem {
 export const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
   { href: "/entities", label: "AED vs Pharmacy P&L", icon: Scale, perm: "dashboard.view" },
+  { href: "/departments", label: "Department accounts", icon: Building2, perm: "analytics.view" },
   { href: "/daily-accounts", label: "Daily Accounts", icon: CalendarCheck, perm: "accounts.view" },
   { href: "/opd", label: "OPD", icon: Stethoscope, perm: "opd.view" },
   { href: "/ipd", label: "IPD", icon: BedDouble, perm: "ipd.view" },
