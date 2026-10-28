@@ -9,7 +9,8 @@ import { seedFixture, type Fixture } from "../helpers/db";
 let f: Fixture;
 beforeEach(async () => {
   f = await seedFixture();
-  for (const [i, [name, keywords]] of DEFAULT_DEPARTMENTS.entries()) await prisma.serviceDepartment.create({ data: { name, keywords, sortOrder: (i + 1) * 10 } });
+  for (const [i, [name, keywords, addOnKeywords = "", addOnAmount = 0]] of DEFAULT_DEPARTMENTS.entries())
+    await prisma.serviceDepartment.create({ data: { name, keywords, addOnKeywords, addOnAmount, sortOrder: (i + 1) * 10 } });
 });
 
 describe("department accounts", () => {
@@ -33,5 +34,24 @@ describe("department accounts", () => {
     expect(d.unassigned.map((g) => [g.name, g.total])).toEqual([["Laboratory — not in a department", 1500]]);
     expect(d.grandTotal).toBe(9300);
     expect(d.months).toEqual(["2026-09", "2026-10"]);
+  });
+
+  it("gives JJ Wellness ₹200 of every consultation + wellness bill and leaves the rest in OPD", async () => {
+    const combo = (await createMaster(f.admin, "consultationTypes", { name: "New Thyroid + Wellness Consultation", defaultRate: 1200 })) as { id: string };
+    const plain = (await createMaster(f.admin, "consultationTypes", { name: "Wellness Consultation", defaultRate: 200 })) as { id: string };
+    const opd = (d: string, id: string, amt: number) =>
+      createTransaction(f.admin, "opd", { date: d, patientCode: "P3", patientName: "DEMO C", specialtyId: f.ids.diabetes, visitType: "NEW", consultationTypeId: id, grossAmount: amt, discount: 0, paymentModeId: f.ids.CASH });
+    await opd("2026-10-08", combo.id, 1200);
+    await opd("2026-10-09", combo.id, 1200);
+    await opd("2026-10-09", plain.id, 200);
+    const d = await departmentAccounts(f.admin, { from: "2026-10-01", to: "2026-10-31" });
+    const jj = d.departments.find((g) => g.name === "JJ Wellness (skin, hair, BMI)")!;
+    expect(jj.total).toBe(600);
+    expect(jj.items.map((i) => [i.name, i.count, i.total])).toEqual([
+      ["New Thyroid + Wellness Consultation (₹200 per bill)", 2, 400],
+      ["Wellness Consultation", 1, 200],
+    ]);
+    expect(d.unassigned.map((g) => [g.name, g.total])).toEqual([["OPD — not in a department", 2000]]);
+    expect(d.grandTotal).toBe(2600);
   });
 });

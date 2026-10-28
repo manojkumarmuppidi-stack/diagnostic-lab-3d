@@ -25,7 +25,7 @@ import { readSpreadsheet, type SheetData } from "../spreadsheet";
 import { classifyLabItem } from "@/lib/import/lab-category";
 import { canonicalItemName, itemFingerprint, itemForm, normalizeItemRow, type ItemLineInput } from "@/lib/import/items";
 import { normalizePaymentRow, paymentFingerprint, type SupplierPaymentInput } from "@/lib/import/payments";
-import { convertHmsSheet, HmsReportError, HMS_LABELS, type ConvertedSheet } from "@/lib/import/hms";
+import { convertHmsSheet, convertJjWorkbook, HmsReportError, HMS_LABELS, type ConvertedSheet } from "@/lib/import/hms";
 import { fingerprintFor } from "./modules";
 import { refreshClosedDays } from "./daily";
 import { bulkInsertPrepared, insertRecord, prepareRecord } from "./transactions";
@@ -107,7 +107,12 @@ export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, ty
 }
 
 /** Replace recognised OneGlance report sheets with converted, month-split sheets. */
-function expandHmsReports(sheets: SheetData[]): (SheetData | ConvertedSheet)[] {
+export function expandHmsReports(sheets: SheetData[]): (SheetData | ConvertedSheet)[] {
+  const jj = convertJjWorkbook(sheets);
+  if (jj) {
+    if (!jj.length) throw badRequest("No package payments found in this JJ Wellness workbook");
+    return jj;
+  }
   const out: (SheetData | ConvertedSheet)[] = [];
   for (const sh of sheets) {
     let converted: ConvertedSheet[] | null;

@@ -21,7 +21,7 @@ export const MASTER_TYPES = {
   serviceDepartments: {
     label: "Income departments",
     model: (tx: Tx) => tx.serviceDepartment,
-    schema: z.object({ name, keywords: z.string().trim().max(1000).default(""), sortOrder: z.coerce.number().int().optional(), active }),
+    schema: z.object({ name, keywords: z.string().trim().max(1000).default(""), addOnKeywords: z.string().trim().max(500).default(""), addOnAmount: money.default(0), sortOrder: z.coerce.number().int().optional(), active }),
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   },
   departments: {

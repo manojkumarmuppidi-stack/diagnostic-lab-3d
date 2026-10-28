@@ -11,6 +11,7 @@ import { prisma } from "../db";
 import { monthlyChecklist } from "./expenses";
 import { dataFreshness } from "./freshness";
 import { listDays } from "./daily";
+import { jjSyncState } from "./jj-sync";
 
 export interface Notice {
   id: string;
@@ -62,6 +63,17 @@ export async function notificationsFor(actor: Actor): Promise<{ items: Notice[];
           detail: from ? `Export the OneGlance Pharmacy Collection Report for ${formatDayMonth(from)} – ${formatDayMonth(addDays(today, -1))} and upload it in Excel Import.` : "Export the OneGlance Pharmacy Collection Report and upload it in Excel Import.",
           href: "/import",
         });
+      }),
+    );
+
+  // Admin: the nightly JJ Wellness sync from Google Drive — what it added, or why it failed.
+  if (actor.roleCode === "ADMIN")
+    jobs.push(
+      jjSyncState().then((s) => {
+        if (s?.error && s.errorAt)
+          items.push({ id: `jj-sync-error:${s.errorAt.slice(0, 10)}`, tone: "bad", title: "JJ Wellness sync from Google Drive failed", detail: s.error, href: "/import" });
+        else if (s?.at && s.imported && daysBetweenInclusive(s.at.slice(0, 10) as typeof today, today) <= 2)
+          items.push({ id: `jj-sync:${s.at}`, tone: "info", title: `JJ Wellness sync added ${s.imported} package payment${s.imported === 1 ? "" : "s"}`, detail: `${formatINR(s.amount ?? 0)} as Other income`, href: "/import" });
       }),
     );
 

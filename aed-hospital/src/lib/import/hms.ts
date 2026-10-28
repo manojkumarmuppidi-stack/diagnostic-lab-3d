@@ -13,6 +13,7 @@
  *  - Pharmacy bill collection (bill-wise) → one pharmacy sale per bill, with its exact payment mode
  *  - Lab Bill Collection                → rejected with guidance (bill totals, no test names)
  *  - Cash book (Date/Description/Debit/Credit/Balance) → Expenses, categorised from the description
+ *  - JJ Wellness workbook (Package_Payments tab) → Other income: MMP/GLP package payments only
  *
  * Payment modes are not in the OPD or item-wise exports; those rows are recorded as "Other"
  * and flagged in Remarks, so reconciliation never pretends to know the split.
@@ -38,7 +39,7 @@ export interface ConvertedSheet extends RawSheet {
   note: string;
   source: HmsReport;
 }
-export type HmsReport = "oneglance-opd" | "oneglance-opd-collection" | "oneglance-pharmacy-bills" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-summary" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book";
+export type HmsReport = "oneglance-opd" | "oneglance-opd-collection" | "oneglance-pharmacy-bills" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-summary" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book" | "jj-wellness-packages";
 
 export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-opd": "OneGlance · Outpatient Collection Report",
@@ -52,6 +53,7 @@ export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-pharmacy-item-purchases": "OneGlance · Purchase/Sales Report (purchase invoices)",
   "oneglance-supplier-payments": "OneGlance · Pharmacy Invoice Report (supplier payments)",
   "cash-book": "Cash book (Date · Description · Debit · Credit · Balance)",
+  "jj-wellness-packages": "JJ Wellness workbook · Package payments (MMP/GLP)",
 };
 
 const has = (headers: string[], ...names: string[]) => {
@@ -71,6 +73,7 @@ export function detectHmsReport(headers: string[]): HmsReport | null {
   if (has(headers, "Invoice No", "Invoice Date", "Stockiest Name", "Drug Name", "Purchase Value")) return "oneglance-pharmacy-item-purchases";
   if (has(headers, "BillNo", "Paid date", "Stockiest Name", "Details", "Paid Amount")) return "oneglance-supplier-payments";
   if (has(headers, "Description", "Debit", "Credit", "Balance") && (has(headers, "Cheque No.") || has(headers, "Ledger"))) return "cash-book";
+  if (has(headers, "Date", "Patient ID", "Program", "Advance", "Balance")) return "jj-wellness-packages";
   return null;
 }
 
@@ -796,6 +799,87 @@ function convertCashBook(sheet: RawSheet): ConvertedSheet[] {
   return [...expenses, ...byMonth("cash-book", sheet.name, "supplier-payments", "Cash book supplier payments", PAYMENT_HEADERS, supplier, supplierNote)];
 }
 
+// ─────────────────────────── JJ Wellness workbook ───────────────────────────
+
+/**
+ * A register typed day-first ("10/09/2026") where Excel turned every date with a day up to 12 into a real
+ * date, month-first (9 Oct), and left the rest as text ("14-09-2026"). When no Excel date has a day above 12
+ * and some text dates do, every Excel date is flipped back; otherwise the dates are resolved by neighbours.
+ */
+export function dayFirstDates(raw: string[]): { dates: string[]; swapped: number } {
+  const excel = raw.map((v) => /^(\d{4})-(\d{2})-(\d{2})/.exec(v.trim()));
+  const typedDayFirst = raw.some((v) => /^(1[3-9]|2\d|3[01])[-/.]\d{1,2}[-/.]\d{2,4}$/.test(v.trim()));
+  if (!typedDayFirst || excel.some((m) => m && +m[3] > 12)) return fixLedgerDates(raw);
+  let swapped = 0;
+  const dates = raw.map((v, i) => {
+    const m = excel[i];
+    if (m) {
+      if (m[2] !== m[3]) swapped++;
+      return isoOf(+m[1], +m[3], +m[2]) ?? "";
+    }
+    const t = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(v.trim());
+    return t ? (isoOf(+t[3] < 100 ? 2000 + +t[3] : +t[3], +t[2], +t[1]) ?? "") : "";
+  });
+  return { dates, swapped };
+}
+
+const OTHER_INCOME_HEADERS = ["Date", "Source", "Description", "Amount", "Payment Mode", "Reference"];
+export const JJ_PACKAGE_SOURCE = "JJ Wellness MMP package";
+
+/**
+ * JJ Wellness keeps its own workbook (Package_Payments, Consultations, BMI_Tests, Injection_Sales …).
+ * Only the package payments are new money: the ₹200 wellness consultations and ₹450 BMI are billed in
+ * OneGlance (OPD / lab) and the injections are Hormonal Pharmacy bills, so those tabs are not imported.
+ * Each payment's reference is the patient ID (plus a counter for a second equal payment the same day),
+ * so uploading the whole workbook again — every month, or nightly from Google Drive — adds only new rows.
+ */
+function convertJjPackages(sheet: RawSheet): ConvertedSheet[] {
+  const { dates, swapped } = dayFirstDates(sheet.rows.map((r) => String(getter(r.values)("Date") ?? "")));
+  const out: Out[] = [];
+  const seen = new Map<string, number>();
+  sheet.rows.forEach((r, i) => {
+    const g = getter(r.values);
+    const amount = num(g("Advance"));
+    if (!(amount > 0)) return;
+    const pid = g("Patient ID").replace(/\.0+$/, "");
+    const program = cleanText(g("Program")) || "MMP";
+    const balance = num(g("Balance"));
+    const [y, m, d] = (dates[i] || "").split("-");
+    const base = `JJW-${pid || `ROW${r.rowNumber}`}`;
+    const key = `${base}|${dates[i]}|${amount}`;
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    out.push({
+      rowNumber: r.rowNumber,
+      values: {
+        Date: dates[i] ? `${d}-${m}-${y}` : "",
+        Source: JJ_PACKAGE_SOURCE,
+        Description: [program, pid && `patient ${pid}`, balance > 0 && `balance due ₹${Math.round(balance).toLocaleString("en-IN")}`].filter(Boolean).join(" · "),
+        Amount: r2(amount),
+        "Payment Mode": "Other",
+        Reference: n > 1 ? `${base}-${n}` : base,
+      },
+    });
+  });
+  const total = out.reduce((a, r) => a + Number(r.values.Amount), 0);
+  const note =
+    `${out.length} MMP/GLP package payments (₹${Math.round(total).toLocaleString("en-IN")}) as Other income "${JJ_PACKAGE_SOURCE}"` +
+    (swapped ? `; ${swapped} dates that Excel had read month-first were corrected from the neighbouring rows` : "") +
+    `. Rows already imported are flagged as duplicates, so the whole workbook can be uploaded again.` +
+    ` The workbook does not record the payment mode ("Other").`;
+  return byMonth("jj-wellness-packages", sheet.name, "other-income", "JJ Wellness packages", OTHER_INCOME_HEADERS, out, note);
+}
+
+const JJ_SKIPPED = "Not imported from the JJ Wellness workbook: consultations (₹200) and BMI (₹450) are billed in OneGlance, injections are Hormonal Pharmacy bills, and the other tabs are registers.";
+
+/** A JJ Wellness workbook: its package tab is converted and its other tabs are left out (see JJ_SKIPPED). */
+export function convertJjWorkbook(sheets: RawSheet[]): ConvertedSheet[] | null {
+  const packages = sheets.filter((sh) => detectHmsReport(sh.headers) === "jj-wellness-packages");
+  if (!packages.length) return null;
+  const skipped = sheets.filter((sh) => !packages.includes(sh)).map((sh) => sh.name);
+  return packages.flatMap(convertJjPackages).map((c) => ({ ...c, note: skipped.length ? `${c.note} ${JJ_SKIPPED} (${skipped.join(", ")})` : c.note }));
+}
+
 export class HmsReportError extends Error {}
 
 /**
@@ -825,6 +909,8 @@ export function convertHmsSheet(sheet: RawSheet): ConvertedSheet[] | null {
       return convertSupplierPayments(sheet);
     case "cash-book":
       return convertCashBook(sheet);
+    case "jj-wellness-packages":
+      return convertJjPackages(sheet);
     case "oneglance-lab-bills":
       throw new HmsReportError(
         'This is OneGlance "Lab Bill Collection": bill totals without test names, so importing it would count one test per bill. ' +

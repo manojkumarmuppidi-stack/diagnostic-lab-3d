@@ -944,6 +944,9 @@ model ServiceDepartment {
   name      String   @unique
   /// Comma-separated words or phrases matched against the billed name, e.g. "usg, doppler, fnac".
   keywords  String   @default("")
+  /// Combined bills "<consultation> + <add-on>": the fixed amount per bill this department takes.
+  addOnKeywords String  @default("")
+  addOnAmount   Decimal @default(0) @db.Decimal(12, 2)
   sortOrder Int      @default(0)
   active    Boolean  @default(true)
   createdAt DateTime @default(now())

@@ -79,3 +79,27 @@ The password cannot be read back (only a one-way hash is stored). If another Adm
 4. **Delete `ADMIN_RESET_PASSWORD`** from Vercel. (Each value is applied only once, so leaving it does not keep resetting the password — but it should not stay stored.)
 
 The reset re-enables the `admin` login, signs it out everywhere and is written to the Audit Log.
+
+## Nightly JJ Wellness sync from Google Drive (optional)
+
+Every night at 3:00 AM IST (`vercel.json` → `/api/cron/jj-wellness`) the app downloads the JJ Wellness
+workbook from Google Drive and imports **new MMP/GLP package payments only**, exactly as if the workbook
+had been uploaded in Excel Import. Payments already imported are recognised and skipped, and closed days are never
+changed. Consultations (₹200), BMI (₹450) and injections are not imported, because OneGlance already bills them.
+The Admin's bell shows what each sync added, or why it failed. Uploading the workbook by hand still works.
+
+One-time setup (about 10 minutes, Google account that owns the workbook):
+
+1. https://console.cloud.google.com → create a project (e.g. "AED app") → **APIs & Services → Library** →
+   enable **Google Drive API**.
+2. **IAM & Admin → Service Accounts → Create service account** (e.g. `aed-jj-sync`, no roles needed) →
+   open it → **Keys → Add key → JSON**. A `.json` file downloads. Keep it private; never paste it in chat or email.
+3. In Google Drive, **Share** the JJ Wellness workbook with the service account's email
+   (`…@….iam.gserviceaccount.com`) as **Viewer**. If Google Workspace refuses to share outside the organisation,
+   a Workspace admin must allow sharing with that address.
+4. Vercel → Settings → Environment Variables (Production):
+   - `GOOGLE_SERVICE_ACCOUNT_JSON`: the whole contents of the `.json` file
+   - `JJ_WELLNESS_FILE_ID`: the id in the workbook's link (`…/d/<this part>/edit`)
+   - `CRON_SECRET`: any random text of 32+ characters (Vercel sends it with the nightly call)
+   - `JJ_SYNC_USERNAME` (optional): the login the imports are recorded under; default `admin`
+5. Redeploy. The next night's run appears in Import history as "JJ Wellness packages <month>".

@@ -5,7 +5,7 @@
  */
 import { Prisma } from "@prisma/client";
 import { addMonths, isISODate, startOfMonth, todayISO, toDbDate, type ISODate } from "@/lib/dates";
-import { compileDepartments, departmentFor } from "@/lib/departments";
+import { addOnSplit, compileDepartments, departmentFor } from "@/lib/departments";
 import { STREAM_LABELS, type IncomeStream } from "@/lib/accounting";
 import { round2, toNum } from "@/lib/money";
 import { requirePermission, type Actor } from "../authz";
@@ -33,7 +33,7 @@ export async function departmentAccounts(actor: Actor, q: { from?: string | null
   const to = (q.to && isISODate(q.to) ? q.to : today) as ISODate;
   const from = (q.from && isISODate(q.from) ? q.from : `${today.slice(0, 4)}-01-01`) as ISODate;
   const [rules, rows] = await Promise.all([
-    prisma.serviceDepartment.findMany({ where: { active: true } }),
+    prisma.serviceDepartment.findMany({ where: { active: true } }).then((rs) => rs.map((r) => ({ ...r, addOnAmount: toNum(r.addOnAmount) }))),
     // Billed name per line: consultation type (OPD/SCP), lab test, diet service, IPD admission type.
     prisma.$queryRaw<{ m: string; stream: string; name: string | null; n: Prisma.Decimal; amount: Prisma.Decimal }[]>`
       SELECT to_char(v.date, 'YYYY-MM') AS m, v.stream,
@@ -55,28 +55,40 @@ export async function departmentAccounts(actor: Actor, q: { from?: string | null
   const groups = new Map<string, Group>(depts.map((d) => [d.id, { id: d.id, name: d.name, count: 0, total: 0, byMonth: {}, items: [] }]));
   const unassigned = new Map<string, Group>();
   let grand = 0;
+  const unassignedGroup = (stream: string) => {
+    // Not in any department yet: grouped by stream, so the Admin sees what to map.
+    const key = `unassigned:${stream}`;
+    let g = unassigned.get(key);
+    if (!g) unassigned.set(key, (g = { id: key, name: `${STREAM_LABELS[stream as IncomeStream] ?? stream} — not in a department`, count: 0, total: 0, byMonth: {}, items: [] }));
+    return g;
+  };
+  const add = (g: Group, itemName: string, stream: string, m: string, count: number, amount: number) => {
+    g.count += count;
+    g.total = round2(g.total + amount);
+    g.byMonth[m] = round2((g.byMonth[m] ?? 0) + amount);
+    let it = g.items.find((x) => x.name === itemName && x.stream === stream);
+    if (!it) g.items.push((it = { name: itemName, stream, count: 0, total: 0, byMonth: {} }));
+    it.count += count;
+    it.total = round2(it.total + amount);
+    it.byMonth[m] = round2((it.byMonth[m] ?? 0) + amount);
+  };
   for (const r of rows) {
-    const amount = toNum(r.amount);
+    let amount = toNum(r.amount);
     const count = toNum(r.n);
     const itemName = r.name ?? `(${STREAM_LABELS[r.stream as IncomeStream] ?? r.stream}, no name)`;
     grand = round2(grand + amount);
-    const d = departmentFor(depts, r.stream, r.name);
-    let g: Group;
-    if (d) g = groups.get(d.id)!;
-    else {
-      // Not in any department yet: grouped by stream, so the Admin sees what to map.
-      const key = `unassigned:${r.stream}`;
-      g = unassigned.get(key) ?? { id: key, name: `${STREAM_LABELS[r.stream as IncomeStream] ?? r.stream} — not in a department`, count: 0, total: 0, byMonth: {}, items: [] };
-      unassigned.set(key, g);
+    let placeBy = r.name;
+    const split = addOnSplit(depts, r.name);
+    if (split) {
+      // "New Thyroid + Wellness Consultation": the add-on department takes its fixed amount per bill.
+      const share = split.base ? Math.min(amount, round2(split.dept.addOnAmount * count)) : amount;
+      add(groups.get(split.dept.id)!, split.base ? `${itemName} (₹${split.dept.addOnAmount.toLocaleString("en-IN")} per bill)` : itemName, r.stream, r.m, count, share);
+      amount = round2(amount - share);
+      if (!split.base || amount === 0) continue;
+      placeBy = split.base;
     }
-    g.count += count;
-    g.total = round2(g.total + amount);
-    g.byMonth[r.m] = round2((g.byMonth[r.m] ?? 0) + amount);
-    let it = g.items.find((x) => x.name === itemName && x.stream === r.stream);
-    if (!it) g.items.push((it = { name: itemName, stream: r.stream, count: 0, total: 0, byMonth: {} }));
-    it.count += count;
-    it.total = round2(it.total + amount);
-    it.byMonth[r.m] = round2((it.byMonth[r.m] ?? 0) + amount);
+    const d = departmentFor(depts, r.stream, placeBy);
+    add(d ? groups.get(d.id)! : unassignedGroup(r.stream), itemName, r.stream, r.m, count, amount);
   }
   const finish = (gs: Group[]) => gs.map((g) => ({ ...g, items: g.items.sort((a, b) => b.total - a.total) }));
   const departments = finish([...groups.values()]);

@@ -24,9 +24,11 @@ const DEFS: Record<string, { label: string; fields: F[]; show: string[] }> = {
     fields: [
       { key: "name", label: "Department", type: "text", required: true },
       { key: "keywords", label: "Billed names containing (comma-separated words; stream:DIET takes a whole stream)", type: "text" },
+      { key: "addOnKeywords", label: 'Combined bills "… + X": X is one of (comma-separated)', type: "text" },
+      { key: "addOnAmount", label: "Amount per combined bill (₹)", type: "money" },
       { key: "sortOrder", label: "Order (lower is checked first)", type: "int" },
     ],
-    show: ["name", "keywords", "sortOrder"],
+    show: ["name", "keywords", "addOnAmount", "sortOrder"],
   },
   specialties: { label: "Specialties", fields: [{ key: "name", label: "Name", type: "text", required: true }, { key: "sortOrder", label: "Sort order", type: "int" }], show: ["name"] },
   doctors: {

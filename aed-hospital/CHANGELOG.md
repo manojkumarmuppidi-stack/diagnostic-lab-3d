@@ -2,6 +2,11 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.15.0: JJ Wellness
+- Department accounts: combined OneGlance bills such as "New Thyroid + Wellness Consultation" or "Old Diabetes + Consultation" give JJ Wellness ₹200 per bill; the rest stays with the consultation. The stand-alone "Wellness Consultation" is JJ Wellness. Configurable in Master Data → Income departments (migration `20261029000000_department_addons`).
+- Excel Import recognises the JJ Wellness workbook (Package_Payments tab) and imports MMP/GLP package payments as Other income "JJ Wellness MMP package", counted under JJ Wellness — MMP admissions. Dates that Excel flipped month-first are read day-first. The other tabs are not imported: consultations and BMI are OneGlance bills, and injections are Hormonal Pharmacy bills. Uploading the workbook again adds only new payments.
+- Optional nightly sync of that workbook from Google Drive through a service account (VERCEL.md), with the result or error in the Admin's bell.
+
 ## 0.14.0: Department accounts
 - New **Department accounts** page: AED income (pharmacy excluded) per department and month, with the billed services behind each department, bills/tests counts, share of AED income and a "Not in any department" list.
 - Nine default departments (USG scan room; Foot exam, neuropathy & physiotherapy; Cardiac; JJ Wellness skin/hair/BMI; Ophthalmology; Diet; SCP; Short admissions; JJ Wellness MMP admissions), matched by keywords in the billed service name. Editable in Master Data → Income departments (migration `20261028000000_service_departments`).
