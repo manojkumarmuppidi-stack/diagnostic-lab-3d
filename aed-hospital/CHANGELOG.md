@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.18.0: Department heads and day-by-day view
+- Department statement: income lines are grouped by source (injections, tests, wellness share of combined bills, packages …; tap to expand), so the costs and profit are on the first screen; the card title shows income, costs and profit for the period.
 - The USG & 2D Echo room is shared 80% USG scan room / 20% Cardiac (2D Echo). Reception & Administration and the Lobby serve the whole hospital and are no longer departments; profit is before those common costs (migration `20261101020000_room_split_common_areas`).
 - Staff logins: an Admin can make any login the head of a department ("Department head of"). A head sees Department accounts for their own department only (no hospital-wide figures), adds its costs such as maintenance, and changes or removes the costs they added. Admins change any cost (migration `20261101010000_department_heads`).
 - Department accounts: View "Day by day (one month)" (monthly costs spread evenly over the days of their month), and a "This year" shortcut for the year view.

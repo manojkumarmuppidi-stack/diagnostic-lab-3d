@@ -19,6 +19,39 @@ import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Moda
 import { useCan, useSession } from "@/components/session";
 import { BarsChart, ChartCard, SLOT } from "@/components/charts/Charts";
 
+/** Income lines grouped by source, so a department with many billed items stays one screen tall. */
+const SOURCE_LABELS: Record<string, string> = {
+  PHARMACY: "Injections — margin",
+  LAB: "Tests",
+  OPD: "Consultations",
+  SCP: "Sugar control plans & short admissions",
+  IPD: "Admissions",
+  DIET: "Diet",
+  OTHER: "Packages & other income",
+};
+interface IncomeGroup {
+  key: string;
+  label: string;
+  lines: any[];
+  byMonth: Record<string, number>;
+  total: number;
+  count: number;
+}
+function incomeGroups(lines: any[]): IncomeGroup[] {
+  const groups = new Map<string, IncomeGroup>();
+  for (const l of lines) {
+    const key = l.stream === "OPD" && /per bill\)$/.test(l.name) ? "OPD-share" : l.stream;
+    const label = key === "OPD-share" ? "Wellness share of combined consultation bills" : (SOURCE_LABELS[l.stream] ?? l.stream);
+    const g: IncomeGroup = groups.get(key) ?? { key, label, lines: [], byMonth: {}, total: 0, count: 0 };
+    g.lines.push(l);
+    g.total += l.total;
+    g.count += l.count;
+    for (const [m, v] of Object.entries(l.byMonth as Record<string, number>)) g.byMonth[m] = (g.byMonth[m] ?? 0) + v;
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => b.total - a.total);
+}
+
 /** Column heading: "Oct 2026" for a month, "5 Oct" for a day. */
 const colLabel = (k: string) => (k.length > 7 ? `${Number(k.slice(8))} ${mLabel(k.slice(0, 7)).split(" ")[0]}` : mLabel(k));
 
@@ -192,6 +225,14 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
   const canChange = (c: any) => admin || (me.headOfDepartmentId === st.id && c.createdById === me.id);
   const [dialog, setDialog] = useState<{ cost: any | null } | null>(null);
   const [removing, setRemoving] = useState<any | null>(null);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
+  const toggle = (k: string) =>
+    setOpenGroups((o) => {
+      const n = new Set(o);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
   const { data: costs, reload } = useApi<any[]>(`/api/departments/costs?departmentId=${st.id}`);
   const changed = () => {
     reload();
@@ -236,7 +277,14 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
   );
   return (
     <Card
-      title={`${st.name} — income, costs and profit`}
+      title={
+        <span>
+          {st.name} — income, costs and profit
+          <span className="ml-2 text-xs font-normal muted">
+            income {formatINR(st.totals.income)} · costs −{formatINR(st.totals.costs)} · profit {formatINR(st.totals.profit)}
+          </span>
+        </span>
+      }
       actions={
         edit && (
           <Button size="sm" onClick={() => setDialog({ cost: null })}>
@@ -267,13 +315,42 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
                 </td>
               </tr>
             )}
-            {st.incomeLines.map((l: any) => (
-              <Fragment key={`${l.stream}|${l.name}`}>
-                {row(l.name, l.byMonth, l.total, {
-                  sub: l.count ? `${STREAM_LABELS[l.stream as keyof typeof STREAM_LABELS] ?? l.stream} · ${formatNumber(l.count)} bills/tests` : undefined,
-                })}
-              </Fragment>
-            ))}
+            {incomeGroups(st.incomeLines).map((g) =>
+              g.lines.length === 1 ? (
+                <Fragment key={g.key}>
+                  {row(g.lines[0].name, g.lines[0].byMonth, g.lines[0].total, {
+                    sub: g.lines[0].count ? `${STREAM_LABELS[g.lines[0].stream as keyof typeof STREAM_LABELS] ?? g.lines[0].stream} · ${formatNumber(g.lines[0].count)} bills/tests` : undefined,
+                  })}
+                </Fragment>
+              ) : (
+                <Fragment key={g.key}>
+                  {row(
+                    <button type="button" className="flex items-center gap-1 text-left hover:underline" onClick={() => toggle(g.key)} aria-expanded={openGroups.has(g.key)}>
+                      {openGroups.has(g.key) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                      {g.label}
+                    </button>,
+                    g.byMonth,
+                    g.total,
+                    { sub: `${g.lines.length} billed items${g.count ? ` · ${formatNumber(g.count)} bills/tests` : ""} — tap to see them` },
+                  )}
+                  {openGroups.has(g.key) &&
+                    g.lines.map((l: any) => (
+                      <tr key={`${l.stream}|${l.name}`} className="text-xs">
+                        <td className="pl-12">
+                          {l.name}
+                          {l.count ? <span className="muted"> · {formatNumber(l.count)}</span> : null}
+                        </td>
+                        {months.map((m) => (
+                          <td key={m} className="num muted">
+                            {l.byMonth[m] ? formatINRCompact(l.byMonth[m]) : ""}
+                          </td>
+                        ))}
+                        <td className="num">{formatINR(l.total)}</td>
+                      </tr>
+                    ))}
+                </Fragment>
+              ),
+            )}
             {row("Total income", st.income, st.totals.income, { bold: true })}
             {head("Costs — the shares you allocate to this department")}
             {st.costLines.length === 0 && (
