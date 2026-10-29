@@ -2,6 +2,12 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.22.0: Payroll → department salaries, expenses by name, long admissions
+- Staff → department list (Department accounts → All departments, Admin): import a sheet with Staff · Also written as · Department · % to that department · Second department. Anyone marked Hospital-wide / Others is not charged. Remove a person to stop charging them.
+- Bank payroll files (NAME · AMOUNT · BANK · IFSC CODE · ACCOUNT NO) can be imported on Department accounts: the month comes from the file name ("November 2026 Salaries.xlsx") or the title above the table. Each mapped person's pay becomes "Salary — <name>" in their department(s) for that month; a corrected file for the same month replaces it. The toast lists who was not charged to any department. Payroll and the staff list are Admin-only. Department accounts only; the hospital's books do not change.
+- New cost kind "Hospital expenses mentioning …" (e.g. Dr. Geetha Priya): every active hospital expense whose description or vendor contains the name (spellings separated by commas) is counted in that department, month by month. Also importable from a list sheet with an "Expenses containing" column.
+- Correction (migration `20261104010000_ipd_monthly_totals_long`): the Jan–Sep 2026 IPD monthly totals were long admissions; each is superseded and re-created under "Long Admission" with its payments, and audited. Amounts do not change; Long admissions in department accounts now shows those months.
+
 ## 0.21.1: Diet follow-ups and billed names
 - Correction (migration `20261103010000_plus_named_consultations`): imported bills named with "+" (consultation + ₹200 wellness share) that were filed under the same name without "+" are corrected like a manual correction — the record is superseded and a copy under the right consultation type points back to it, with an audit entry. The original name comes from the import record; amounts do not change.
 - OneGlance OP bill collection exported with "Bill Details: Particulars": the billed item (Particulars) is now the consultation name, specialty and New/Old, and decides Diet ("Diet Follow up") and SCP ("Sugar Control Plan"); Visit Purpose is used only when Particulars is empty.

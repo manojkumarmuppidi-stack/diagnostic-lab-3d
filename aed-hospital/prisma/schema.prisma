@@ -965,6 +965,7 @@ model ServiceDepartment {
   costs        DepartmentCost[]
   heads        User[]
   contributors DepartmentContributor[]
+  staff        StaffDepartment[]
 }
 
 /// A department's share of hospital costs, for department accounts only (it is not a hospital expense):
@@ -979,6 +980,8 @@ model DepartmentCost {
   amount       Decimal           @default(0) @db.Decimal(12, 2)
   percent      Decimal           @default(0) @db.Decimal(6, 2)
   categoryId   String?
+  /// MATCH: hospital expenses whose description or vendor contains one of these (comma-separated), e.g. a doctor's name.
+  matchText    String?
   /// First and last month it applies to ("2026-01"); no last month = every month from then on.
   fromMonth    String
   toMonth      String?
@@ -1017,4 +1020,23 @@ model ContributorIncome {
   updatedAt     DateTime              @updatedAt
 
   @@unique([contributorId, month])
+}
+
+/// Who works for which department, for department accounts: each payroll (bank salary list) upload
+/// books this share of the person's pay to the department, month by month. People not listed are
+/// hospital-wide and not charged to any department.
+model StaffDepartment {
+  id           String            @id @default(cuid())
+  /// Shown on the department statement: "Salary — <label>".
+  label        String
+  /// Names as written in the bank lists (comma-separated), matched without case or punctuation.
+  names        String            @default("")
+  departmentId String
+  department   ServiceDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  percent      Decimal           @default(100) @db.Decimal(5, 2)
+  createdById  String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([label, departmentId])
 }

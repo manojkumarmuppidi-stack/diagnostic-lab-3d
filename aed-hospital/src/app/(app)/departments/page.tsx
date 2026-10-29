@@ -5,7 +5,7 @@
  * Profit = billed income + margin on its pharmacy medicines − its own expenses − staff incentive, with the
  * partner's share (JJ Wellness 20%); then income month by month with the billed items behind it.
  */
-import { Fragment, Suspense, useEffect, useState, type ReactNode } from "react";
+import { Fragment, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronRight, Download, Info, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
@@ -35,6 +35,7 @@ const EMPTY_COST = {
   amount: "",
   percent: "",
   categoryId: "",
+  matchText: "",
   fromMonth: "",
   toMonth: "",
 };
@@ -69,6 +70,7 @@ function CostDialog({
             amount: cost.amount || "",
             percent: cost.percent || "",
             categoryId: cost.categoryId ?? "",
+            matchText: cost.matchText ?? "",
             toMonth: cost.toMonth ?? "",
           }
         : { ...EMPTY_COST, fromMonth: todayISO().slice(0, 7) },
@@ -86,6 +88,7 @@ function CostDialog({
         amount: Number(v.amount) || 0,
         percent: Number(v.percent) || 0,
         categoryId: v.categoryId || null,
+        matchText: v.kind === "MATCH" ? v.matchText : null,
         fromMonth: v.fromMonth,
         toMonth: v.toMonth || null,
       };
@@ -125,9 +128,18 @@ function CostDialog({
             <option value="FIXED">A fixed amount every month</option>
             <option value="SHARE">A % of what the hospital spends on an expense category that month</option>
             <option value="INCOME">A % of this department&apos;s own billed income that month (incentives)</option>
+            <option value="MATCH">The hospital expenses whose description or vendor mentions a name (e.g. a visiting doctor)</option>
           </select>
         </Field>
-        {v.kind === "INCOME" ? (
+        {v.kind === "MATCH" ? (
+          <Field
+            label="Expenses mentioning"
+            required
+            help="Every hospital expense entered with this in its description or vendor is counted here, month by month. Separate spellings with commas, e.g. Geetha Priya, Geethapriya"
+          >
+            <input className="input" value={v.matchText} onChange={(e) => set("matchText", e.target.value)} />
+          </Field>
+        ) : v.kind === "INCOME" ? (
           <Field
             label="Percent of the department's billed income (%)"
             required
@@ -214,6 +226,62 @@ function SheetButton({ departmentId, from, to, label = "Download blank sheet" }:
   );
 }
 
+/** Saved staff → department mapping used by payroll uploads. Change it by importing a "Staff / Department" sheet. */
+function StaffList({ version }: { version: unknown }) {
+  const toast = useToast();
+  const { data, reload } = useApi<any[]>("/api/departments/staff");
+  // The page reloads its data after an import; a staff sheet may have changed this list too.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) first.current = false;
+    else reload();
+  }, [version, reload]);
+  if (!data) return null;
+  if (!data.length) return <p className="text-sm muted">Nobody mapped yet. Import a sheet with the columns Staff and Department (and optionally % to that department).</p>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Staff</th>
+            <th>Also written as</th>
+            <th>Department</th>
+            <th className="text-right">Share</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((r) => (
+            <tr key={r.id}>
+              <td>{r.label}</td>
+              <td className="muted">{r.names}</td>
+              <td>{r.department}</td>
+              <td className="text-right">{r.percent}%</td>
+              <td className="text-right">
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={async () => {
+                    if (!confirm(`Stop charging ${r.label}'s pay to ${r.department}? Costs already imported stay.`)) return;
+                    try {
+                      await apiFetch(`/api/departments/staff/${r.id}`, { method: "DELETE" });
+                      toast("success", "Removed");
+                      reload();
+                    } catch (e: any) {
+                      toast("error", e.message);
+                    }
+                  }}
+                >
+                  Remove
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Upload a costs workbook: for one department, or (with a Department column) for every department. */
 function ImportButton({ departmentId, label = "Import from Excel", onDone }: { departmentId: string | null; label?: string; onDone: () => void }) {
   const toast = useToast();
@@ -234,9 +302,16 @@ function ImportButton({ departmentId, label = "Import from Excel", onDone }: { d
           try {
             const r: any = await apiFetch("/api/departments/import", { method: "POST", body: fd });
             const where = r.departments?.length > 1 ? `${r.departments.length} departments` : r.department;
+            const pay = r.payroll?.months?.length
+              ? ` Payroll ${r.payroll.months.join(", ")}: ${r.payroll.charged} people charged to departments${
+                  r.payroll.notCharged.length ? `; not in any department: ${r.payroll.notCharged.join(", ")}` : ""
+                }.`
+              : "";
             toast(
               "success",
-              `${where}: ${r.costsAdded} costs added, ${r.costsUpdated} updated${r.people ? `, ${r.people} people, ${r.incomeMonths} months of income generated` : ""}`,
+              `${where}: ${r.costsAdded} costs added, ${r.costsUpdated} updated${r.people ? `, ${r.people} people, ${r.incomeMonths} months of income generated` : ""}${
+                r.staff ? `, ${r.staff} staff mapped to departments` : ""
+              }.${pay}`,
             );
             onDone();
           } catch (err: any) {
@@ -966,6 +1041,14 @@ function Inner() {
                     </div>
                     <Overview data={data} selected={st.id} onSelect={(id) => set("dept", id)} />
                     <AllDepartmentsInsights data={data} />
+                    {can("masters.manage") && (
+                      <Section
+                        title="Staff → department (for payroll uploads)"
+                        subtitle="When a bank payroll file is imported, each person's pay is charged to these departments; anyone not listed stays hospital-wide"
+                      >
+                        <StaffList version={data} />
+                      </Section>
+                    )}
                   </>
                 )}
               </>

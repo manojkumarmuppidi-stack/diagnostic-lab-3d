@@ -3,7 +3,20 @@ import { prisma } from "@/server/db";
 import { createTransaction } from "@/server/services/transactions";
 import { createMaster } from "@/server/services/masters";
 import ExcelJS from "exceljs";
-import { deleteContributor, deleteDepartmentCost, departmentAccounts, departmentPatients, expenditureSheet, importDepartmentWorkbook, saveContributor, saveDepartmentCost, setContributorIncome } from "@/server/services/departments";
+import {
+  deleteContributor,
+  deleteDepartmentCost,
+  deleteStaffDepartment,
+  departmentAccounts,
+  listStaffDepartments,
+  monthIn,
+  departmentPatients,
+  expenditureSheet,
+  importDepartmentWorkbook,
+  saveContributor,
+  saveDepartmentCost,
+  setContributorIncome,
+} from "@/server/services/departments";
 import { DEFAULT_DEPARTMENTS } from "@/lib/departments";
 import { createUser, updateUser } from "@/server/services/misc";
 import { seedFixture, type Fixture } from "../helpers/db";
@@ -19,12 +32,23 @@ describe("department accounts", () => {
     const echo = await prisma.labInvestigation.create({ data: { name: "2D Echo", category: "Cardiac", rate: 1500 } });
     const usg = await prisma.labInvestigation.create({ data: { name: "USG Thyroid Doppler Scan", category: "Radiology", rate: 1500 } });
     const scp = (await createMaster(f.admin, "consultationTypes", { name: "Sugar Control Plan", defaultRate: 0 })) as { id: string };
-    const lab = (d: string, id: string, q = 1) => createTransaction(f.admin, "lab", { date: d, patientCode: "P1", patientName: "DEMO A", investigationId: id, quantity: q, paymentModeId: f.ids.CASH });
+    const lab = (d: string, id: string, q = 1) =>
+      createTransaction(f.admin, "lab", { date: d, patientCode: "P1", patientName: "DEMO A", investigationId: id, quantity: q, paymentModeId: f.ids.CASH });
     await lab("2026-09-05", echo.id, 2);
     await lab("2026-10-05", usg.id);
     await lab("2026-10-05", f.ids.ecg);
     await lab("2026-10-06", f.ids.diabProfile);
-    await createTransaction(f.admin, "opd", { date: "2026-10-07", patientCode: "P2", patientName: "DEMO B", specialtyId: f.ids.diabetes, visitType: "OLD", consultationTypeId: scp.id, grossAmount: 3000, discount: 0, paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "opd", {
+      date: "2026-10-07",
+      patientCode: "P2",
+      patientName: "DEMO B",
+      specialtyId: f.ids.diabetes,
+      visitType: "OLD",
+      consultationTypeId: scp.id,
+      grossAmount: 3000,
+      discount: 0,
+      paymentModeId: f.ids.CASH,
+    });
     await createTransaction(f.admin, "pharmacy-sale", { date: "2026-10-07", invoiceNo: "S1", grossAmount: 9999, discount: 0, paymentModeId: f.ids.CASH });
 
     const d = await departmentAccounts(f.admin, { from: "2026-09-01", to: "2026-10-31" });
@@ -42,7 +66,17 @@ describe("department accounts", () => {
     const combo = (await createMaster(f.admin, "consultationTypes", { name: "New Thyroid + Wellness Consultation", defaultRate: 1200 })) as { id: string };
     const plain = (await createMaster(f.admin, "consultationTypes", { name: "Wellness Consultation", defaultRate: 200 })) as { id: string };
     const opd = (d: string, id: string, amt: number) =>
-      createTransaction(f.admin, "opd", { date: d, patientCode: "P3", patientName: "DEMO C", specialtyId: f.ids.diabetes, visitType: "NEW", consultationTypeId: id, grossAmount: amt, discount: 0, paymentModeId: f.ids.CASH });
+      createTransaction(f.admin, "opd", {
+        date: d,
+        patientCode: "P3",
+        patientName: "DEMO C",
+        specialtyId: f.ids.diabetes,
+        visitType: "NEW",
+        consultationTypeId: id,
+        grossAmount: amt,
+        discount: 0,
+        paymentModeId: f.ids.CASH,
+      });
     await opd("2026-10-08", combo.id, 1200);
     await opd("2026-10-09", combo.id, 1200);
     await opd("2026-10-09", plain.id, 200);
@@ -60,16 +94,30 @@ describe("department accounts", () => {
   it("works out a department's statement from its income and the costs allocated to it, and JJ Wellness's 20%", async () => {
     const wellness = await prisma.department.create({ data: { name: "Wellness" } });
     const combo = (await createMaster(f.admin, "consultationTypes", { name: "New Thyroid + Wellness Consultation", defaultRate: 1200 })) as { id: string };
-    await createTransaction(f.admin, "opd", { date: "2026-10-08", patientCode: "P3", patientName: "DEMO C", specialtyId: f.ids.diabetes, visitType: "NEW", consultationTypeId: combo.id, grossAmount: 1200, discount: 0, paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "opd", {
+      date: "2026-10-08",
+      patientCode: "P3",
+      patientName: "DEMO C",
+      specialtyId: f.ids.diabetes,
+      visitType: "NEW",
+      consultationTypeId: combo.id,
+      grossAmount: 1200,
+      discount: 0,
+      paymentModeId: f.ids.CASH,
+    });
     await createTransaction(f.admin, "other-income", { date: "2026-10-05", source: "JJ Wellness MMP package", amount: 100000, paymentModeId: f.ids.CASH, reference: "JJW-P9" });
     const pen = await prisma.pharmacyItem.create({ data: { name: "INJ MOUNJARO KWIKPEN 5mg/0.6ml", form: "INJ" } });
     const tab = await prisma.pharmacyItem.create({ data: { name: "TAB METFORMIN 500", form: "TAB" } });
     const sale = (itemId: string, amount: number, taxable: number, cost: number) =>
-      prisma.pharmacyItemLine.create({ data: { kind: "SALE", date: new Date("2026-10-10"), itemId, qty: 1, amount, taxable, tax: amount - taxable, cost, fingerprint: `t-${itemId}`, createdById: f.admin.id } });
+      prisma.pharmacyItemLine.create({
+        data: { kind: "SALE", date: new Date("2026-10-10"), itemId, qty: 1, amount, taxable, tax: amount - taxable, cost, fingerprint: `t-${itemId}`, createdById: f.admin.id },
+      });
     await sale(pen.id, 21000, 20000, 18000);
     await sale(tab.id, 500, 476, 300);
     const expense = (date: string, categoryId: string, subcategoryId: string | null, amount: number, departmentId: string | null = null) =>
-      prisma.expense.create({ data: { date: new Date(date), departmentId, categoryId, subcategoryId, description: "test", amount, fingerprint: `e-${date}-${amount}`, createdById: f.admin.id } });
+      prisma.expense.create({
+        data: { date: new Date(date), departmentId, categoryId, subcategoryId, description: "test", amount, fingerprint: `e-${date}-${amount}`, createdById: f.admin.id },
+      });
     await expense("2026-10-20", f.ids.groceries, null, 50000);
     await expense("2026-11-20", f.ids.groceries, f.ids.veg, 20000);
     // Booked to the Wellness expense department, but department accounts only count allocated costs.
@@ -214,8 +262,11 @@ describe("department accounts", () => {
     const jjId = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "JJ Wellness" } })).id;
     await createTransaction(f.admin, "other-income", { date: "2026-11-05", source: "JJ Wellness MMP package", amount: 100000, paymentModeId: f.ids.CASH });
     const pen = await prisma.pharmacyItem.create({ data: { name: "INJ MOUNJARO KWIKPEN 5mg/0.6ml", form: "INJ" } });
-    await prisma.pharmacyItemLine.create({ data: { kind: "SALE", date: new Date("2026-11-10"), itemId: pen.id, qty: 1, amount: 21000, taxable: 20000, cost: 18000, fingerprint: "t-pen", createdById: f.admin.id } });
-    for (const who of ["A", "B", "C"]) await saveDepartmentCost(f.admin, null, { departmentId: jjId, label: `Incentive — ${who} (3%)`, kind: "INCOME", percent: 3, fromMonth: "2026-11" });
+    await prisma.pharmacyItemLine.create({
+      data: { kind: "SALE", date: new Date("2026-11-10"), itemId: pen.id, qty: 1, amount: 21000, taxable: 20000, cost: 18000, fingerprint: "t-pen", createdById: f.admin.id },
+    });
+    for (const who of ["A", "B", "C"])
+      await saveDepartmentCost(f.admin, null, { departmentId: jjId, label: `Incentive — ${who} (3%)`, kind: "INCOME", percent: 3, fromMonth: "2026-11" });
     await expect(saveDepartmentCost(f.admin, null, { departmentId: jjId, label: "x", kind: "INCOME", fromMonth: "2026-11" })).rejects.toThrow(/%/);
     const d = await departmentAccounts(f.admin, { from: "2026-11-01", to: "2026-11-30" });
     const jj = d.statements.find((x) => x.name === "JJ Wellness")!;
@@ -250,7 +301,9 @@ describe("department accounts", () => {
     b.addRow(["Department", "What is it", "Amount per month", "From month"]);
     b.addRow(["Radiology wing", "Salary — X", 1000, "Jan 2026"]);
     b.addRow(["", "Salary — Y", 1000, "Jan 2026"]);
-    await expect(importDepartmentWorkbook(f.admin, null, "bad.xlsx", Buffer.from(await bad.xlsx.writeBuffer()))).rejects.toThrow(/no department called "Radiology wing".*choose the department/);
+    await expect(importDepartmentWorkbook(f.admin, null, "bad.xlsx", Buffer.from(await bad.xlsx.writeBuffer()))).rejects.toThrow(
+      /no department called "Radiology wing".*choose the department/,
+    );
   });
 
   it("reads a department's monthly expenditure sheet (months across), and its head can upload it again to correct it", async () => {
@@ -333,5 +386,74 @@ describe("department accounts", () => {
     expect(one.worksheets.map((w) => w.name)).toEqual(["Laboratory"]);
     await expect(expenditureSheet(f.reception, {})).rejects.toThrow();
   });
-});
 
+  it("charges a visiting doctor's hospital expenses to a department by name", async () => {
+    const eye = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Ophthalmology" } })).id;
+    const expense = (date: string, description: string, amount: number, vendor: string | null = null) =>
+      prisma.expense.create({
+        data: { date: new Date(date), categoryId: f.ids.groceries, description, vendor, amount, fingerprint: `m-${date}-${amount}`, createdById: f.admin.id },
+      });
+    await expense("2026-09-03", "Dr. GeethaPriya consultation fee", 8000);
+    await expense("2026-10-03", "Consultations Sept", 9000, "Dr Geetha Priya");
+    await expense("2026-10-04", "Geetha Priya", 1500);
+    await expense("2026-10-05", "Dr. Priya Geetha? no", 999999);
+    await expect(saveDepartmentCost(f.admin, null, { departmentId: eye, label: "Doctor", kind: "MATCH", matchText: " , ", fromMonth: "2026-01" })).rejects.toThrow();
+    await saveDepartmentCost(f.admin, null, {
+      departmentId: eye,
+      label: "Consultations — Dr. Geetha Priya",
+      kind: "MATCH",
+      matchText: "Geetha Priya, Geethapriya",
+      fromMonth: "2026-01",
+    });
+    const d = await departmentAccounts(f.admin, { from: "2026-09-01", to: "2026-10-31" });
+    const st = d.statements.find((x) => x.name === "Ophthalmology")!;
+    expect(st.costLines.map((l) => [l.label, l.byMonth])).toEqual([["Consultations — Dr. Geetha Priya", { "2026-09": 8000, "2026-10": 10500 }]]);
+  });
+
+  it("maps staff to departments once, then charges each payroll upload to them (and a re-upload replaces it)", async () => {
+    expect(monthIn("November_2026_Salaries.xlsx")).toBe("2026-11");
+    expect(monthIn("salaries for the month of March 2026")).toBe("2026-03");
+    const staff = new ExcelJS.Workbook();
+    const s = staff.addWorksheet("Staff → department");
+    s.addRow(["Staff (as in the bank list)", "Also written as", "Department", "% to that department (blank = 100)", "Second department (if shared)"]);
+    s.addRow(["Tech A", "A. Tech, Technician A", "Laboratory", null, null]);
+    s.addRow(["Helper B", "", "USG scan room", 50, "Hospital-wide (Others)"]);
+    s.addRow(["Admin C", "", "Hospital-wide (Others)", null, null]);
+    await expect(importDepartmentWorkbook(f.accounts, null, "staff.xlsx", Buffer.from(await staff.xlsx.writeBuffer()))).rejects.toThrow();
+    expect(await importDepartmentWorkbook(f.admin, null, "staff.xlsx", Buffer.from(await staff.xlsx.writeBuffer()))).toMatchObject({ staff: 3, costsAdded: 0 });
+    expect((await listStaffDepartments(f.admin)).map((r) => [r.label, r.department, r.percent])).toEqual([
+      ["Helper B", "USG scan room", 50],
+      ["Tech A", "Laboratory", 100],
+    ]);
+
+    const payroll = async (rows: [string, number][]) => {
+      const wb = new ExcelJS.Workbook();
+      const w = wb.addWorksheet("Sheet1");
+      w.addRow(["SNO", "NAME", "AMOUNT", "BANK", "IFSC CODE", "ACCOUNT NO"]);
+      rows.forEach(([n, a], i) => w.addRow([i + 1, n, a, "BANK", "TEST0000001", "000"]));
+      w.addRow([null, null, rows.reduce((t, [, a]) => t + a, 0)]);
+      return Buffer.from(await wb.xlsx.writeBuffer());
+    };
+    const nov = await payroll([
+      ["Technician A", 20000],
+      ["Helper B", 30000],
+      ["Admin C", 90000],
+      ["New Person", 10000],
+    ]);
+    await expect(importDepartmentWorkbook(f.admin, null, "payroll.xlsx", nov)).rejects.toThrow(/which month/);
+    const r = await importDepartmentWorkbook(f.admin, null, "November 2026 Salaries.xlsx", nov);
+    expect(r.payroll).toEqual({ months: ["2026-11"], charged: 2, notCharged: ["Admin C", "New Person"] });
+    const costs = await prisma.departmentCost.findMany({ include: { department: true }, orderBy: { label: "asc" } });
+    expect(costs.map((c) => [c.department.name, c.label, Number(c.amount), c.fromMonth, c.toMonth])).toEqual([
+      ["USG scan room", "Salary — Helper B", 15000, "2026-11", "2026-11"],
+      ["Laboratory", "Salary — Tech A", 20000, "2026-11", "2026-11"],
+    ]);
+    // A corrected November file replaces November, it does not add to it.
+    await importDepartmentWorkbook(f.admin, null, "November 2026 Salaries.xlsx", await payroll([["Tech A", 21000]]));
+    expect((await prisma.departmentCost.findMany({ where: { label: "Salary — Tech A" } })).map((c) => Number(c.amount))).toEqual([21000]);
+
+    const helper = (await listStaffDepartments(f.admin)).find((x) => x.label === "Helper B")!;
+    await deleteStaffDepartment(f.admin, helper.id);
+    expect((await importDepartmentWorkbook(f.admin, null, "December 2026 Salaries.xlsx", await payroll([["Helper B", 1]]))).payroll.notCharged).toEqual(["Helper B"]);
+  });
+});

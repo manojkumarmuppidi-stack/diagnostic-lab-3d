@@ -155,7 +155,7 @@ export async function departmentAccounts(actor: Actor, q: { from?: string | null
   const rest = finish([...unassigned.values()].sort((a, b) => b.total - a.total));
   const totals: Record<string, number> = {};
   for (const m of months) totals[m] = round2([...departments, ...rest].reduce((a, g) => a + (g.byMonth[m] ?? 0), 0));
-  const profit = await departmentProfit(depts, departments, months, calendarMonths, byDay, costs, medicineRows, contributors);
+  const profit = await departmentProfit(depts, departments, months, calendarMonths, byDay, costs, medicineRows, contributors, { from, to, fmt });
   const result = {
     from,
     to,
@@ -229,12 +229,26 @@ async function departmentProfit(
     amount: Prisma.Decimal;
     percent: Prisma.Decimal;
     categoryId: string | null;
+    matchText?: string | null;
     fromMonth: string;
     toMonth: string | null;
   }[],
   medicineRows: { m: string; name: string; amount: Prisma.Decimal; taxable: Prisma.Decimal | null; cost: Prisma.Decimal | null; nocost: bigint }[],
   contributors: { id: string; departmentId: string; name: string; incentivePct: Prisma.Decimal; incomes: { month: string; amount: Prisma.Decimal }[] }[],
+  range: { from: ISODate; to: ISODate; fmt: string },
 ) {
+  // MATCH costs: the hospital's own expenses for this person/thing, picked up by description or vendor.
+  const matched = new Map<string, Money>();
+  for (const c of costs.filter((x) => x.kind === "MATCH" && x.matchText)) {
+    const patterns = matchPatterns(c.matchText!);
+    if (!patterns.length) continue;
+    const rows = await prisma.$queryRaw<{ b: string; amount: Prisma.Decimal }[]>`
+      SELECT to_char(e.date, ${range.fmt}) AS b, SUM(e.amount) AS amount FROM "Expense" e
+       WHERE e.status = 'ACTIVE' AND e.date BETWEEN ${toDbDate(range.from)} AND ${toDbDate(range.to)}
+         AND (lower(e.description) LIKE ANY(${patterns}) OR lower(COALESCE(e.vendor, '')) LIKE ANY(${patterns}))
+       GROUP BY 1`;
+    matched.set(c.id, Object.fromEntries(rows.map((r) => [r.b, toNum(r.amount)])));
+  }
   const categoryIds = [...new Set(costs.filter((c) => c.kind === "SHARE" && c.categoryId).map((c) => c.categoryId!))];
   const [byCategory, categories] = await Promise.all([
     categoryTotals(categoryIds, calendarMonths),
@@ -280,6 +294,7 @@ async function departmentProfit(
         let v: number;
         // INCOME: a % of the department's own billed income in that column (incentives); not of the injection margin.
         if (c.kind === "INCOME") v = round2(((g.byMonth[m] ?? 0) * toNum(c.percent)) / 100);
+        else if (c.kind === "MATCH") v = round2(matched.get(c.id)?.[m] ?? 0);
         else {
           const monthly = c.kind === "SHARE" ? ((byCategory.get(c.categoryId ?? "")?.[month] ?? 0) * toNum(c.percent)) / 100 : toNum(c.amount);
           v = round2(byDay ? monthly / daysIn(month) : monthly);
@@ -291,7 +306,9 @@ async function departmentProfit(
           ? `${toNum(c.percent)}% of ${catName.get(c.categoryId ?? "") ?? "a deleted category"}`
           : c.kind === "INCOME"
             ? `${toNum(c.percent)}% of ${d.name}'s billed income (not the injection margin)`
-            : `₹${toNum(c.amount).toLocaleString("en-IN")} a month`;
+            : c.kind === "MATCH"
+              ? `hospital expenses mentioning "${c.matchText}"`
+              : `₹${toNum(c.amount).toLocaleString("en-IN")} a month`;
       costLines.push({ id: c.id, label: c.label, basis: `${basis} · ${c.fromMonth}${c.toMonth ? ` to ${c.toMonth}` : " onwards"}`, byMonth, total: sum(byMonth) });
     }
     // People who bring income in: their incentive is a % of the income they generated that month.
@@ -370,22 +387,36 @@ const formatShort = (v: number) => `₹${Math.round(v).toLocaleString("en-IN")}`
 // ─────────────────────────── allocated costs ───────────────────────────
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/** "Geetha Priya, Geeta Priya" → ["%geetha%priya%", "%geeta%priya%"] (also catches "Dr.GeethaPriya"). */
+export function matchPatterns(text: string): string[] {
+  return text
+    .split(/[,\n]/)
+    .map((t) => norm(t).split(" ").filter(Boolean))
+    .filter((w) => w.length)
+    .map((w) => `%${w.join("%")}%`);
+}
 const costInput = z
   .object({
     departmentId: z.string().min(1),
     label: z.string().trim().min(1).max(120),
-    kind: z.enum(["FIXED", "SHARE", "INCOME"]),
+    kind: z.enum(["FIXED", "SHARE", "INCOME", "MATCH"]),
     amount: z.coerce.number().min(0).max(99_99_99_999).default(0),
     percent: z.coerce.number().min(0).max(100).default(0),
     categoryId: z.string().nullable().optional(),
+    matchText: z.string().trim().max(200).nullable().optional(),
     fromMonth: z.string().regex(MONTH, "Choose the first month"),
     toMonth: z.string().regex(MONTH).nullable().optional(),
   })
   .refine((c) => !c.toMonth || c.toMonth >= c.fromMonth, { message: "The last month is before the first month", path: ["toMonth"] })
-  .refine((c) => (c.kind === "FIXED" ? c.amount > 0 : c.kind === "INCOME" ? c.percent > 0 : c.percent > 0 && !!c.categoryId), {
-    message: "Enter the amount, or the %, and for a share of hospital spending the expense category",
-    path: ["amount"],
-  });
+  .refine(
+    (c) =>
+      c.kind === "FIXED" ? c.amount > 0 : c.kind === "INCOME" ? c.percent > 0 : c.kind === "MATCH" ? matchPatterns(c.matchText ?? "").length > 0 : c.percent > 0 && !!c.categoryId,
+    {
+      message: "Enter the amount, the %, the expense category, or the words to look for in expenses",
+      path: ["amount"],
+    },
+  );
 
 export async function listDepartmentCostOptions(actor: Actor) {
   const own = scopeOf(actor);
@@ -406,8 +437,9 @@ export async function saveDepartmentCost(actor: Actor, id: string | null, raw: u
   const data = {
     ...c,
     amount: c.kind === "FIXED" ? c.amount : 0,
-    percent: c.kind === "FIXED" ? 0 : c.percent,
+    percent: c.kind === "SHARE" || c.kind === "INCOME" ? c.percent : 0,
     categoryId: c.kind === "SHARE" ? c.categoryId! : null,
+    matchText: c.kind === "MATCH" ? c.matchText! : null,
     toMonth: c.toMonth || null,
   };
   return prisma.$transaction(async (tx) => {
@@ -528,6 +560,24 @@ export async function deleteContributor(actor: Actor, id: string) {
   });
 }
 
+/** Who is charged to which department when a bank payroll file is uploaded. */
+export async function listStaffDepartments(actor: Actor) {
+  requireAdmin(actor);
+  const rows = await prisma.staffDepartment.findMany({ include: { department: { select: { name: true } } }, orderBy: [{ label: "asc" }, { percent: "desc" }] });
+  return rows.map((r) => ({ id: r.id, label: r.label, names: r.names, department: r.department.name, percent: Number(r.percent) }));
+}
+
+export async function deleteStaffDepartment(actor: Actor, id: string) {
+  requireAdmin(actor);
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.staffDepartment.findUnique({ where: { id } });
+    if (!before) throw notFound("Not found");
+    await tx.staffDepartment.delete({ where: { id } });
+    await audit(tx, actor, { action: "DEPT_STAFF_DELETE", entityType: "StaffDepartment", entityId: id, before });
+    return { ok: true };
+  });
+}
+
 /** The income a person generated in one month (empty or 0 clears it). */
 export async function setContributorIncome(actor: Actor, id: string, raw: unknown) {
   requireAdmin(actor);
@@ -603,9 +653,11 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
   const { readSpreadsheet } = await import("../spreadsheet");
   const sheets = await readSpreadsheet(fileName, buf);
   const key = (h: string) => norm(h);
-  const costs: { departmentId: string; label: string; amount: number; percent: number; fromMonth: string; toMonth: string | null; row: number }[] = [];
+  const costs: { departmentId: string; label: string; amount: number; percent: number; matchText: string | null; fromMonth: string; toMonth: string | null; row: number }[] = [];
   const people: { name: string; pct: number; incomes: [string, number | null][]; row: number }[] = [];
   const errors: string[] = [];
+  const staff: { label: string; names: string; parts: { departmentId: string; percent: number }[] }[] = [];
+  const payroll: { name: string; amount: number; month: string }[] = [];
   // Month-grid sheets: one row per cost, one column per month (the department's monthly expenditure sheet).
   const grid = new Map<string, { departmentId: string; label: string; months: Map<string, number>; from: string; to: string }>();
   for (const sh of sheets) {
@@ -615,6 +667,57 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     const amountCol = col("amount per month", "amount", "monthly amount");
     const fromCol = col("from month", "from");
     const personCol = col("person", "name");
+    // Staff → department list ("Staff (as in the bank list) | Also written as | Department | % | Second department").
+    const staffCol = sh.headers[hs.findIndex((h) => h.startsWith("staff"))];
+    const staffDeptCol = sh.headers[hs.findIndex((h) => h.startsWith("department"))];
+    if (staffCol && staffDeptCol) {
+      const alsoCol = sh.headers[hs.findIndex((h) => h.startsWith("also written"))];
+      const pctCol = sh.headers.find((h) => /^\s*(%|percent|share\b)/i.test(h));
+      const secondCol = sh.headers[hs.findIndex((h) => h.startsWith("second department"))];
+      for (const r of sh.rows) {
+        const label = String(r.values[staffCol] ?? "").trim();
+        if (!label || /^total$/i.test(label)) continue;
+        const names = [label, ...String((alsoCol && r.values[alsoCol]) ?? "").split(",")].map((x) => x.trim()).filter(Boolean);
+        const first = String(r.values[staffDeptCol] ?? "").trim();
+        const second = secondCol ? String(r.values[secondCol] ?? "").trim() : "";
+        const notCharged = (v: string) => !v || /hospital[- ]wide|others?\b|skip/i.test(v);
+        const pct = pctCol ? amountOf(r.values[pctCol]) : null;
+        const share = pct === null ? 100 : pct;
+        if (Number.isNaN(share) || share < 0 || share > 100) {
+          errors.push(`${sh.name} row ${r.rowNumber}: % must be 0–100`);
+          continue;
+        }
+        const parts: { departmentId: string; percent: number }[] = [];
+        for (const [v, p] of [
+          [first, share],
+          [second, 100 - share],
+        ] as const) {
+          if (notCharged(v) || !(p > 0)) continue;
+          const d = findDept(v);
+          if (!d) errors.push(`${sh.name} row ${r.rowNumber}: no department called "${v}"`);
+          else parts.push({ departmentId: d.id, percent: round2(p) });
+        }
+        staff.push({ label: label.slice(0, 80), names: names.join(", "), parts });
+      }
+      continue;
+    }
+    // Bank salary list ("NAME | AMOUNT | BANK | IFSC CODE | ACCOUNT NO"): each listed person's pay, for one month.
+    const nameCol = col("name", "employee name", "staff name");
+    const payCol = col("amount", "net pay", "salary");
+    if (nameCol && payCol && (col("account no", "account number", "a c no") || col("ifsc code", "ifsc"))) {
+      const month = (sh.preamble ?? []).map((l) => monthIn(l)).find(Boolean) ?? monthIn(fileName) ?? monthIn(sh.name);
+      if (!month) {
+        errors.push(`${sh.name}: which month is this payroll for? Name the file like "November 2026 Salaries.xlsx"`);
+        continue;
+      }
+      for (const r of sh.rows) {
+        const name = String(r.values[nameCol] ?? "").trim();
+        const pay = amountOf(r.values[payCol]);
+        if (!name || pay === null || Number.isNaN(pay) || pay <= 0) continue;
+        payroll.push({ name, amount: pay, month });
+      }
+      continue;
+    }
     const catCol = col("category", "expense head", "head", "type");
     const monthCols = sh.headers.map((h) => [h, monthOf(h)] as const).filter(([, m]) => m) as [string, string][];
     if (catCol && monthCols.length && !amountCol && !personCol) {
@@ -672,6 +775,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
       const pctCol = col("% of department income", "percent of department income", "% of income");
       const deptCol = col("department", "dept");
       const typeCol = col("type", "cost type", "kind");
+      const matchCol = col("expenses containing", "expense containing", "expenses mentioning");
       for (const r of sh.rows) {
         let label = String(r.values[labelCol] ?? "").trim();
         if (!label) continue;
@@ -690,8 +794,9 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
         const toMonth = untilCol ? monthOf(r.values[untilCol]) : null;
         const hasAmount = amount !== null && !Number.isNaN(amount) && amount > 0;
         const hasPct = percent !== null && !Number.isNaN(percent) && percent > 0 && percent <= 100;
-        if (!fromMonth || hasAmount === hasPct) {
-          errors.push(`${sh.name} row ${r.rowNumber}: needs a first month and either an amount or a % of department income`);
+        const matchText = matchCol ? String(r.values[matchCol] ?? "").trim() : "";
+        if (!fromMonth || [hasAmount, hasPct, !!matchText].filter(Boolean).length !== 1) {
+          errors.push(`${sh.name} row ${r.rowNumber}: needs a first month and one of: an amount, a % of department income, or words to find in expenses`);
           continue;
         }
         if (toMonth && toMonth < fromMonth) {
@@ -703,6 +808,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
           label: label.slice(0, 120),
           amount: hasAmount ? round2(amount!) : 0,
           percent: hasPct ? round2(percent!) : 0,
+          matchText: matchText || null,
           fromMonth,
           toMonth,
           row: r.rowNumber,
@@ -730,7 +836,40 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     }
   }
   if (errors.length) throw badRequest(`Nothing was saved. Fix these rows: ${errors.slice(0, 8).join("; ")}${errors.length > 8 ? ` (and ${errors.length - 8} more)` : ""}`);
-  if (!costs.length && !people.length && !grid.size)
+  // Payroll: each listed person's pay goes to their department(s) by the staff list (this file's, else the saved one).
+  const payrollResult = { months: [] as string[], charged: 0, notCharged: [] as string[] };
+  if (payroll.length) {
+    const saved = await prisma.staffDepartment.findMany();
+    const byLabel = new Map<string, { label: string; names: string; parts: { departmentId: string; percent: number }[] }>();
+    for (const m of saved) {
+      const e = byLabel.get(m.label) ?? { label: m.label, names: m.names, parts: [] };
+      e.parts.push({ departmentId: m.departmentId, percent: toNum(m.percent) });
+      byLabel.set(m.label, e);
+    }
+    for (const m of staff) byLabel.set(m.label, m);
+    const index = new Map<string, { label: string; parts: { departmentId: string; percent: number }[] }>();
+    for (const m of byLabel.values()) for (const n of [m.label, ...m.names.split(",")]) if (norm(n)) index.set(norm(n), m);
+    for (const p of payroll) {
+      if (!payrollResult.months.includes(p.month)) payrollResult.months.push(p.month);
+      const m = index.get(norm(p.name));
+      if (!m || !m.parts.length) {
+        payrollResult.notCharged.push(p.name);
+        continue;
+      }
+      payrollResult.charged++;
+      for (const part of m.parts) {
+        const label = `Salary — ${m.label}`.slice(0, 120);
+        const k = `${part.departmentId}|${label}`;
+        const g = grid.get(k) ?? { departmentId: part.departmentId, label, months: new Map(), from: p.month, to: p.month };
+        g.from = g.from < p.month ? g.from : p.month;
+        g.to = g.to > p.month ? g.to : p.month;
+        g.months.set(p.month, round2((g.months.get(p.month) ?? 0) + (p.amount * part.percent) / 100));
+        grid.set(k, g);
+      }
+    }
+  }
+  if ((staff.length || payroll.length) && !admin) throw forbidden("Only an Admin can upload payroll or the staff list");
+  if (!costs.length && !people.length && !grid.size && !staff.length && !payroll.length)
     throw badRequest(
       'No amounts found. In the monthly expenditure sheet, type the names/items and the rupees paid under each month; or use a sheet with "What is it | Amount per month | From month | Until month".',
     );
@@ -742,6 +881,12 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
   return prisma.$transaction(async (tx) => {
     let added = 0;
     let updated = 0;
+    // The staff list replaces what was saved for the same people.
+    for (const m of staff) {
+      await tx.staffDepartment.deleteMany({ where: { label: m.label } });
+      for (const part of m.parts)
+        await tx.staffDepartment.create({ data: { label: m.label, names: m.names, departmentId: part.departmentId, percent: part.percent, createdById: actor.id } });
+    }
     // A month-grid replaces what was there for the same cost in the months it covers, so a corrected
     // sheet can be uploaded again without counting anything twice. Equal amounts in a row become one range.
     for (const g of grid.values()) {
@@ -760,7 +905,14 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     }
     for (const c of costs) {
       const existing = await tx.departmentCost.findFirst({ where: { departmentId: c.departmentId, label: c.label, fromMonth: c.fromMonth } });
-      const data = { kind: c.percent ? "INCOME" : "FIXED", amount: c.amount, percent: c.percent, categoryId: null, toMonth: c.toMonth };
+      const data = {
+        kind: c.matchText ? "MATCH" : c.percent ? "INCOME" : "FIXED",
+        amount: c.amount,
+        percent: c.percent,
+        matchText: c.matchText,
+        categoryId: null,
+        toMonth: c.toMonth,
+      };
       if (existing) {
         await tx.departmentCost.update({ where: { id: existing.id }, data });
         updated++;
@@ -797,10 +949,19 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
       people: people.length,
       incomeMonths,
       departments: perDepartment,
+      staff: staff.length,
+      payroll: payrollResult,
     };
     await audit(tx, actor, { action: "DEPT_IMPORT", entityType: "ServiceDepartment", entityId: dept?.id ?? "all", after: { fileName, ...result } });
     return result;
   });
+}
+
+const MONTHS3 = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+/** "salaries for the month of March 2026", "October_2026_Salaries.xlsx" → "2026-10". */
+export function monthIn(text: string | null | undefined): string | null {
+  const m = /(?<![a-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s_.\-,']*(20\d\d)(?!\d)/i.exec(text ?? "");
+  return m ? `${m[2]}-${String(MONTHS3.indexOf(m[1].toLowerCase()) + 1).padStart(2, "0")}` : null;
 }
 
 /** "Salaries" + "Ravi" → "Salary — Ravi"; the kind in front makes costs group by kind on the statement. */
