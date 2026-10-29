@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { createTransaction } from "@/server/services/transactions";
 import { createMaster } from "@/server/services/masters";
-import { deleteContributor, deleteDepartmentCost, departmentAccounts, departmentPatients, saveContributor, saveDepartmentCost, setContributorIncome } from "@/server/services/departments";
+import ExcelJS from "exceljs";
+import { deleteContributor, deleteDepartmentCost, departmentAccounts, departmentPatients, importDepartmentWorkbook, saveContributor, saveDepartmentCost, setContributorIncome } from "@/server/services/departments";
 import { DEFAULT_DEPARTMENTS } from "@/lib/departments";
 import { createUser, updateUser } from "@/server/services/misc";
 import { seedFixture, type Fixture } from "../helpers/db";
@@ -168,6 +169,36 @@ describe("department accounts", () => {
     expect(head.statements[0].contributors[0]).toMatchObject({ totalGenerated: 70000, totalIncentive: 7000 });
     await deleteContributor(f.admin, person.id);
     expect(await prisma.contributorIncome.count()).toBe(0);
+  });
+
+  it("books a department's costs and people from one Excel file, and a second upload updates instead of repeating", async () => {
+    const jjId = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "JJ Wellness" } })).id;
+    const wb = new ExcelJS.Workbook();
+    const c = wb.addWorksheet("Costs");
+    c.addRow(["What is it", "Amount per month", "From month", "Until month"]);
+    c.addRow(["Salary — Staff A", 20000, "Apr 2026", ""]);
+    c.addRow(["Salary — Staff B", 8000, "2026-05", "Jun 2026"]);
+    const p = wb.addWorksheet("People");
+    p.addRow(["Person", "Incentive %", "Sep 2026", "Oct 2026"]);
+    p.addRow(["Earner A", 3, 100000, null]);
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    expect(await importDepartmentWorkbook(f.admin, jjId, "jj.xlsx", buf)).toMatchObject({ costsAdded: 2, costsUpdated: 0, people: 1, incomeMonths: 1 });
+    expect(await importDepartmentWorkbook(f.admin, jjId, "jj.xlsx", buf)).toMatchObject({ costsAdded: 0, costsUpdated: 2 });
+    await expect(importDepartmentWorkbook(f.reception, jjId, "jj.xlsx", buf)).rejects.toThrow(/Admin/);
+
+    const d = await departmentAccounts(f.admin, { from: "2026-04-01", to: "2026-10-31" });
+    const jj = d.statements.find((x) => x.name === "JJ Wellness")!;
+    expect(jj.costLines.map((l) => [l.label, l.total])).toEqual([
+      ["Salary — Staff A", 140000],
+      ["Salary — Staff B", 16000],
+      ["Incentive — Earner A", 3000],
+    ]);
+
+    const bad = new ExcelJS.Workbook();
+    const b = bad.addWorksheet("Costs");
+    b.addRow(["What is it", "Amount per month", "From month", "Until month"]);
+    b.addRow(["Salary — Staff C", "", "Apr 2026", ""]);
+    await expect(importDepartmentWorkbook(f.admin, jjId, "bad.xlsx", Buffer.from(await bad.xlsx.writeBuffer()))).rejects.toThrow(/Nothing was saved/);
   });
 });
 

@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.19.0: Incentives on income generated
+- Department statement: "Import from Excel" (Admin) books salaries and other monthly costs (What is it · Amount per month · From month · Until month) and people with their incentive % and monthly income generated (Person · Incentive % · one column per month) in one upload; uploading again updates the same rows.
 - Department statement: "People bringing income" — the Admin adds each person (or pair) with their incentive %, and records the income they generated each month. Their incentive (% × income generated) appears under the department's costs; the income generated is not added to the department's income, which comes from the bills. Heads see it; only the Admin changes it (migration `20261102000000_department_contributors`).
 
 ## 0.18.0: Department heads and day-by-day view

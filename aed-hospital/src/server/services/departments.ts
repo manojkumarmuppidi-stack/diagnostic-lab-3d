@@ -10,6 +10,7 @@ import { z } from "zod";
 import { addDays, addMonths, endOfMonth, isISODate, startOfMonth, todayISO, toDbDate, type ISODate } from "@/lib/dates";
 import { addOnSplit, compileDepartments, departmentFor, pharmacyDepartmentFor } from "@/lib/departments";
 import { STREAM_LABELS, type IncomeStream } from "@/lib/accounting";
+import { norm } from "@/lib/import/text";
 import { round2, toNum } from "@/lib/money";
 import { can, type Actor } from "../authz";
 import { prisma } from "../db";
@@ -489,4 +490,125 @@ export async function setContributorIncome(actor: Actor, id: string, raw: unknow
 
 function requireAdmin(actor: Actor) {
   if (!can(actor, "masters.manage")) throw forbidden("Only an Admin can change incentives");
+}
+
+// ─────────────────────────── import costs and people from Excel ───────────────────────────
+
+const MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** "2026-04", "Apr 2026", "April 2026", "04/2026" or an Excel date → "2026-04"; null when it is not a month. */
+export function monthOf(v: unknown): string | null {
+  const s = String(v ?? "").trim().toLowerCase();
+  let m = /^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/.exec(s);
+  if (m && +m[2] >= 1 && +m[2] <= 12) return `${m[1]}-${m[2].padStart(2, "0")}`;
+  m = /^([a-z]{3})[a-z]*[\s'-]*(\d{2}|\d{4})$/.exec(s);
+  if (m && MONTH_NAMES.includes(m[1])) return `${m[2].length === 2 ? `20${m[2]}` : m[2]}-${String(MONTH_NAMES.indexOf(m[1]) + 1).padStart(2, "0")}`;
+  m = /^(\d{1,2})[/.-](\d{4})$/.exec(s);
+  if (m && +m[1] >= 1 && +m[1] <= 12) return `${m[2]}-${m[1].padStart(2, "0")}`;
+  return null;
+}
+
+const amountOf = (v: unknown) => {
+  if (v === null || v === undefined || String(v).trim() === "") return null;
+  const n = Number(String(v).replace(/[₹,\s]/g, ""));
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/**
+ * One workbook books a department's costs and people:
+ *  - a sheet with "What is it | Amount per month | From month | Until month": fixed monthly costs
+ *    (salaries, other expenses); a row with the same name and first month is updated, not repeated;
+ *  - a sheet with "Person | Incentive % | <one column per month>": people who bring income, with the
+ *    income they generated each month.
+ */
+export async function importDepartmentWorkbook(actor: Actor, departmentId: string, fileName: string, buf: Buffer) {
+  requireAdmin(actor);
+  const dept = await prisma.serviceDepartment.findUnique({ where: { id: departmentId } });
+  if (!dept) throw notFound("Department not found");
+  const { readSpreadsheet } = await import("../spreadsheet");
+  const sheets = await readSpreadsheet(fileName, buf);
+  const key = (h: string) => norm(h);
+  const costs: { label: string; amount: number; fromMonth: string; toMonth: string | null; row: number }[] = [];
+  const people: { name: string; pct: number; incomes: [string, number | null][]; row: number }[] = [];
+  const errors: string[] = [];
+  for (const sh of sheets) {
+    const hs = sh.headers.map(key);
+    const col = (...names: string[]) => sh.headers[hs.findIndex((h) => names.includes(h))];
+    const labelCol = col("what is it", "label", "cost", "description");
+    const amountCol = col("amount per month", "amount", "monthly amount");
+    const fromCol = col("from month", "from");
+    const personCol = col("person", "name");
+    if (labelCol && amountCol && fromCol) {
+      const untilCol = col("until month", "until", "to month", "to");
+      for (const r of sh.rows) {
+        const label = String(r.values[labelCol] ?? "").trim();
+        if (!label) continue;
+        const amount = amountOf(r.values[amountCol]);
+        const fromMonth = monthOf(r.values[fromCol]);
+        const toMonth = untilCol ? monthOf(r.values[untilCol]) : null;
+        if (amount === null || Number.isNaN(amount) || amount <= 0 || !fromMonth) {
+          errors.push(`${sh.name} row ${r.rowNumber}: needs an amount and a first month`);
+          continue;
+        }
+        if (toMonth && toMonth < fromMonth) {
+          errors.push(`${sh.name} row ${r.rowNumber}: last month is before the first month`);
+          continue;
+        }
+        costs.push({ label: label.slice(0, 120), amount: round2(amount), fromMonth, toMonth, row: r.rowNumber });
+      }
+    } else if (personCol) {
+      const pctCol = col("incentive %", "incentive", "incentive percent");
+      const monthCols = sh.headers.map((h) => [h, monthOf(h)] as const).filter(([, m]) => m) as [string, string][];
+      for (const r of sh.rows) {
+        const name = String(r.values[personCol] ?? "").trim();
+        if (!name || /^total$/i.test(name)) continue;
+        const pct = pctCol ? (amountOf(r.values[pctCol]) ?? 0) : 0;
+        if (Number.isNaN(pct) || pct < 0 || pct > 100) {
+          errors.push(`${sh.name} row ${r.rowNumber}: incentive % must be 0–100`);
+          continue;
+        }
+        const incomes: [string, number | null][] = [];
+        for (const [h, m] of monthCols) {
+          const a = amountOf(r.values[h]);
+          if (Number.isNaN(a) || (a !== null && a < 0)) errors.push(`${sh.name} row ${r.rowNumber}, ${h}: not an amount`);
+          else incomes.push([m, a]);
+        }
+        people.push({ name: name.slice(0, 80), pct: round2(pct), incomes, row: r.rowNumber });
+      }
+    }
+  }
+  if (errors.length) throw badRequest(`Nothing was saved. Fix these rows: ${errors.slice(0, 8).join("; ")}${errors.length > 8 ? ` (and ${errors.length - 8} more)` : ""}`);
+  if (!costs.length && !people.length)
+    throw badRequest('No costs or people found. Use a sheet with "What is it | Amount per month | From month | Until month" and/or one with "Person | Incentive % | <months>".');
+  return prisma.$transaction(async (tx) => {
+    let added = 0;
+    let updated = 0;
+    for (const c of costs) {
+      const existing = await tx.departmentCost.findFirst({ where: { departmentId, label: c.label, fromMonth: c.fromMonth } });
+      const data = { kind: "FIXED", amount: c.amount, percent: 0, categoryId: null, toMonth: c.toMonth };
+      if (existing) {
+        await tx.departmentCost.update({ where: { id: existing.id }, data });
+        updated++;
+      } else {
+        await tx.departmentCost.create({ data: { ...data, departmentId, label: c.label, fromMonth: c.fromMonth, createdById: actor.id } });
+        added++;
+      }
+    }
+    let incomeMonths = 0;
+    for (const p of people) {
+      const existing = await tx.departmentContributor.findFirst({ where: { departmentId, name: p.name } });
+      const person = existing
+        ? await tx.departmentContributor.update({ where: { id: existing.id }, data: { incentivePct: p.pct, active: true } })
+        : await tx.departmentContributor.create({ data: { departmentId, name: p.name, incentivePct: p.pct, createdById: actor.id } });
+      for (const [month, amount] of p.incomes) {
+        if (amount) {
+          await tx.contributorIncome.upsert({ where: { contributorId_month: { contributorId: person.id, month } }, create: { contributorId: person.id, month, amount }, update: { amount } });
+          incomeMonths++;
+        } else await tx.contributorIncome.deleteMany({ where: { contributorId: person.id, month } });
+      }
+    }
+    const result = { department: dept.name, costsAdded: added, costsUpdated: updated, people: people.length, incomeMonths };
+    await audit(tx, actor, { action: "DEPT_IMPORT", entityType: "ServiceDepartment", entityId: departmentId, after: { fileName, ...result } });
+    return result;
+  });
 }

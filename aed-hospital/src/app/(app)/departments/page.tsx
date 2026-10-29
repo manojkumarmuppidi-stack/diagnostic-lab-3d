@@ -8,7 +8,7 @@
 import { Fragment, Suspense, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, Info, Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Info, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
 import { apiFetch, useApi } from "@/lib/client";
 import { endOfMonth, todayISO } from "@/lib/dates";
 import { mLabel } from "@/lib/entities";
@@ -286,11 +286,38 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
         </span>
       }
       actions={
-        edit && (
-          <Button size="sm" onClick={() => setDialog({ cost: null })}>
-            <Plus className="h-4 w-4" /> Add cost
-          </Button>
-        )
+        <span className="flex flex-wrap gap-2">
+          {admin && (
+            <label className="btn btn-secondary btn-sm cursor-pointer" title="Salaries, other costs and people's income generated, from one Excel file">
+              <Upload className="h-4 w-4" /> Import from Excel
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="sr-only"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  const fd = new FormData();
+                  fd.append("file", file);
+                  fd.append("departmentId", st.id);
+                  try {
+                    const r: any = await apiFetch("/api/departments/import", { method: "POST", body: fd });
+                    toast("success", `${r.department}: ${r.costsAdded} costs added, ${r.costsUpdated} updated, ${r.people} people, ${r.incomeMonths} months of income generated`);
+                    changed();
+                  } catch (err: any) {
+                    toast("error", err.message);
+                  }
+                }}
+              />
+            </label>
+          )}
+          {edit && (
+            <Button size="sm" onClick={() => setDialog({ cost: null })}>
+              <Plus className="h-4 w-4" /> Add cost
+            </Button>
+          )}
+        </span>
       }
     >
       <div className="overflow-x-auto">
