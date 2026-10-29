@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.20.0: Department insights and graphs
+- Department accounts: costs grouped into Salaries, Incentives, Space/rent/utilities and Other (tap to see and edit each item), like income.
+- Insights and graphs in dropdowns for the selected department (findings, income vs costs, profit and margin trend, income by source and costs by kind, partner share vs AED) and for all departments (findings, profit by department, income vs costs by department). Tables and graphs fold away so the page stays short.
+
 ## 0.19.1: Incentives as a % of a department's income
 - New role "Department head" with no other access: together with "Department head of" in Staff logins, the login sees only that department in Department accounts and lands there after sign-in.
 - Department Excel import: the "% of department income" column is recognised (the % sign was dropped when matching headers).

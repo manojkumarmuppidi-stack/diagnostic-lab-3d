@@ -11,49 +11,13 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronRight, Info, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
 import { apiFetch, useApi } from "@/lib/client";
 import { endOfMonth, todayISO } from "@/lib/dates";
-import { mLabel } from "@/lib/entities";
 import { formatINR, formatINRCompact, formatNumber } from "@/lib/money";
 import { recentMonths } from "@/lib/periods";
 import { STREAM_LABELS } from "@/lib/accounting";
 import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Modal, PageHeader, Spinner, useToast } from "@/components/ui";
 import { useCan, useSession } from "@/components/session";
 import { BarsChart, ChartCard, SLOT } from "@/components/charts/Charts";
-
-/** Income lines grouped by source, so a department with many billed items stays one screen tall. */
-const SOURCE_LABELS: Record<string, string> = {
-  PHARMACY: "Injections — margin",
-  LAB: "Tests",
-  OPD: "Consultations",
-  SCP: "Sugar control plans & short admissions",
-  IPD: "Admissions",
-  DIET: "Diet",
-  OTHER: "Packages & other income",
-};
-interface IncomeGroup {
-  key: string;
-  label: string;
-  lines: any[];
-  byMonth: Record<string, number>;
-  total: number;
-  count: number;
-}
-function incomeGroups(lines: any[]): IncomeGroup[] {
-  const groups = new Map<string, IncomeGroup>();
-  for (const l of lines) {
-    const key = l.stream === "OPD" && /per bill\)$/.test(l.name) ? "OPD-share" : l.stream;
-    const label = key === "OPD-share" ? "Wellness share of combined consultation bills" : (SOURCE_LABELS[l.stream] ?? l.stream);
-    const g: IncomeGroup = groups.get(key) ?? { key, label, lines: [], byMonth: {}, total: 0, count: 0 };
-    g.lines.push(l);
-    g.total += l.total;
-    g.count += l.count;
-    for (const [m, v] of Object.entries(l.byMonth as Record<string, number>)) g.byMonth[m] = (g.byMonth[m] ?? 0) + v;
-    groups.set(key, g);
-  }
-  return [...groups.values()].sort((a, b) => b.total - a.total);
-}
-
-/** Column heading: "Oct 2026" for a month, "5 Oct" for a day. */
-const colLabel = (k: string) => (k.length > 7 ? `${Number(k.slice(8))} ${mLabel(k.slice(0, 7)).split(" ")[0]}` : mLabel(k));
+import { AllDepartmentsInsights, colLabel, costGroups, DepartmentInsights, incomeGroups, Section } from "@/components/departments/insights";
 
 const money = (v: number | undefined) => (v ? formatINR(v) : "—");
 const signed = (v: number) => <span style={{ color: v < 0 ? "var(--status-bad)" : undefined }}>{formatINR(v)}</span>;
@@ -164,7 +128,11 @@ function CostDialog({
           </select>
         </Field>
         {v.kind === "INCOME" ? (
-          <Field label="Percent of the department's billed income (%)" required help="Packages, tests and consultations billed to this department that month — not the injection margin">
+          <Field
+            label="Percent of the department's billed income (%)"
+            required
+            help="Packages, tests and consultations billed to this department that month — not the injection margin"
+          >
             <input className="input" type="number" min={0} max={100} step="0.01" value={v.percent} onChange={(e) => set("percent", e.target.value)} />
           </Field>
         ) : v.kind === "FIXED" ? (
@@ -351,7 +319,9 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
               g.lines.length === 1 ? (
                 <Fragment key={g.key}>
                   {row(g.lines[0].name, g.lines[0].byMonth, g.lines[0].total, {
-                    sub: g.lines[0].count ? `${STREAM_LABELS[g.lines[0].stream as keyof typeof STREAM_LABELS] ?? g.lines[0].stream} · ${formatNumber(g.lines[0].count)} bills/tests` : undefined,
+                    sub: g.lines[0].count
+                      ? `${STREAM_LABELS[g.lines[0].stream as keyof typeof STREAM_LABELS] ?? g.lines[0].stream} · ${formatNumber(g.lines[0].count)} bills/tests`
+                      : undefined,
                   })}
                 </Fragment>
               ) : (
@@ -393,28 +363,59 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
                 </td>
               </tr>
             )}
-            {st.costLines.map((l: any) => {
-              const c = l.id ? costs?.find((x: any) => x.id === l.id) : null;
-              return (
-                <Fragment key={l.id ?? l.label}>
-                  {row(l.label, l.byMonth, l.total, {
+            {costGroups(st.costLines).map((g) => (
+              <Fragment key={g.key}>
+                {row(
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-left hover:underline"
+                    onClick={() => toggle(`cost:${g.key}`)}
+                    aria-expanded={openGroups.has(`cost:${g.key}`)}
+                  >
+                    {openGroups.has(`cost:${g.key}`) ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                    {g.label}
+                  </button>,
+                  g.byMonth,
+                  g.total,
+                  {
                     minus: true,
-                    sub: l.basis,
-                    actions:
-                      c && canChange(c) ? (
-                        <span className="flex shrink-0 gap-1">
-                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Edit ${l.label}`} onClick={() => setDialog({ cost: c })}>
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${l.label}`} onClick={() => setRemoving(c)}>
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </span>
-                      ) : undefined,
+                    sub: `${new Set(g.lines.map((l: any) => l.label)).size} item${new Set(g.lines.map((l: any) => l.label)).size === 1 ? "" : "s"} — tap to see${edit ? " and edit" : ""} them`,
+                  },
+                )}
+                {openGroups.has(`cost:${g.key}`) &&
+                  g.lines.map((l: any) => {
+                    const c = l.id ? costs?.find((x: any) => x.id === l.id) : null;
+                    return (
+                      <tr key={l.id ?? l.label} className="text-xs">
+                        <td className="pl-12">
+                          <div className="flex items-start justify-between gap-2">
+                            <span>
+                              {l.label}
+                              <span className="block muted">{l.basis}</span>
+                            </span>
+                            {c && canChange(c) && (
+                              <span className="flex shrink-0 gap-1">
+                                <button type="button" className="btn btn-ghost btn-sm" aria-label={`Edit ${l.label}`} onClick={() => setDialog({ cost: c })}>
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                                <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${l.label}`} onClick={() => setRemoving(c)}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        {months.map((m) => (
+                          <td key={m} className="num muted">
+                            {l.byMonth[m] ? `−${formatINRCompact(l.byMonth[m])}` : ""}
+                          </td>
+                        ))}
+                        <td className="num">{l.total ? `−${formatINR(l.total)}` : "—"}</td>
+                      </tr>
+                    );
                   })}
-                </Fragment>
-              );
-            })}
+              </Fragment>
+            ))}
             {row("Total costs", st.costs, st.totals.costs, {
               bold: true,
               minus: true,
@@ -478,21 +479,19 @@ function Contributors({ st, months, onChanged }: { st: any; months: string[]; on
     if ((amount ?? 0) === (old ?? 0) || (amount !== null && !Number.isFinite(amount))) return;
     run(() => apiFetch(`/api/departments/contributors/${id}/income`, { method: "PUT", json: { month, amount } }));
   };
-  if (!st.contributors.length && !admin) return null;
+  if (!st.contributors.length && !admin) return <p className="text-sm muted">No one recorded for this department.</p>;
   return (
-    <Card
-      title={`People bringing income to ${st.name} — income they generated and their incentive`}
-      actions={
-        admin && (
+    <div>
+      {admin && (
+        <div className="mb-3 flex justify-end">
           <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
             <Plus className="h-4 w-4" /> Add person
           </Button>
-        )
-      }
-    >
+        </div>
+      )}
       <p className="mb-3 text-xs muted">
-        The income each person generated is entered here only to work out their incentive: it is not added to {st.name}&apos;s income, which comes from the bills. Each incentive appears
-        under Costs above.
+        The income each person generated is entered here only to work out their incentive: it is not added to {st.name}&apos;s income, which comes from the bills. Each incentive
+        appears under Costs above.
       </p>
       {st.contributors.length === 0 ? (
         <p className="text-sm muted">No one added yet.</p>
@@ -530,7 +529,11 @@ function Contributors({ st, months, onChanged }: { st: any; months: string[]; on
                         aria-label={`Incentive % for ${c.name}`}
                         onBlur={(e) => {
                           const v = Number(e.target.value) || 0;
-                          if (v !== c.incentivePct) run(() => apiFetch(`/api/departments/contributors/${c.id}`, { method: "PATCH", json: { departmentId: st.id, name: c.name, incentivePct: v } }), "Incentive % saved");
+                          if (v !== c.incentivePct)
+                            run(
+                              () => apiFetch(`/api/departments/contributors/${c.id}`, { method: "PATCH", json: { departmentId: st.id, name: c.name, incentivePct: v } }),
+                              "Incentive % saved",
+                            );
                         }}
                       />
                     ) : c.incentivePct ? (
@@ -568,7 +571,8 @@ function Contributors({ st, months, onChanged }: { st: any; months: string[]; on
                         className="btn btn-ghost btn-sm"
                         aria-label={`Remove ${c.name}`}
                         onClick={() => {
-                          if (window.confirm(`Remove ${c.name} and the income recorded for them?`)) run(() => apiFetch(`/api/departments/contributors/${c.id}`, { method: "DELETE" }), "Removed");
+                          if (window.confirm(`Remove ${c.name} and the income recorded for them?`))
+                            run(() => apiFetch(`/api/departments/contributors/${c.id}`, { method: "DELETE" }), "Removed");
                         }}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -614,7 +618,7 @@ function Contributors({ st, months, onChanged }: { st: any; months: string[]; on
           </Field>
         </div>
       </Modal>
-    </Card>
+    </div>
   );
 }
 
@@ -903,18 +907,27 @@ function Inner() {
             return (
               <>
                 <Statement st={st} months={data.months} monthOptions={months} onChanged={reload} />
-                <Contributors st={st} months={data.calendarMonths} onChanged={reload} />
-                {partner && <PartnerCard partner={partner} months={data.months} />}
                 {byDay && (
                   <p className="text-xs muted">Day by day: each monthly cost is spread evenly over the days of its month. The partner&apos;s share is worked out month by month.</p>
                 )}
+                {partner && <PartnerCard partner={partner} months={data.months} />}
+                <DepartmentInsights key={st.id} st={st} months={data.months} partner={partner} />
+                <Section title={`People bringing income to ${st.name}`} subtitle="Income each person generated and their incentive">
+                  <Contributors st={st} months={data.calendarMonths} onChanged={reload} />
+                </Section>
                 <Patients key={`${st.id}|${from}|${toDate}`} departmentId={st.id} from={`${from}-01`} to={toDate} />
-                {all && <Overview data={data} selected={st.id} onSelect={(id) => set("dept", id)} />}
+                {all && (
+                  <>
+                    <h2 className="pt-2 text-base font-semibold">All departments</h2>
+                    <Overview data={data} selected={st.id} onSelect={(id) => set("dept", id)} />
+                    <AllDepartmentsInsights data={data} />
+                  </>
+                )}
               </>
             );
           })()}
           {all && (
-            <Card title="Income by department, month by month — tap a department to see its billed items">
+            <Section title="Table: income by department, month by month" subtitle="Tap a department to see its billed items, and the names not in any department">
               <div className="overflow-x-auto">
                 <table className="table">
                   <thead>
@@ -962,29 +975,32 @@ function Inner() {
                   </tfoot>
                 </table>
               </div>
-            </Card>
+            </Section>
           )}
           {all && chart.length > 0 && (
-            <ChartCard
-              title="Department income for the period"
-              height={Math.max(220, chart.length * 34)}
-              table={{
-                columns: [
-                  { key: "name", label: "Department", format: "text" },
-                  { key: "total", label: "Income", format: "money" },
-                ],
-                rows: chart,
-              }}
-            >
-              <BarsChart data={chart} xKey="name" horizontal series={[{ key: "total", label: "Income", color: SLOT(0) }]} />
-            </ChartCard>
+            <Section title="Graph: income by department">
+              <ChartCard
+                title="Department income for the period"
+                height={Math.max(220, chart.length * 34)}
+                table={{
+                  columns: [
+                    { key: "name", label: "Department", format: "text" },
+                    { key: "total", label: "Income", format: "money" },
+                  ],
+                  rows: chart,
+                }}
+              >
+                <BarsChart data={chart} xKey="name" horizontal series={[{ key: "total", label: "Income", color: SLOT(0) }]} />
+              </ChartCard>
+            </Section>
           )}
           <p className="flex gap-2 text-xs muted">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
               Department accounts are an analysis on their own: they never change the hospital&apos;s income or expenditure. A bill belongs to a department by the name it was
               billed under in OneGlance (consultation type, lab test, diet service or IPD admission type). A department&apos;s costs are only the shares entered with “Add cost”,
-              plus the incentive on its injections. Hospital-wide areas (reception, administration, lobby) are not charged to departments, so profit here is before those common costs. Injection margin comes from the Hormonal Pharmacy&apos;s medicine-wise sales (OneGlance Purchase/Sales report), without GST.{" "}
+              plus the incentive on its injections. Hospital-wide areas (reception, administration, lobby) are not charged to departments, so profit here is before those common
+              costs. Injection margin comes from the Hormonal Pharmacy&apos;s medicine-wise sales (OneGlance Purchase/Sales report), without GST.{" "}
               {can("masters.manage") && (
                 <>
                   To move a billed name or a medicine into a department, edit it under{" "}
