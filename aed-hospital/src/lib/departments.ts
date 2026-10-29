@@ -19,6 +19,11 @@ export interface DeptRule {
   sortOrder: number;
   addOnKeywords?: string | null;
   addOnAmount?: number | null;
+  expenseDepartments?: string | null;
+  pharmacyItems?: string | null;
+  pharmacyIncentivePct?: number | null;
+  partnerName?: string | null;
+  partnerSharePct?: number | null;
 }
 
 interface Compiled {
@@ -28,6 +33,13 @@ interface Compiled {
   streams: string[];
   addOns: string[];
   addOnAmount: number;
+  /** Expense departments (normalised names) charged to this department. */
+  expenseDepartments: string[];
+  /** Pharmacy medicine words whose sales margin is this department's income. */
+  pharmacyPhrases: string[];
+  pharmacyIncentivePct: number;
+  partnerName: string;
+  partnerSharePct: number;
 }
 
 const splitList = (s: string | null | undefined) => (s ?? "").split(/[,\n]/).map((k) => k.trim()).filter(Boolean);
@@ -44,6 +56,11 @@ export function compileDepartments(rules: DeptRule[]): Compiled[] {
         streams: parts.filter((p) => /^stream:/i.test(p)).map((p) => p.slice(7).trim().toUpperCase()),
         addOns: Number(r.addOnAmount) > 0 ? splitList(r.addOnKeywords).map((p) => norm(p)).filter(Boolean) : [],
         addOnAmount: Number(r.addOnAmount) || 0,
+        expenseDepartments: splitList(r.expenseDepartments).map((p) => norm(p)).filter(Boolean),
+        pharmacyPhrases: splitList(r.pharmacyItems).map((p) => norm(p)).filter(Boolean),
+        pharmacyIncentivePct: Number(r.pharmacyIncentivePct) || 0,
+        partnerName: (r.partnerName ?? "").trim(),
+        partnerSharePct: Number(r.partnerSharePct) || 0,
       };
     });
 }
@@ -54,6 +71,18 @@ export function departmentFor(depts: Compiled[], stream: string, itemName: strin
   for (const d of depts) if (d.phrases.some((p) => text.includes(` ${p} `))) return d;
   for (const d of depts) if (d.streams.includes(stream)) return d;
   return null;
+}
+
+/** The department whose pharmacy medicine words occur in this medicine name ("INJ MOUNJARO KWIKPEN 5MG"). */
+export function pharmacyDepartmentFor(depts: Compiled[], medicine: string): Compiled | null {
+  const text = ` ${norm(medicine)} `;
+  return depts.find((d) => d.pharmacyPhrases.some((p) => text.includes(` ${p} `))) ?? null;
+}
+
+/** The department an expense department ("Wellness") is charged to. */
+export function expenseDepartmentFor(depts: Compiled[], expenseDept: string | null | undefined): Compiled | null {
+  const n = norm(expenseDept ?? "");
+  return n ? (depts.find((d) => d.expenseDepartments.includes(n)) ?? null) : null;
 }
 
 /**
@@ -69,15 +98,38 @@ export function addOnSplit(depts: Compiled[], itemName: string | null | undefine
   return dept ? { dept, base: name.slice(0, at).trim() } : null;
 }
 
+export const GLP_INJECTIONS =
+  "mounjaro, yurpeak, yurpeck, glipiq, semanext, semanat, semalix, semasize, semafull, sematrinity, semabest, semawin, semaglu, sembolic, sunday, sundae, ozempic, wegovy, ozanta, wyntide, obeda, extensior, povizitra";
+
+export interface DeptDefault {
+  name: string;
+  keywords: string;
+  addOnKeywords?: string;
+  addOnAmount?: number;
+  expenseDepartments?: string;
+  pharmacyItems?: string;
+  pharmacyIncentivePct?: number;
+  partnerName?: string;
+  partnerSharePct?: number;
+}
+
 /** AED's departments as agreed (Oct 2026); editable under Master Data → Income departments. */
-export const DEFAULT_DEPARTMENTS: [string, string, string?, number?][] = [
-  ["USG scan room", "usg, ultrasound, ultra sound, sonography, doppler, fnac, fatty liver, thyroid screening, thy screening"],
-  ["Foot exam, neuropathy & physiotherapy", "foot, neuropathy, physio, physiotherapy"],
-  ["Cardiac (2D Echo, TMT, ECG)", "2d echo, echo, tmt, treadmill, treadmil, ecg"],
-  ["JJ Wellness (skin, hair, BMI)", "skin, hair, bmi, wellness consultation", "consultation, wellness consultation, wellness", 200],
-  ["Ophthalmology", "pft, ar, fundus, ophthal, ophthalmology, eye"],
-  ["Diet", "diet, stream:DIET"],
-  ["SCP — Sugar Control Plans", "sugar control, scp, stream:SCP"],
-  ["Short admissions", "short admission, short admissions, short adm"],
-  ["JJ Wellness — MMP admissions", "mmp"],
+export const DEFAULT_DEPARTMENTS: DeptDefault[] = [
+  { name: "USG scan room", keywords: "usg, ultrasound, ultra sound, sonography, doppler, fnac, fatty liver, thyroid screening, thy screening", expenseDepartments: "Radiology" },
+  { name: "Foot exam, neuropathy & physiotherapy", keywords: "foot, neuropathy, physio, physiotherapy" },
+  { name: "Cardiac (2D Echo, TMT, ECG)", keywords: "2d echo, echo, tmt, treadmill, treadmil, ecg", expenseDepartments: "Cardiology" },
+  { name: "JJ Wellness (skin, hair, BMI)", keywords: "skin, hair, bmi, wellness consultation", addOnKeywords: "consultation, wellness consultation, wellness", addOnAmount: 200, partnerName: "JJ Wellness", partnerSharePct: 20 },
+  { name: "Ophthalmology", keywords: "pft, ar, fundus, ophthal, ophthalmology, eye" },
+  { name: "Diet", keywords: "diet, stream:DIET", expenseDepartments: "Diet & Nutrition" },
+  { name: "SCP — Sugar Control Plans", keywords: "sugar control, scp, stream:SCP" },
+  { name: "Short admissions", keywords: "short admission, short admissions, short adm" },
+  {
+    name: "JJ Wellness — MMP admissions",
+    keywords: "mmp",
+    expenseDepartments: "Wellness",
+    pharmacyItems: GLP_INJECTIONS,
+    pharmacyIncentivePct: 1,
+    partnerName: "JJ Wellness",
+    partnerSharePct: 20,
+  },
 ];

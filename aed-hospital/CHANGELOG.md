@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.16.0: Department profit
+- Department accounts open with "Is each department making money?": billed income + margin on the department's pharmacy medicines (without GST, after purchase cost) − expenses booked to its expense department − staff incentive, with Profit / Loss per department and month. Expenses of departments no income department claims are shown as shared costs.
+- JJ Wellness: GLP injections (Mounjaro, Yurpeak, Glipiq, Sema… brands, Sundae, Ozempic, Wegovy, Ozanta, Wyntide, Obeda, Extensior, Povizitra) from the Hormonal Pharmacy's medicine-wise sales count as its margin, with the 1% staff incentive on their sales as its cost; "Wellness" expenses are its costs; JJ Wellness's 20% share is worked out on the combined profit of its two departments, per month, on months in profit. All configurable in Master Data → Income departments (migration `20261030000000_department_profit`).
+
 ## 0.15.0: JJ Wellness
 - Department accounts: combined OneGlance bills such as "New Thyroid + Wellness Consultation" or "Old Diabetes + Consultation" give JJ Wellness ₹200 per bill; the rest stays with the consultation. The stand-alone "Wellness Consultation" is JJ Wellness. Configurable in Master Data → Income departments (migration `20261029000000_department_addons`).
 - Excel Import recognises the JJ Wellness workbook (Package_Payments tab) and imports MMP/GLP package payments as Other income "JJ Wellness MMP package", counted under JJ Wellness — MMP admissions. Dates that Excel flipped month-first are read day-first. The other tabs are not imported: consultations and BMI are OneGlance bills, and injections are Hormonal Pharmacy bills. Uploading the workbook again adds only new payments.

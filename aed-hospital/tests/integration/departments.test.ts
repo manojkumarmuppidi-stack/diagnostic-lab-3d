@@ -9,8 +9,7 @@ import { seedFixture, type Fixture } from "../helpers/db";
 let f: Fixture;
 beforeEach(async () => {
   f = await seedFixture();
-  for (const [i, [name, keywords, addOnKeywords = "", addOnAmount = 0]] of DEFAULT_DEPARTMENTS.entries())
-    await prisma.serviceDepartment.create({ data: { name, keywords, addOnKeywords, addOnAmount, sortOrder: (i + 1) * 10 } });
+  for (const [i, d] of DEFAULT_DEPARTMENTS.entries()) await prisma.serviceDepartment.create({ data: { ...d, sortOrder: (i + 1) * 10 } });
 });
 
 describe("department accounts", () => {
@@ -54,4 +53,35 @@ describe("department accounts", () => {
     expect(d.unassigned.map((g) => [g.name, g.total])).toEqual([["OPD — not in a department", 2000]]);
     expect(d.grandTotal).toBe(2600);
   });
+
+  it("works out each department's profit and JJ Wellness's 20% of its combined profit, month by month", async () => {
+    const wellness = await prisma.department.create({ data: { name: "Wellness" } });
+    const combo = (await createMaster(f.admin, "consultationTypes", { name: "New Thyroid + Wellness Consultation", defaultRate: 1200 })) as { id: string };
+    await createTransaction(f.admin, "opd", { date: "2026-10-08", patientCode: "P3", patientName: "DEMO C", specialtyId: f.ids.diabetes, visitType: "NEW", consultationTypeId: combo.id, grossAmount: 1200, discount: 0, paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "other-income", { date: "2026-10-05", source: "JJ Wellness MMP package", amount: 100000, paymentModeId: f.ids.CASH });
+    const pen = await prisma.pharmacyItem.create({ data: { name: "INJ MOUNJARO KWIKPEN 5mg/0.6ml", form: "INJ" } });
+    const tab = await prisma.pharmacyItem.create({ data: { name: "TAB METFORMIN 500", form: "TAB" } });
+    const sale = (itemId: string, amount: number, taxable: number, cost: number) =>
+      prisma.pharmacyItemLine.create({ data: { kind: "SALE", date: new Date("2026-10-10"), itemId, qty: 1, amount, taxable, tax: amount - taxable, cost, fingerprint: `t-${itemId}`, createdById: f.admin.id } });
+    await sale(pen.id, 21000, 20000, 18000);
+    await sale(tab.id, 500, 476, 300);
+    const expense = (date: string, departmentId: string, amount: number) =>
+      prisma.expense.create({ data: { date: new Date(date), departmentId, categoryId: f.ids.groceries, description: "test", amount, fingerprint: `e-${date}-${amount}`, createdById: f.admin.id } });
+    await expense("2026-10-20", wellness.id, 30000);
+    await expense("2026-11-20", wellness.id, 50000);
+    await expense("2026-10-21", f.ids.lab, 5000);
+
+    const d = await departmentAccounts(f.admin, { from: "2026-10-01", to: "2026-11-30" });
+    const mmp = d.profit.find((p) => p.name === "JJ Wellness — MMP admissions")!;
+    expect(mmp.totals).toEqual({ income: 100000, pharmacySales: 21000, pharmacyMargin: 2000, expenses: 80000, incentive: 210, profit: 21790 });
+    expect(mmp.profit).toEqual({ "2026-10": 71790, "2026-11": -50000 });
+    expect(mmp.medicines).toEqual([{ name: "INJ MOUNJARO KWIKPEN 5mg/0.6ml", sales: 21000, margin: 2000 }]);
+    expect(d.profit.find((p) => p.name === "JJ Wellness (skin, hair, BMI)")!.totals.profit).toBe(200);
+    expect(d.sharedExpenses.total).toBe(5000);
+    const jj = d.partners.find((p) => p.name === "JJ Wellness")!;
+    expect(jj.profit).toEqual({ "2026-10": 71990, "2026-11": -50000 });
+    expect(jj.share).toEqual({ "2026-10": 14398, "2026-11": 0 });
+    expect(jj.totals).toEqual({ profit: 21990, share: 14398, aed: 7592 });
+  });
 });
+

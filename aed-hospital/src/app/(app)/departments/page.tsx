@@ -1,8 +1,9 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * Department-wise accounts: AED income by department (USG scan room, Cardiac, SCP …) month by month,
- * with the billed items behind each department and the names not yet in any department.
+ * Department-wise accounts: is each department (USG scan room, Cardiac, JJ Wellness …) making money?
+ * Profit = billed income + margin on its pharmacy medicines − its own expenses − staff incentive, with the
+ * partner's share (JJ Wellness 20%); then income month by month with the billed items behind it.
  */
 import { Fragment, Suspense, useState } from "react";
 import Link from "next/link";
@@ -14,10 +15,194 @@ import { mLabel } from "@/lib/entities";
 import { formatINR, formatINRCompact, formatNumber } from "@/lib/money";
 import { recentMonths } from "@/lib/periods";
 import { STREAM_LABELS } from "@/lib/accounting";
-import { Card, ErrorState, PageHeader, Spinner } from "@/components/ui";
+import { Badge, Card, ErrorState, PageHeader, Spinner } from "@/components/ui";
 import { Guard } from "@/components/Guard";
 import { useCan } from "@/components/session";
 import { BarsChart, ChartCard, SLOT } from "@/components/charts/Charts";
+
+const money = (v: number | undefined) => (v ? formatINR(v) : "—");
+const signed = (v: number) => <span style={{ color: v < 0 ? "var(--status-bad)" : undefined }}>{formatINR(v)}</span>;
+
+function Verdict({ p }: { p: any }) {
+  if (!p.costsMapped && !p.totals.pharmacySales) return <Badge tone="neutral">No costs linked</Badge>;
+  if (p.totals.profit > 0) return <Badge tone="green">Profit</Badge>;
+  if (p.totals.profit < 0) return <Badge tone="red">Loss</Badge>;
+  return <Badge tone="neutral">Break-even</Badge>;
+}
+
+function ProfitRows({ p, months }: { p: any; months: string[] }) {
+  const [open, setOpen] = useState(false);
+  const line = (label: string, byMonth: Record<string, number>, total: number, minus = false) => (
+    <tr className="text-xs">
+      <td className="pl-8">{label}</td>
+      <td colSpan={5} className="muted">
+        {months
+          .filter((m) => byMonth[m])
+          .map((m) => `${mLabel(m)} ${minus ? "−" : ""}${formatINRCompact(byMonth[m])}`)
+          .join(" · ")}
+      </td>
+      <td className="num">{minus ? `−${formatINR(total)}` : formatINR(total)}</td>
+      <td colSpan={2} />
+    </tr>
+  );
+  return (
+    <>
+      <tr>
+        <td className="whitespace-nowrap">
+          <button type="button" className="flex items-center gap-1 text-left font-medium hover:underline" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+            {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+            {p.name}
+          </button>
+        </td>
+        <td className="num">{money(p.totals.income)}</td>
+        <td className="num">{money(p.totals.pharmacyMargin)}</td>
+        <td className="num">{p.totals.expenses ? `−${formatINR(p.totals.expenses)}` : "—"}</td>
+        <td className="num">{p.totals.incentive ? `−${formatINR(p.totals.incentive)}` : "—"}</td>
+        <td className="num muted">{p.totals.pharmacySales ? formatINRCompact(p.totals.pharmacySales) : ""}</td>
+        <td className="num font-semibold">{signed(p.totals.profit)}</td>
+        <td className="num muted">{p.marginPct === null ? "" : `${p.marginPct.toFixed(0)}%`}</td>
+        <td>
+          <Verdict p={p} />
+        </td>
+      </tr>
+      {open && (
+        <>
+          {line("Profit by month", p.profit, p.totals.profit)}
+          {line("Billed income", p.income, p.totals.income)}
+          {p.medicines.length > 0 && line(`Pharmacy margin (sales ${formatINRCompact(p.totals.pharmacySales)}, without GST, after cost)`, p.pharmacyMargin, p.totals.pharmacyMargin)}
+          {p.medicines.slice(0, 12).map((m: any) => (
+            <tr key={m.name} className="text-xs">
+              <td className="pl-12 muted">{m.name}</td>
+              <td colSpan={5} className="muted">sales {formatINR(m.sales)}</td>
+              <td className="num muted">{formatINR(m.margin)}</td>
+              <td colSpan={2} />
+            </tr>
+          ))}
+          {p.totals.incentive > 0 && line(`Staff incentive ${p.incentivePct}% of injection sales`, p.incentive, p.totals.incentive, true)}
+          {p.expenseItems.map((e: any) => (
+            <Fragment key={e.name}>{line(e.name, e.byMonth, e.total, true)}</Fragment>
+          ))}
+          {p.missingCost > 0 && (
+            <tr className="text-xs">
+              <td colSpan={9} className="pl-8 muted">
+                {p.missingCost} medicine lines have no purchase cost, so their margin is counted as ₹0.
+              </td>
+            </tr>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function ProfitCard({ data }: { data: any }) {
+  const [sharedOpen, setSharedOpen] = useState(false);
+  return (
+    <Card title="Is each department making money? — profit for the period (tap a department for months and costs)">
+      <div className="overflow-x-auto">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Department</th>
+              <th className="num">Billed income</th>
+              <th className="num">+ Injection margin</th>
+              <th className="num">− Own expenses</th>
+              <th className="num">− Incentive</th>
+              <th className="num">Injection sales</th>
+              <th className="num">Profit</th>
+              <th className="num">Margin</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {data.profit.map((p: any) => (
+              <ProfitRows key={p.id} p={p} months={data.months} />
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td>
+                <button type="button" className="flex items-center gap-1 text-left hover:underline" onClick={() => setSharedOpen((o) => !o)} aria-expanded={sharedOpen}>
+                  {sharedOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
+                  Shared costs, not charged to any department
+                </button>
+              </td>
+              <td colSpan={2} />
+              <td className="num">{data.sharedExpenses.total ? `−${formatINR(data.sharedExpenses.total)}` : "—"}</td>
+              <td colSpan={5} className="text-xs muted">
+                salaries of common staff, rent, power … (by expense department)
+              </td>
+            </tr>
+            {sharedOpen &&
+              data.sharedExpenses.items.map((e: any) => (
+                <tr key={e.name} className="text-xs">
+                  <td className="pl-8">{e.name}</td>
+                  <td colSpan={2} />
+                  <td className="num">−{formatINR(e.total)}</td>
+                  <td colSpan={5} />
+                </tr>
+              ))}
+          </tfoot>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function PartnerCard({ partner, months }: { partner: any; months: string[] }) {
+  return (
+    <Card title={`${partner.name} — ${partner.pct}% share of profit (${partner.departments.join(" + ")})`}>
+      <div className="overflow-x-auto">
+        <table className="table">
+          <thead>
+            <tr>
+              <th />
+              {months.map((m) => (
+                <th key={m} className="num whitespace-nowrap">
+                  {mLabel(m)}
+                </th>
+              ))}
+              <th className="num">Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Profit after {partner.name} expenses & incentive</td>
+              {months.map((m) => (
+                <td key={m} className="num">
+                  {signed(partner.profit[m] ?? 0)}
+                </td>
+              ))}
+              <td className="num font-semibold">{signed(partner.totals.profit)}</td>
+            </tr>
+            <tr>
+              <td>
+                {partner.name} share ({partner.pct}%)
+              </td>
+              {months.map((m) => (
+                <td key={m} className="num">
+                  {money(partner.share[m])}
+                </td>
+              ))}
+              <td className="num font-semibold">{formatINR(partner.totals.share)}</td>
+            </tr>
+            <tr>
+              <td>AED keeps</td>
+              {months.map((m) => (
+                <td key={m} className="num">
+                  {signed(round((partner.profit[m] ?? 0) - (partner.share[m] ?? 0)))}
+                </td>
+              ))}
+              <td className="num font-semibold">{signed(partner.totals.aed)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs muted">The share is worked out month by month and only on a month in profit; a loss month gives {partner.name} nothing and is not carried forward.</p>
+    </Card>
+  );
+}
+const round = (v: number) => Math.round(v * 100) / 100;
 
 function GroupRows({ g, months, grand, muted }: { g: any; months: string[]; grand: number; muted?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -102,6 +287,10 @@ function Inner() {
       {!data && !error && from <= to && <Spinner />}
       {data && (
         <div className="space-y-4" style={{ opacity: loading ? 0.6 : 1 }}>
+          <ProfitCard data={data} />
+          {data.partners.map((p: any) => (
+            <PartnerCard key={p.name} partner={p} months={data.months} />
+          ))}
           <Card title="Income by department, month by month — tap a department to see its billed items">
             <div className="overflow-x-auto">
               <table className="table">
@@ -159,10 +348,12 @@ function Inner() {
           <p className="flex gap-2 text-xs muted">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              A bill belongs to a department by the name it was billed under in OneGlance (consultation type, lab test, diet service or IPD admission type). Income only; Hormonal Pharmacy is
-              separate. {can("masters.manage") && (
+              A bill belongs to a department by the name it was billed under in OneGlance (consultation type, lab test, diet service or IPD admission type). A department&apos;s own
+              expenses are those booked to its expense department (e.g. JJ Wellness → &quot;Wellness&quot;); everything else is a shared cost. Injection margin comes from the
+              Hormonal Pharmacy&apos;s medicine-wise sales (OneGlance Purchase/Sales report), without GST. Profit here is before shared costs.{" "}
+              {can("masters.manage") && (
                 <>
-                  To move a billed name into a department, add a word from it under{" "}
+                  To move a billed name, an expense department or a medicine into a department, edit it under{" "}
                   <Link className="underline" href="/masters?type=serviceDepartments">
                     Master Data → Income departments
                   </Link>
@@ -180,7 +371,7 @@ function Inner() {
 export default function Page() {
   return (
     <Guard perm="analytics.view">
-      <PageHeader title="Department accounts" subtitle="AED income by department — USG, foot & physio, cardiac, JJ Wellness, ophthalmology, diet, SCP, short admissions, MMP — month by month" />
+      <PageHeader title="Department accounts" subtitle="Income, own costs and profit of each department — USG, foot & physio, cardiac, JJ Wellness, ophthalmology, diet, SCP, short admissions, MMP" />
       <Suspense fallback={<Spinner />}>
         <Inner />
       </Suspense>

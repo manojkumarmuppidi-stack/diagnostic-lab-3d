@@ -273,8 +273,7 @@ async function seedMasters() {
     await prisma.expenseHead.create({ data: { name, keywords, categoryId: cat.id, subcategoryId: sub?.id ?? null, departmentId: dept?.id ?? null, defaultMode, monthly, sortOrder: i * 10 } });
   }
   // Income departments: created once; the Admin edits names and keywords afterwards.
-  for (const [i, [name, keywords, addOnKeywords = "", addOnAmount = 0]] of DEFAULT_DEPARTMENTS.entries())
-    await prisma.serviceDepartment.upsert({ where: { name }, create: { name, keywords, addOnKeywords, addOnAmount, sortOrder: (i + 1) * 10 }, update: {} });
+  for (const [i, d] of DEFAULT_DEPARTMENTS.entries()) await prisma.serviceDepartment.upsert({ where: { name: d.name }, create: { ...d, sortOrder: (i + 1) * 10 }, update: {} });
   if (!(await prisma.setting.findUnique({ where: { key: "app" } }))) {
     await prisma.setting.create({ data: { key: "app", value: DEFAULT_SETTINGS } });
   }

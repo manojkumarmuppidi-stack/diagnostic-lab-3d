@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { addOnSplit, compileDepartments, departmentFor, DEFAULT_DEPARTMENTS } from "@/lib/departments";
+import { addOnSplit, compileDepartments, departmentFor, DEFAULT_DEPARTMENTS, expenseDepartmentFor, pharmacyDepartmentFor } from "@/lib/departments";
 
-const depts = compileDepartments(DEFAULT_DEPARTMENTS.map(([name, keywords, addOnKeywords, addOnAmount], i) => ({ id: name, name, keywords, addOnKeywords, addOnAmount, sortOrder: (i + 1) * 10 })));
+const depts = compileDepartments(DEFAULT_DEPARTMENTS.map((d, i) => ({ ...d, id: d.name, sortOrder: (i + 1) * 10 })));
 const dept = (stream: string, name: string) => departmentFor(depts, stream, name)?.name ?? null;
 
 describe("department of a billed item (names as billed in OneGlance)", () => {
@@ -70,5 +70,19 @@ describe("JJ Wellness register dates", () => {
   it("leaves genuine Excel dates alone", async () => {
     const { dayFirstDates } = await import("@/lib/import/hms");
     expect(dayFirstDates(["2026-09-10", "2026-09-14", "2026-09-20"]).dates).toEqual(["2026-09-10", "2026-09-14", "2026-09-20"]);
+  });
+});
+
+describe("JJ Wellness costs and injections", () => {
+  it.each(["INJ MOUNJARO KWIKPEN 2.5mg/0.6ml", "INJ MOUNJARO KWIKPEN 15MG/0.6ML", "INJ WEGOVY 1.7MG/3ML", "INJ SUNDAE 2MG PEN", "VIAL SUNDAE 4MG INJ", "INJ SEMATRINITY 2MG", "Glipiq 4 mg", "INJ YURPEAK 5MG", "Ozempic 1mg"])(
+    "%s is a JJ Wellness injection",
+    (name) => expect(pharmacyDepartmentFor(depts, name)?.name).toBe("JJ Wellness — MMP admissions"),
+  );
+  it.each(["TAB METFORMIN 500", "INJ HUMAN MIXTARD 30/70", "CAP PREGASTIN-M"])("%s is not", (name) => expect(pharmacyDepartmentFor(depts, name)).toBeNull());
+  it("charges Wellness expenses to JJ Wellness and leaves others shared", () => {
+    expect(expenseDepartmentFor(depts, "Wellness")?.name).toBe("JJ Wellness — MMP admissions");
+    expect(expenseDepartmentFor(depts, "Diet & Nutrition")?.name).toBe("Diet");
+    expect(expenseDepartmentFor(depts, "Administration")).toBeNull();
+    expect(expenseDepartmentFor(depts, null)).toBeNull();
   });
 });
