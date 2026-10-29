@@ -228,5 +228,29 @@ describe("department accounts", () => {
     const days = await departmentAccounts(f.admin, { from: "2026-11-01", to: "2026-11-30", granularity: "day" });
     expect(days.statements.find((x) => x.name === "JJ Wellness")!.costs["2026-11-05"]).toBe(9000);
   });
+
+  it("books costs for every department from one sheet with a Department column", async () => {
+    const wb = new ExcelJS.Workbook();
+    const c = wb.addWorksheet("Costs");
+    c.addRow(["Department", "Type", "What is it", "Amount per month", "From month", "Until month"]);
+    c.addRow(["Laboratory", "Salary", "Technician A", 18000, "Jan 2026", "Oct 2026"]);
+    c.addRow(["USG scan room", "Repair & maintenance", "Probe repair", 12000, "Mar 2026", "Mar 2026"]);
+    c.addRow(["Ophthalmology", "", "Salary — Optometrist", 15000, "Jan 2026", "Oct 2026"]);
+    const buf = Buffer.from(await wb.xlsx.writeBuffer());
+    const r = await importDepartmentWorkbook(f.admin, null, "all.xlsx", buf);
+    expect(r).toMatchObject({ department: "All departments", costsAdded: 3 });
+    expect(r.departments.map((d) => d.name).sort()).toEqual(["Laboratory", "Ophthalmology", "USG scan room"]);
+    const lab = await prisma.departmentCost.findFirstOrThrow({ where: { department: { name: "Laboratory" } } });
+    expect(lab).toMatchObject({ label: "Salary — Technician A", fromMonth: "2026-01", toMonth: "2026-10" });
+    expect(await prisma.departmentCost.findFirst({ where: { label: "Repair & maintenance — Probe repair" } })).not.toBeNull();
+    expect(await importDepartmentWorkbook(f.admin, null, "all.xlsx", buf)).toMatchObject({ costsAdded: 0, costsUpdated: 3 });
+
+    const bad = new ExcelJS.Workbook();
+    const b = bad.addWorksheet("Costs");
+    b.addRow(["Department", "What is it", "Amount per month", "From month"]);
+    b.addRow(["Radiology wing", "Salary — X", 1000, "Jan 2026"]);
+    b.addRow(["", "Salary — Y", 1000, "Jan 2026"]);
+    await expect(importDepartmentWorkbook(f.admin, null, "bad.xlsx", Buffer.from(await bad.xlsx.writeBuffer()))).rejects.toThrow(/no department called "Radiology wing".*choose the department/);
+  });
 });
 

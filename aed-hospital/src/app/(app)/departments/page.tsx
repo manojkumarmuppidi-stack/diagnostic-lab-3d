@@ -188,6 +188,40 @@ function CostDialog({
   );
 }
 
+/** Upload a costs workbook: for one department, or (with a Department column) for every department. */
+function ImportButton({ departmentId, label = "Import from Excel", onDone }: { departmentId: string | null; label?: string; onDone: () => void }) {
+  const toast = useToast();
+  return (
+    <label className="btn btn-secondary btn-sm cursor-pointer" title="Salaries, repairs and other costs (and people's income generated) from one Excel file">
+      <Upload className="h-4 w-4" /> {label}
+      <input
+        type="file"
+        accept=".xlsx,.xls,.csv"
+        className="sr-only"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (!file) return;
+          const fd = new FormData();
+          fd.append("file", file);
+          if (departmentId) fd.append("departmentId", departmentId);
+          try {
+            const r: any = await apiFetch("/api/departments/import", { method: "POST", body: fd });
+            const where = r.departments?.length > 1 ? `${r.departments.length} departments` : r.department;
+            toast(
+              "success",
+              `${where}: ${r.costsAdded} costs added, ${r.costsUpdated} updated${r.people ? `, ${r.people} people, ${r.incomeMonths} months of income generated` : ""}`,
+            );
+            onDone();
+          } catch (err: any) {
+            toast("error", err.message);
+          }
+        }}
+      />
+    </label>
+  );
+}
+
 function Statement({ st, months, monthOptions, onChanged }: { st: any; months: string[]; monthOptions: { value: string; label: string }[]; onChanged: () => void }) {
   const can = useCan();
   const me = useSession();
@@ -260,31 +294,7 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
       }
       actions={
         <span className="flex flex-wrap gap-2">
-          {admin && (
-            <label className="btn btn-secondary btn-sm cursor-pointer" title="Salaries, other costs and people's income generated, from one Excel file">
-              <Upload className="h-4 w-4" /> Import from Excel
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                className="sr-only"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!file) return;
-                  const fd = new FormData();
-                  fd.append("file", file);
-                  fd.append("departmentId", st.id);
-                  try {
-                    const r: any = await apiFetch("/api/departments/import", { method: "POST", body: fd });
-                    toast("success", `${r.department}: ${r.costsAdded} costs added, ${r.costsUpdated} updated, ${r.people} people, ${r.incomeMonths} months of income generated`);
-                    changed();
-                  } catch (err: any) {
-                    toast("error", err.message);
-                  }
-                }}
-              />
-            </label>
-          )}
+          {admin && <ImportButton departmentId={st.id} onDone={changed} />}
           {edit && (
             <Button size="sm" onClick={() => setDialog({ cost: null })}>
               <Plus className="h-4 w-4" /> Add cost
@@ -918,7 +928,10 @@ function Inner() {
                 <Patients key={`${st.id}|${from}|${toDate}`} departmentId={st.id} from={`${from}-01`} to={toDate} />
                 {all && (
                   <>
-                    <h2 className="pt-2 text-base font-semibold">All departments</h2>
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
+                      <h2 className="text-base font-semibold">All departments</h2>
+                      {can("masters.manage") && <ImportButton departmentId={null} label="Import costs for all departments" onDone={reload} />}
+                    </div>
                     <Overview data={data} selected={st.id} onSelect={(id) => set("dept", id)} />
                     <AllDepartmentsInsights data={data} />
                   </>

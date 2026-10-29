@@ -98,9 +98,11 @@ export const incomeGroups = (lines: any[]) =>
 
 /** Cost lines by kind: salaries, incentives, space & utilities, other. */
 export function costCategory(label: string): [string, string] {
-  if (/^salary/i.test(label)) return ["salaries", "Salaries"];
+  if (/^salar/i.test(label)) return ["salaries", "Salaries"];
   if (/incentive/i.test(label)) return ["incentives", "Incentives"];
-  if (/first-floor|space|rent|electric|power|water|maintenance/i.test(label)) return ["space", "Space, rent & utilities"];
+  if (/first-floor|space|rent|electric|power|current|water/i.test(label)) return ["space", "Space, rent & utilities"];
+  if (/repair|maintenance|equipment|service|amc/i.test(label)) return ["repairs", "Equipment, repairs & maintenance"];
+  if (/consumable|supplies|supply|stationery|reagent|kit/i.test(label)) return ["consumables", "Consumables & supplies"];
   return ["other", "Other costs"];
 }
 export const costGroups = (lines: any[]) =>

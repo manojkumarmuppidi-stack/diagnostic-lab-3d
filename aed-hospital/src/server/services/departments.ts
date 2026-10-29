@@ -535,14 +535,21 @@ const amountOf = (v: unknown) => {
  *  - a sheet with "Person | Incentive % | <one column per month>": people who bring income, with the
  *    income they generated each month.
  */
-export async function importDepartmentWorkbook(actor: Actor, departmentId: string, fileName: string, buf: Buffer) {
+export async function importDepartmentWorkbook(actor: Actor, departmentId: string | null, fileName: string, buf: Buffer) {
   requireAdmin(actor);
-  const dept = await prisma.serviceDepartment.findUnique({ where: { id: departmentId } });
-  if (!dept) throw notFound("Department not found");
+  const all = await prisma.serviceDepartment.findMany({ where: { active: true }, select: { id: true, name: true } });
+  const dept = departmentId ? all.find((d) => d.id === departmentId) : null;
+  if (departmentId && !dept) throw notFound("Department not found");
+  // A "Department" column books each row to the department it names (one sheet for every department).
+  const byName = new Map(all.map((d) => [norm(d.name), d]));
+  const findDept = (v: unknown) => {
+    const n = norm(v);
+    return byName.get(n) ?? all.find((d) => norm(d.name).startsWith(n) && n.length >= 3) ?? null;
+  };
   const { readSpreadsheet } = await import("../spreadsheet");
   const sheets = await readSpreadsheet(fileName, buf);
   const key = (h: string) => norm(h);
-  const costs: { label: string; amount: number; percent: number; fromMonth: string; toMonth: string | null; row: number }[] = [];
+  const costs: { departmentId: string; label: string; amount: number; percent: number; fromMonth: string; toMonth: string | null; row: number }[] = [];
   const people: { name: string; pct: number; incomes: [string, number | null][]; row: number }[] = [];
   const errors: string[] = [];
   for (const sh of sheets) {
@@ -555,9 +562,20 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     if (labelCol && amountCol && fromCol) {
       const untilCol = col("until month", "until", "to month", "to");
       const pctCol = col("% of department income", "percent of department income", "% of income");
+      const deptCol = col("department", "dept");
+      const typeCol = col("type", "cost type", "kind");
       for (const r of sh.rows) {
-        const label = String(r.values[labelCol] ?? "").trim();
+        let label = String(r.values[labelCol] ?? "").trim();
         if (!label) continue;
+        const named = deptCol ? String(r.values[deptCol] ?? "").trim() : "";
+        const target = named ? findDept(named) : dept;
+        if (!target) {
+          errors.push(named ? `${sh.name} row ${r.rowNumber}: no department called "${named}"` : `${sh.name} row ${r.rowNumber}: choose the department`);
+          continue;
+        }
+        // "Salary" + "Niswanth" → "Salary — Niswanth", so costs group by kind on the statement.
+        const type = typeCol ? String(r.values[typeCol] ?? "").trim() : "";
+        if (type && !norm(label).startsWith(norm(type))) label = `${type} — ${label}`;
         const amount = amountOf(r.values[amountCol]);
         const percent = pctCol ? amountOf(r.values[pctCol]) : null;
         const fromMonth = monthOf(r.values[fromCol]);
@@ -572,7 +590,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
           errors.push(`${sh.name} row ${r.rowNumber}: last month is before the first month`);
           continue;
         }
-        costs.push({ label: label.slice(0, 120), amount: hasAmount ? round2(amount!) : 0, percent: hasPct ? round2(percent!) : 0, fromMonth, toMonth, row: r.rowNumber });
+        costs.push({ departmentId: target.id, label: label.slice(0, 120), amount: hasAmount ? round2(amount!) : 0, percent: hasPct ? round2(percent!) : 0, fromMonth, toMonth, row: r.rowNumber });
       }
     } else if (personCol) {
       const pctCol = col("incentive %", "incentive", "incentive percent");
@@ -598,26 +616,27 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
   if (errors.length) throw badRequest(`Nothing was saved. Fix these rows: ${errors.slice(0, 8).join("; ")}${errors.length > 8 ? ` (and ${errors.length - 8} more)` : ""}`);
   if (!costs.length && !people.length)
     throw badRequest('No costs or people found. Use a sheet with "What is it | Amount per month | From month | Until month" and/or one with "Person | Incentive % | <months>".');
+  if (people.length && !dept) throw badRequest("People and their income generated are imported from that department's statement (its Import from Excel button).");
   return prisma.$transaction(async (tx) => {
     let added = 0;
     let updated = 0;
     for (const c of costs) {
-      const existing = await tx.departmentCost.findFirst({ where: { departmentId, label: c.label, fromMonth: c.fromMonth } });
+      const existing = await tx.departmentCost.findFirst({ where: { departmentId: c.departmentId, label: c.label, fromMonth: c.fromMonth } });
       const data = { kind: c.percent ? "INCOME" : "FIXED", amount: c.amount, percent: c.percent, categoryId: null, toMonth: c.toMonth };
       if (existing) {
         await tx.departmentCost.update({ where: { id: existing.id }, data });
         updated++;
       } else {
-        await tx.departmentCost.create({ data: { ...data, departmentId, label: c.label, fromMonth: c.fromMonth, createdById: actor.id } });
+        await tx.departmentCost.create({ data: { ...data, departmentId: c.departmentId, label: c.label, fromMonth: c.fromMonth, createdById: actor.id } });
         added++;
       }
     }
     let incomeMonths = 0;
     for (const p of people) {
-      const existing = await tx.departmentContributor.findFirst({ where: { departmentId, name: p.name } });
+      const existing = await tx.departmentContributor.findFirst({ where: { departmentId: dept!.id, name: p.name } });
       const person = existing
         ? await tx.departmentContributor.update({ where: { id: existing.id }, data: { incentivePct: p.pct, active: true } })
-        : await tx.departmentContributor.create({ data: { departmentId, name: p.name, incentivePct: p.pct, createdById: actor.id } });
+        : await tx.departmentContributor.create({ data: { departmentId: dept!.id, name: p.name, incentivePct: p.pct, createdById: actor.id } });
       for (const [month, amount] of p.incomes) {
         if (amount) {
           await tx.contributorIncome.upsert({ where: { contributorId_month: { contributorId: person.id, month } }, create: { contributorId: person.id, month, amount }, update: { amount } });
@@ -625,8 +644,9 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
         } else await tx.contributorIncome.deleteMany({ where: { contributorId: person.id, month } });
       }
     }
-    const result = { department: dept.name, costsAdded: added, costsUpdated: updated, people: people.length, incomeMonths };
-    await audit(tx, actor, { action: "DEPT_IMPORT", entityType: "ServiceDepartment", entityId: departmentId, after: { fileName, ...result } });
+    const perDepartment = [...new Set(costs.map((c) => c.departmentId))].map((id) => ({ name: all.find((d) => d.id === id)!.name, rows: costs.filter((c) => c.departmentId === id).length }));
+    const result = { department: dept?.name ?? "All departments", costsAdded: added, costsUpdated: updated, people: people.length, incomeMonths, departments: perDepartment };
+    await audit(tx, actor, { action: "DEPT_IMPORT", entityType: "ServiceDepartment", entityId: dept?.id ?? "all", after: { fileName, ...result } });
     return result;
   });
 }

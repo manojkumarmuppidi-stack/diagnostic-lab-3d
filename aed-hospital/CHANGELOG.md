@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.20.0: Department insights and graphs
+- "Import costs for all departments" (All departments): one sheet with Department · Type · What is it · Amount per month · From month · Until month books every department's salaries, repairs, consumables and other costs; Type is put in front of the name ("Salary — …") so costs group by kind. Cost groups now include Equipment, repairs & maintenance and Consumables & supplies.
 - Department accounts: costs grouped into Salaries, Incentives, Space/rent/utilities and Other (tap to see and edit each item), like income.
 - Insights and graphs in dropdowns for the selected department (findings, income vs costs, profit and margin trend, income by source and costs by kind, partner share vs AED) and for all departments (findings, profit by department, income vs costs by department). Tables and graphs fold away so the page stays short.
 
