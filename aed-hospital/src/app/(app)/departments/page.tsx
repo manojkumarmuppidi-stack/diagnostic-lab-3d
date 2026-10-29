@@ -371,7 +371,7 @@ function Inner() {
 export default function Page() {
   return (
     <Guard perm="analytics.view">
-      <PageHeader title="Department accounts" subtitle="Income, own costs and profit of each department — USG, foot & physio, cardiac, JJ Wellness, ophthalmology, diet, SCP, short admissions, MMP" />
+      <PageHeader title="Department accounts" subtitle="Income, own costs and profit of each department — USG, foot & physio, cardiac, JJ Wellness, ophthalmology, diet, SCP, short and long admissions" />
       <Suspense fallback={<Spinner />}>
         <Inner />
       </Suspense>

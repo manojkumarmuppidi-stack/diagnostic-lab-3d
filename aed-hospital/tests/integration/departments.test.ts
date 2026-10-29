@@ -44,7 +44,7 @@ describe("department accounts", () => {
     await opd("2026-10-09", combo.id, 1200);
     await opd("2026-10-09", plain.id, 200);
     const d = await departmentAccounts(f.admin, { from: "2026-10-01", to: "2026-10-31" });
-    const jj = d.departments.find((g) => g.name === "JJ Wellness (skin, hair, BMI)")!;
+    const jj = d.departments.find((g) => g.name === "JJ Wellness")!;
     expect(jj.total).toBe(600);
     expect(jj.items.map((i) => [i.name, i.count, i.total])).toEqual([
       ["New Thyroid + Wellness Consultation (₹200 per bill)", 2, 400],
@@ -72,11 +72,11 @@ describe("department accounts", () => {
     await expense("2026-10-21", f.ids.lab, 5000);
 
     const d = await departmentAccounts(f.admin, { from: "2026-10-01", to: "2026-11-30" });
-    const mmp = d.profit.find((p) => p.name === "JJ Wellness — MMP admissions")!;
-    expect(mmp.totals).toEqual({ income: 100000, pharmacySales: 21000, pharmacyMargin: 2000, expenses: 80000, incentive: 210, profit: 21790 });
-    expect(mmp.profit).toEqual({ "2026-10": 71790, "2026-11": -50000 });
-    expect(mmp.medicines).toEqual([{ name: "INJ MOUNJARO KWIKPEN 5mg/0.6ml", sales: 21000, margin: 2000 }]);
-    expect(d.profit.find((p) => p.name === "JJ Wellness (skin, hair, BMI)")!.totals.profit).toBe(200);
+    // One department: MMP package + ₹200 wellness share + injection margin − Wellness expenses − 1% incentive.
+    const jjDept = d.profit.find((p) => p.name === "JJ Wellness")!;
+    expect(jjDept.totals).toEqual({ income: 100200, pharmacySales: 21000, pharmacyMargin: 2000, expenses: 80000, incentive: 210, profit: 21990 });
+    expect(jjDept.profit).toEqual({ "2026-10": 71990, "2026-11": -50000 });
+    expect(jjDept.medicines).toEqual([{ name: "INJ MOUNJARO KWIKPEN 5mg/0.6ml", sales: 21000, margin: 2000 }]);
     expect(d.sharedExpenses.total).toBe(5000);
     const jj = d.partners.find((p) => p.name === "JJ Wellness")!;
     expect(jj.profit).toEqual({ "2026-10": 71990, "2026-11": -50000 });

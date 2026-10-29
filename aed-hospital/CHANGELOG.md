@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.16.0: Department profit
+- JJ Wellness is one department (skin, hair, BMI, ₹200 wellness share, MMP packages and admissions, GLP injections, Wellness expenses, 20% share) (migration `20261031010000_jj_wellness_one_department`).
 - Long admissions are their own department, next to Short admissions (migration `20261031000000_long_admissions`).
 - Department accounts open with "Is each department making money?": billed income + margin on the department's pharmacy medicines (without GST, after purchase cost) − expenses booked to its expense department − staff incentive, with Profit / Loss per department and month. Expenses of departments no income department claims are shown as shared costs.
 - JJ Wellness: GLP injections (Mounjaro, Yurpeak, Glipiq, Sema… brands, Sundae, Ozempic, Wegovy, Ozanta, Wyntide, Obeda, Extensior, Povizitra) from the Hormonal Pharmacy's medicine-wise sales count as its margin, with the 1% staff incentive on their sales as its cost; "Wellness" expenses are its costs; JJ Wellness's 20% share is worked out on the combined profit of its two departments, per month, on months in profit. All configurable in Master Data → Income departments (migration `20261030000000_department_profit`).

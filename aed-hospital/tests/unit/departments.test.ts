@@ -17,15 +17,15 @@ describe("department of a billed item (names as billed in OneGlance)", () => {
     ["LAB", "2D Echo", "Cardiac (2D Echo, TMT, ECG)"],
     ["LAB", "TMT ( TREADMIL TEST )", "Cardiac (2D Echo, TMT, ECG)"],
     ["LAB", "ECG", "Cardiac (2D Echo, TMT, ECG)"],
-    ["OPD", "Skin Consultation", "JJ Wellness (skin, hair, BMI)"],
-    ["OPD", "Hair Consultation", "JJ Wellness (skin, hair, BMI)"],
-    ["LAB", "BMI ANALYSIS", "JJ Wellness (skin, hair, BMI)"],
+    ["OPD", "Skin Consultation", "JJ Wellness"],
+    ["OPD", "Hair Consultation", "JJ Wellness"],
+    ["LAB", "BMI ANALYSIS", "JJ Wellness"],
     ["LAB", "PFT", "Ophthalmology"],
     ["LAB", "AR", "Ophthalmology"],
     ["LAB", "Diabetic Fundus", "Ophthalmology"],
     ["LAB", "Thyroid Fundus", "Ophthalmology"],
     ["OPD", "Ophthalmology Consultation", "Ophthalmology"],
-    ["OPD", "Wellness Consultation", "JJ Wellness (skin, hair, BMI)"],
+    ["OPD", "Wellness Consultation", "JJ Wellness"],
     ["DIET", "Diet Follow up", "Diet"],
     ["OPD", "Diet consultation", "Diet"],
     ["SCP", "Sugar Control Plan", "SCP — Sugar Control Plans"],
@@ -33,8 +33,8 @@ describe("department of a billed item (names as billed in OneGlance)", () => {
     ["SCP", "Short admission by Spandana", "Short admissions"],
     ["IPD", "Short Admission", "Short admissions"],
     ["IPD", "Long Admission", "Long admissions"],
-    ["IPD", "MMP admission", "JJ Wellness — MMP admissions"],
-    ["OTHER", "JJ Wellness MMP package", "JJ Wellness — MMP admissions"],
+    ["IPD", "MMP admission", "JJ Wellness"],
+    ["OTHER", "JJ Wellness MMP package", "JJ Wellness"],
   ])("%s %s → %s", (stream, name, expected) => expect(dept(stream, name)).toBe(expected));
 
   it.each([
@@ -57,7 +57,7 @@ describe("combined bills: consultation + ₹200 wellness", () => {
     ["+Wellness Consultation", ""],
   ])("%s → JJ Wellness ₹200, rest is %s", (name, base) => {
     const s = addOnSplit(depts, name);
-    expect(s?.dept.name).toBe("JJ Wellness (skin, hair, BMI)");
+    expect(s?.dept.name).toBe("JJ Wellness");
     expect(s?.dept.addOnAmount).toBe(200);
     expect(s?.base).toBe(base);
   });
@@ -78,11 +78,11 @@ describe("JJ Wellness register dates", () => {
 describe("JJ Wellness costs and injections", () => {
   it.each(["INJ MOUNJARO KWIKPEN 2.5mg/0.6ml", "INJ MOUNJARO KWIKPEN 15MG/0.6ML", "INJ WEGOVY 1.7MG/3ML", "INJ SUNDAE 2MG PEN", "VIAL SUNDAE 4MG INJ", "INJ SEMATRINITY 2MG", "Glipiq 4 mg", "INJ YURPEAK 5MG", "Ozempic 1mg"])(
     "%s is a JJ Wellness injection",
-    (name) => expect(pharmacyDepartmentFor(depts, name)?.name).toBe("JJ Wellness — MMP admissions"),
+    (name) => expect(pharmacyDepartmentFor(depts, name)?.name).toBe("JJ Wellness"),
   );
   it.each(["TAB METFORMIN 500", "INJ HUMAN MIXTARD 30/70", "CAP PREGASTIN-M"])("%s is not", (name) => expect(pharmacyDepartmentFor(depts, name)).toBeNull());
   it("charges Wellness expenses to JJ Wellness and leaves others shared", () => {
-    expect(expenseDepartmentFor(depts, "Wellness")?.name).toBe("JJ Wellness — MMP admissions");
+    expect(expenseDepartmentFor(depts, "Wellness")?.name).toBe("JJ Wellness");
     expect(expenseDepartmentFor(depts, "Diet & Nutrition")?.name).toBe("Diet");
     expect(expenseDepartmentFor(depts, "Administration")).toBeNull();
     expect(expenseDepartmentFor(depts, null)).toBeNull();
