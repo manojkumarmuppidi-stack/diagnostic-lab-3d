@@ -125,7 +125,4 @@ export const DEFAULT_DEPARTMENTS: DeptDefault[] = [
   // Whole streams: lab tests and consultations no department above claims.
   { name: "Laboratory", keywords: "stream:LAB" },
   { name: "Consultation chambers", keywords: "stream:OPD" },
-  // Cost centres without income of their own.
-  { name: "Reception & Administration", keywords: "" },
-  { name: "Lobby", keywords: "" },
 ];

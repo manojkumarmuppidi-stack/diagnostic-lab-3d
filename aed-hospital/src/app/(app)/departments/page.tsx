@@ -713,7 +713,7 @@ function Inner() {
             <span>
               Department accounts are an analysis on their own: they never change the hospital&apos;s income or expenditure. A bill belongs to a department by the name it was
               billed under in OneGlance (consultation type, lab test, diet service or IPD admission type). A department&apos;s costs are only the shares entered with “Add cost”,
-              plus the incentive on its injections. Injection margin comes from the Hormonal Pharmacy&apos;s medicine-wise sales (OneGlance Purchase/Sales report), without GST.{" "}
+              plus the incentive on its injections. Hospital-wide areas (reception, administration, lobby) are not charged to departments, so profit here is before those common costs. Injection margin comes from the Hormonal Pharmacy&apos;s medicine-wise sales (OneGlance Purchase/Sales report), without GST.{" "}
               {can("masters.manage") && (
                 <>
                   To move a billed name or a medicine into a department, edit it under{" "}
