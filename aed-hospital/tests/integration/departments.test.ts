@@ -30,7 +30,8 @@ describe("department accounts", () => {
     expect(by["Cardiac (2D Echo, TMT, ECG)"]).toMatchObject({ total: 3300, count: 3, byMonth: { "2026-09": 3000, "2026-10": 300 } });
     expect(by["USG scan room"]).toMatchObject({ total: 1500, count: 1 });
     expect(by["SCP — Sugar Control Plans"]).toMatchObject({ total: 3000, items: [{ name: "Sugar Control Plan", stream: "SCP" }] });
-    expect(d.unassigned.map((g) => [g.name, g.total])).toEqual([["Laboratory — not in a department", 1500]]);
+    expect(by["Laboratory"]).toMatchObject({ total: 1500, count: 1 });
+    expect(d.unassigned).toEqual([]);
     expect(d.grandTotal).toBe(9300);
     expect(d.months).toEqual(["2026-09", "2026-10"]);
   });
@@ -50,7 +51,7 @@ describe("department accounts", () => {
       ["New Thyroid + Wellness Consultation (₹200 per bill)", 2, 400],
       ["Wellness Consultation", 1, 200],
     ]);
-    expect(d.unassigned.map((g) => [g.name, g.total])).toEqual([["OPD — not in a department", 2000]]);
+    expect(d.departments.find((g) => g.name === "Consultation chambers")!.total).toBe(2000);
     expect(d.grandTotal).toBe(2600);
   });
 

@@ -38,12 +38,12 @@ describe("department of a billed item (names as billed in OneGlance)", () => {
   ])("%s %s → %s", (stream, name, expected) => expect(dept(stream, name)).toBe(expected));
 
   it.each([
-    ["OPD", "Thyroid Old Consultation"],
-    ["LAB", "HbA1c"],
-    ["LAB", "X-RAY WRIST AP VIEW"],
-    ["OPD", "Growth (short) Disorder"],
-    ["IPD", "Other"],
-  ])("%s %s is in no department", (stream, name) => expect(dept(stream, name)).toBeNull());
+    ["OPD", "Thyroid Old Consultation", "Consultation chambers"],
+    ["OPD", "Growth (short) Disorder", "Consultation chambers"],
+    ["LAB", "HbA1c", "Laboratory"],
+    ["LAB", "X-RAY WRIST AP VIEW", "Laboratory"],
+  ])("%s %s → %s (whole stream)", (stream, name, expected) => expect(dept(stream, name)).toBe(expected));
+  it("an IPD admission type no department names stays outside", () => expect(dept("IPD", "Other")).toBeNull());
 });
 
 describe("combined bills: consultation + ₹200 wellness", () => {

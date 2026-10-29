@@ -122,4 +122,10 @@ export const DEFAULT_DEPARTMENTS: DeptDefault[] = [
   { name: "SCP — Sugar Control Plans", keywords: "sugar control, scp, stream:SCP" },
   { name: "Short admissions", keywords: "short admission, short admissions, short adm" },
   { name: "Long admissions", keywords: "long admission, long admissions, long adm" },
+  // Whole streams: lab tests and consultations no department above claims.
+  { name: "Laboratory", keywords: "stream:LAB" },
+  { name: "Consultation chambers", keywords: "stream:OPD" },
+  // Cost centres without income of their own.
+  { name: "Reception & Administration", keywords: "" },
+  { name: "Lobby", keywords: "" },
 ];

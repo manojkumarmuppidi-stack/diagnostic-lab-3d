@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.17.1: First-floor space costs
+- The first-floor expense pool (₹1,51,607.10 a month) is charged to departments by floor area from January 2026: Laboratory 15%, Reception & Administration 7%, Lobby 20%, Consultation chambers 25%, USG & 2D Echo room 5% (USG scan room), Ophthalmology 7%, ECG & TMT room 3% (Cardiac), JJ Wellness 6%, Dietetics 5% (Diet), Physiotherapy 5% (Foot exam, neuropathy & physiotherapy); 2% unallocated.
+- New departments: Laboratory (lab tests no other department claims), Consultation chambers (consultations no other department claims), and the cost centres Reception & Administration and Lobby (migration `20261101000000_first_floor_allocation`).
+
 ## 0.17.0: Department statements
 - Department accounts are an analysis on their own and never change the hospital's income or expenditure. Each department opens as a statement: income from every source (billed items, the ₹200 wellness share, packages, injection margin), then its costs, then profit, month by month, with Profit / Loss.
 - A department's costs are only what the Admin allocates with "Add cost": a fixed ₹ per month (a staff salary, rent for its floor area) or a % of the hospital's spending in an expense category that month (10% of the power bill), from a month and optionally until a month; plus the incentive on its injections. Expenses are no longer swept in by expense department (migration `20261031020000_department_costs`).
