@@ -405,6 +405,12 @@ describe("department accounts", () => {
       matchText: "Geetha Priya, Geethapriya",
       fromMonth: "2026-01",
     });
+    // The same rule from a sheet that has no amount column at all.
+    const wb = new ExcelJS.Workbook();
+    const e = wb.addWorksheet("Expenses by name");
+    e.addRow(["Department", "What is it", "Expenses containing", "From month", "Until month"]);
+    e.addRow(["Ophthalmology", "Consultations — Dr. Geetha Priya", "Geetha Priya, Geethapriya", "Jan 2026", null]);
+    expect(await importDepartmentWorkbook(f.admin, null, "names.xlsx", Buffer.from(await wb.xlsx.writeBuffer()))).toMatchObject({ costsAdded: 0, costsUpdated: 1 });
     const d = await departmentAccounts(f.admin, { from: "2026-09-01", to: "2026-10-31" });
     const st = d.statements.find((x) => x.name === "Ophthalmology")!;
     expect(st.costLines.map((l) => [l.label, l.byMonth])).toEqual([["Consultations — Dr. Geetha Priya", { "2026-09": 8000, "2026-10": 10500 }]]);

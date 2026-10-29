@@ -770,12 +770,13 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
       }
       continue;
     }
-    if (labelCol && amountCol && fromCol) {
+    const listPctCol = col("% of department income", "percent of department income", "% of income");
+    const matchCol = col("expenses containing", "expense containing", "expenses mentioning");
+    if (labelCol && fromCol && (amountCol || listPctCol || matchCol)) {
       const untilCol = col("until month", "until", "to month", "to");
-      const pctCol = col("% of department income", "percent of department income", "% of income");
+      const pctCol = listPctCol;
       const deptCol = col("department", "dept");
       const typeCol = col("type", "cost type", "kind");
-      const matchCol = col("expenses containing", "expense containing", "expenses mentioning");
       for (const r of sh.rows) {
         let label = String(r.values[labelCol] ?? "").trim();
         if (!label) continue;
@@ -788,7 +789,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
         // "Salary" + "Niswanth" → "Salary — Niswanth", so costs group by kind on the statement.
         const type = typeCol ? String(r.values[typeCol] ?? "").trim() : "";
         if (type && !norm(label).startsWith(norm(type))) label = `${type} — ${label}`;
-        const amount = amountOf(r.values[amountCol]);
+        const amount = amountCol ? amountOf(r.values[amountCol]) : null;
         const percent = pctCol ? amountOf(r.values[pctCol]) : null;
         const fromMonth = monthOf(r.values[fromCol]);
         const toMonth = untilCol ? monthOf(r.values[untilCol]) : null;
