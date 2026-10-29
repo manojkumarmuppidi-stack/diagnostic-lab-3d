@@ -26,7 +26,6 @@ export const MASTER_TYPES = {
       keywords: z.string().trim().max(1000).default(""),
       addOnKeywords: z.string().trim().max(500).default(""),
       addOnAmount: money.default(0),
-      expenseDepartments: z.string().trim().max(500).default(""),
       pharmacyItems: z.string().trim().max(2000).default(""),
       pharmacyIncentivePct: z.coerce.number().min(0).max(100).default(0),
       partnerName: z.string().trim().max(80).default(""),

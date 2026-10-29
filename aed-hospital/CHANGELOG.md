@@ -2,6 +2,11 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.17.0: Department statements
+- Department accounts are an analysis on their own and never change the hospital's income or expenditure. Each department opens as a statement: income from every source (billed items, the ₹200 wellness share, packages, injection margin), then its costs, then profit, month by month, with Profit / Loss.
+- A department's costs are only what the Admin allocates with "Add cost": a fixed ₹ per month (a staff salary, rent for its floor area) or a % of the hospital's spending in an expense category that month (10% of the power bill), from a month and optionally until a month; plus the incentive on its injections. Expenses are no longer swept in by expense department (migration `20261031020000_department_costs`).
+- "Income patient by patient" lists everyone who paid the department and for what. "All departments at a glance" compares income, costs and profit.
+
 ## 0.16.0: Department profit
 - JJ Wellness is one department (skin, hair, BMI, ₹200 wellness share, MMP packages and admissions, GLP injections, Wellness expenses, 20% share) (migration `20261031010000_jj_wellness_one_department`).
 - Long admissions are their own department, next to Short admissions (migration `20261031000000_long_admissions`).

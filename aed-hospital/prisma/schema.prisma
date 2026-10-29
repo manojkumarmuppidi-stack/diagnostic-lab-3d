@@ -940,24 +940,46 @@ model Setting {
 /// consultation type, lab test, diet service or IPD admission type — belongs to the first department
 /// whose keywords appear in its name; "stream:XYZ" takes a whole income stream (e.g. stream:DIET).
 model ServiceDepartment {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id                   String   @id @default(cuid())
+  name                 String   @unique
   /// Comma-separated words or phrases matched against the billed name, e.g. "usg, doppler, fnac".
-  keywords  String   @default("")
+  keywords             String   @default("")
   /// Combined bills "<consultation> + <add-on>": the fixed amount per bill this department takes.
-  addOnKeywords String  @default("")
-  addOnAmount   Decimal @default(0) @db.Decimal(12, 2)
-  /// Expense departments (Department master names, comma-separated) whose expenses are this department's costs.
-  expenseDepartments   String  @default("")
+  addOnKeywords        String   @default("")
+  addOnAmount          Decimal  @default(0) @db.Decimal(12, 2)
   /// Hormonal Pharmacy medicines (name words) whose margin is this department's income, e.g. GLP injections.
-  pharmacyItems        String  @default("")
+  pharmacyItems        String   @default("")
   /// Staff incentive on those medicines' sales, % of the billed amount; a cost of this department.
-  pharmacyIncentivePct Decimal @default(0) @db.Decimal(5, 2)
+  pharmacyIncentivePct Decimal  @default(0) @db.Decimal(5, 2)
   /// Profit-sharing partner (e.g. "JJ Wellness"): its share is this % of the partner's departments' profit.
-  partnerName          String  @default("")
-  partnerSharePct      Decimal @default(0) @db.Decimal(5, 2)
-  sortOrder Int      @default(0)
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  partnerName          String   @default("")
+  partnerSharePct      Decimal  @default(0) @db.Decimal(5, 2)
+  sortOrder            Int      @default(0)
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  costs DepartmentCost[]
+}
+
+/// A department's share of hospital costs, for department accounts only (it is not a hospital expense):
+/// FIXED ₹ per month (JJ Wellness staff salary, rent for 500 sq ft), or SHARE: a percentage of the
+/// hospital's booked expenses in one expense category that month (10% of Electricity).
+model DepartmentCost {
+  id           String            @id @default(cuid())
+  departmentId String
+  department   ServiceDepartment @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  label        String
+  kind         String            @default("FIXED")
+  amount       Decimal           @default(0) @db.Decimal(12, 2)
+  percent      Decimal           @default(0) @db.Decimal(6, 2)
+  categoryId   String?
+  /// First and last month it applies to ("2026-01"); no last month = every month from then on.
+  fromMonth    String
+  toMonth      String?
+  createdById  String
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([departmentId])
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addOnSplit, compileDepartments, departmentFor, DEFAULT_DEPARTMENTS, expenseDepartmentFor, pharmacyDepartmentFor } from "@/lib/departments";
+import { addOnSplit, compileDepartments, departmentFor, DEFAULT_DEPARTMENTS, pharmacyDepartmentFor } from "@/lib/departments";
 
 const depts = compileDepartments(DEFAULT_DEPARTMENTS.map((d, i) => ({ ...d, id: d.name, sortOrder: (i + 1) * 10 })));
 const dept = (stream: string, name: string) => departmentFor(depts, stream, name)?.name ?? null;
@@ -81,10 +81,4 @@ describe("JJ Wellness costs and injections", () => {
     (name) => expect(pharmacyDepartmentFor(depts, name)?.name).toBe("JJ Wellness"),
   );
   it.each(["TAB METFORMIN 500", "INJ HUMAN MIXTARD 30/70", "CAP PREGASTIN-M"])("%s is not", (name) => expect(pharmacyDepartmentFor(depts, name)).toBeNull());
-  it("charges Wellness expenses to JJ Wellness and leaves others shared", () => {
-    expect(expenseDepartmentFor(depts, "Wellness")?.name).toBe("JJ Wellness");
-    expect(expenseDepartmentFor(depts, "Diet & Nutrition")?.name).toBe("Diet");
-    expect(expenseDepartmentFor(depts, "Administration")).toBeNull();
-    expect(expenseDepartmentFor(depts, null)).toBeNull();
-  });
 });
