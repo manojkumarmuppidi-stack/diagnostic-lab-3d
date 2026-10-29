@@ -103,6 +103,7 @@ export function costCategory(label: string): [string, string] {
   if (/first-floor|space|rent|electric|power|current|water/i.test(label)) return ["space", "Space, rent & utilities"];
   if (/repair|maintenance|equipment|service|amc/i.test(label)) return ["repairs", "Equipment, repairs & maintenance"];
   if (/consumable|supplies|supply|stationery|reagent|kit/i.test(label)) return ["consumables", "Consumables & supplies"];
+  if (/grocer/i.test(label)) return ["groceries", "Groceries"];
   return ["other", "Other costs"];
 }
 export const costGroups = (lines: any[]) =>

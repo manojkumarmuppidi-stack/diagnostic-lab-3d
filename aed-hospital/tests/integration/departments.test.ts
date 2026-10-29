@@ -252,5 +252,50 @@ describe("department accounts", () => {
     b.addRow(["", "Salary — Y", 1000, "Jan 2026"]);
     await expect(importDepartmentWorkbook(f.admin, null, "bad.xlsx", Buffer.from(await bad.xlsx.writeBuffer()))).rejects.toThrow(/no department called "Radiology wing".*choose the department/);
   });
+
+  it("reads a department's monthly expenditure sheet (months across), and its head can upload it again to correct it", async () => {
+    const physio = await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Foot exam, neuropathy & physiotherapy" } });
+    const sheet = (rows: (string | number | null)[][]) => {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet("Physio");
+      ws.addRow(["AED Hospital — monthly expenditure"]);
+      ws.addRow(["Department: Foot exam, neuropathy & physiotherapy"]);
+      ws.addRow(["Category", "Name / item", "Jan 2026", "Feb 2026", "Mar 2026", "Total"]);
+      rows.forEach((r) => ws.addRow(r));
+      return wb.xlsx.writeBuffer().then((b) => Buffer.from(b));
+    };
+    const first = await sheet([
+      ["Salaries", "Therapist A", 20000, 20000, 22000, null],
+      ["Salaries", "", null, null, null, null],
+      ["Maintenance & repair", "Traction unit", null, 3500, null, null],
+      ["Groceries", "", 800, 800, 800, null],
+      ["Total", "", 20800, 24300, 22800, null],
+    ]);
+    const r = await importDepartmentWorkbook(f.admin, null, "physio.xlsx", first);
+    expect(r).toMatchObject({ department: "Foot exam, neuropathy & physiotherapy", costsAdded: 4 });
+    const rows = await prisma.departmentCost.findMany({ where: { departmentId: physio.id }, orderBy: [{ label: "asc" }, { fromMonth: "asc" }] });
+    expect(rows.map((x) => [x.label, Number(x.amount), x.fromMonth, x.toMonth])).toEqual([
+      ["Groceries", 800, "2026-01", "2026-03"],
+      ["Repair & maintenance — Traction unit", 3500, "2026-02", "2026-02"],
+      ["Salary — Therapist A", 20000, "2026-01", "2026-02"],
+      ["Salary — Therapist A", 22000, "2026-03", "2026-03"],
+    ]);
+
+    // Wrong statement, other heads and Admin-entered rows are refused.
+    const usg = await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "USG scan room" } });
+    await expect(importDepartmentWorkbook(f.admin, usg.id, "physio.xlsx", first)).rejects.toThrow(/is for Foot exam/);
+    await expect(importDepartmentWorkbook({ ...f.reception, headOfDepartmentId: usg.id }, null, "physio.xlsx", first)).rejects.toThrow(/only for the department you head/);
+    const head = { ...f.reception, headOfDepartmentId: physio.id };
+    await expect(importDepartmentWorkbook(head, physio.id, "physio.xlsx", first)).rejects.toThrow(/entered by the Admin/);
+
+    // The head's own corrected sheet replaces their earlier figures for those months, without doubling.
+    await prisma.departmentCost.deleteMany({ where: { departmentId: physio.id } });
+    await importDepartmentWorkbook(head, physio.id, "physio.xlsx", first);
+    await importDepartmentWorkbook(head, physio.id, "physio.xlsx", await sheet([["Salaries", "Therapist A", 21000, 21000, 21000, null]]));
+    const d = await departmentAccounts(f.admin, { from: "2026-01-01", to: "2026-03-31" });
+    const st = d.statements.find((x) => x.id === physio.id)!;
+    expect(st.costLines.filter((l) => l.label === "Salary — Therapist A").reduce((a, l) => a + l.total, 0)).toBe(63000);
+    expect(st.costLines.find((l) => l.label === "Groceries")!.total).toBe(2400);
+  });
 });
 

@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.21.0: Department monthly expenditure sheets
+- Department Excel import reads the monthly expenditure sheet: Category (Salaries, Maintenance & repair, Consumables, Groceries, Equipment, Other) · Name / item · one column per month, with "Department: …" above the table. Consecutive months with the same amount become one cost line; uploading a corrected sheet replaces that cost for the months it covers instead of adding it twice.
+- Department heads can import their own department's costs (their statement's Import from Excel); they cannot overwrite what the Admin entered. Cost groups include Groceries.
+
 ## 0.20.0: Department insights and graphs
 - "Import costs for all departments" (All departments): one sheet with Department · Type · What is it · Amount per month · From month · Until month books every department's salaries, repairs, consumables and other costs; Type is put in front of the name ("Salary — …") so costs group by kind. Cost groups now include Equipment, repairs & maintenance and Consumables & supplies.
 - Department accounts: costs grouped into Salaries, Incentives, Space/rent/utilities and Other (tap to see and edit each item), like income.

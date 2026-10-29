@@ -294,7 +294,7 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
       }
       actions={
         <span className="flex flex-wrap gap-2">
-          {admin && <ImportButton departmentId={st.id} onDone={changed} />}
+          {edit && <ImportButton departmentId={st.id} onDone={changed} />}
           {edit && (
             <Button size="sm" onClick={() => setDialog({ cost: null })}>
               <Plus className="h-4 w-4" /> Add cost

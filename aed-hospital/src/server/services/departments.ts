@@ -36,7 +36,9 @@ type Compiled = ReturnType<typeof compileDepartments>;
 
 async function loadDepartments() {
   const rules = await prisma.serviceDepartment.findMany({ where: { active: true } });
-  return compileDepartments(rules.map((r) => ({ ...r, addOnAmount: toNum(r.addOnAmount), pharmacyIncentivePct: toNum(r.pharmacyIncentivePct), partnerSharePct: toNum(r.partnerSharePct) })));
+  return compileDepartments(
+    rules.map((r) => ({ ...r, addOnAmount: toNum(r.addOnAmount), pharmacyIncentivePct: toNum(r.pharmacyIncentivePct), partnerSharePct: toNum(r.partnerSharePct) })),
+  );
 }
 
 /**
@@ -145,7 +147,8 @@ export async function departmentAccounts(actor: Actor, q: { from?: string | null
     const count = toNum(r.n);
     const itemName = r.name ?? `(${STREAM_LABELS[r.stream as IncomeStream] ?? r.stream}, no name)`;
     grand = round2(grand + amount);
-    for (const p of place(depts, r.stream, r.name, count, amount)) add(p.deptId ? groups.get(p.deptId)! : unassignedGroup(r.stream), p.label ?? itemName, r.stream, r.m, count, p.amount);
+    for (const p of place(depts, r.stream, r.name, count, amount))
+      add(p.deptId ? groups.get(p.deptId)! : unassignedGroup(r.stream), p.label ?? itemName, r.stream, r.m, count, p.amount);
   }
   const finish = (gs: Group[]) => gs.map((g) => ({ ...g, items: g.items.sort((a, b) => b.total - a.total) }));
   const departments = finish([...groups.values()]);
@@ -218,7 +221,17 @@ async function departmentProfit(
   months: string[],
   calendarMonths: string[],
   byDay: boolean,
-  costs: { id: string; departmentId: string; label: string; kind: string; amount: Prisma.Decimal; percent: Prisma.Decimal; categoryId: string | null; fromMonth: string; toMonth: string | null }[],
+  costs: {
+    id: string;
+    departmentId: string;
+    label: string;
+    kind: string;
+    amount: Prisma.Decimal;
+    percent: Prisma.Decimal;
+    categoryId: string | null;
+    fromMonth: string;
+    toMonth: string | null;
+  }[],
   medicineRows: { m: string; name: string; amount: Prisma.Decimal; taxable: Prisma.Decimal | null; cost: Prisma.Decimal | null; nocost: bigint }[],
   contributors: { id: string; departmentId: string; name: string; incentivePct: Prisma.Decimal; incomes: { month: string; amount: Prisma.Decimal }[] }[],
 ) {
@@ -250,7 +263,14 @@ async function departmentProfit(
       medicines.set(r.name, { sales: round2(med.sales + s), margin: round2(med.margin + mg) });
     }
     const incomeLines = g.items.map((it) => ({ name: it.name, stream: it.stream, count: it.count, byMonth: it.byMonth, total: it.total }));
-    if (medicines.size) incomeLines.push({ name: `Injection margin (sales ${formatShort(sum(sales))}, without GST, after purchase cost)`, stream: "PHARMACY", count: 0, byMonth: margin, total: sum(margin) });
+    if (medicines.size)
+      incomeLines.push({
+        name: `Injection margin (sales ${formatShort(sum(sales))}, without GST, after purchase cost)`,
+        stream: "PHARMACY",
+        count: 0,
+        byMonth: margin,
+        total: sum(margin),
+      });
     const costLines: { id: string | null; label: string; basis: string; byMonth: Money; total: number }[] = [];
     for (const c of costs.filter((x) => x.departmentId === d.id)) {
       const byMonth: Money = {};
@@ -291,8 +311,16 @@ async function departmentProfit(
         return { id: c.id, name: c.name, incentivePct: pct, generated, totalGenerated: sum(generated), incentive: pay, totalIncentive: sum(pay) };
       });
     for (const p of people)
-      if (p.totalIncentive) costLines.push({ id: null, label: `Incentive — ${p.name}`, basis: `${p.incentivePct}% of the income they generated`, byMonth: p.incentive, total: p.totalIncentive });
-    if (sum(incentive)) costLines.push({ id: null, label: `Staff incentive ${d.pharmacyIncentivePct}% of injection sales`, basis: "calculated from the pharmacy's medicine-wise sales", byMonth: incentive, total: sum(incentive) });
+      if (p.totalIncentive)
+        costLines.push({ id: null, label: `Incentive — ${p.name}`, basis: `${p.incentivePct}% of the income they generated`, byMonth: p.incentive, total: p.totalIncentive });
+    if (sum(incentive))
+      costLines.push({
+        id: null,
+        label: `Staff incentive ${d.pharmacyIncentivePct}% of injection sales`,
+        basis: "calculated from the pharmacy's medicine-wise sales",
+        byMonth: incentive,
+        total: sum(incentive),
+      });
     const costTotal: Money = {};
     for (const l of costLines) for (const [m, v] of Object.entries(l.byMonth)) addTo(costTotal, m, v);
     const profit: Money = {};
@@ -327,11 +355,13 @@ async function departmentProfit(
   return {
     statements,
     // The partner's share is agreed per month, so it is not worked out day by day.
-    partners: byDay ? [] : [...partners.values()].map((p) => {
-      const share: Money = {};
-      for (const m of months) share[m] = p.profit[m] > 0 ? round2((p.profit[m] * p.pct) / 100) : 0;
-      return { ...p, share, totals: { profit: sum(p.profit), share: sum(share), aed: round2(sum(p.profit) - sum(share)) } };
-    }),
+    partners: byDay
+      ? []
+      : [...partners.values()].map((p) => {
+          const share: Money = {};
+          for (const m of months) share[m] = p.profit[m] > 0 ? round2((p.profit[m] * p.pct) / 100) : 0;
+          return { ...p, share, totals: { profit: sum(p.profit), share: sum(share), aed: round2(sum(p.profit) - sum(share)) } };
+        }),
   };
 }
 
@@ -373,7 +403,13 @@ export async function saveDepartmentCost(actor: Actor, id: string | null, raw: u
   assertCanEditCost(actor, c.departmentId);
   if (!(await prisma.serviceDepartment.findUnique({ where: { id: c.departmentId } }))) throw notFound("Department not found");
   if (c.kind === "SHARE" && !(await prisma.expenseCategory.findUnique({ where: { id: c.categoryId! } }))) throw badRequest("Expense category not found");
-  const data = { ...c, amount: c.kind === "FIXED" ? c.amount : 0, percent: c.kind === "FIXED" ? 0 : c.percent, categoryId: c.kind === "SHARE" ? c.categoryId! : null, toMonth: c.toMonth || null };
+  const data = {
+    ...c,
+    amount: c.kind === "FIXED" ? c.amount : 0,
+    percent: c.kind === "FIXED" ? 0 : c.percent,
+    categoryId: c.kind === "SHARE" ? c.categoryId! : null,
+    toMonth: c.toMonth || null,
+  };
   return prisma.$transaction(async (tx) => {
     const before = id ? await tx.departmentCost.findUnique({ where: { id } }) : null;
     if (id && !before) throw notFound("Cost not found");
@@ -412,7 +448,9 @@ export async function departmentPatients(actor: Actor, q: { departmentId?: strin
   const depts = await loadDepartments();
   const dept = depts.find((d) => d.id === q.departmentId);
   if (!dept) throw notFound("Department not found");
-  const rows = await prisma.$queryRaw<{ stream: string; name: string | null; patient: string | null; code: string | null; pname: string | null; ref: string | null; n: Prisma.Decimal; amount: Prisma.Decimal }[]>`
+  const rows = await prisma.$queryRaw<
+    { stream: string; name: string | null; patient: string | null; code: string | null; pname: string | null; ref: string | null; n: Prisma.Decimal; amount: Prisma.Decimal }[]
+  >`
     SELECT v.stream, COALESCE(ct.name, li.name, ds.name, at.name, o.source) AS name, v.patient_key AS patient,
            p."patientCode" AS code, p.name AS pname, o.reference AS ref,
            SUM(CASE WHEN v.source_table = 'LabTransaction' THEN v.units ELSE 1 END) AS n, SUM(v.amount) AS amount
@@ -468,7 +506,13 @@ export async function saveContributor(actor: Actor, id: string | null, raw: unkn
     const before = id ? await tx.departmentContributor.findUnique({ where: { id } }) : null;
     if (id && !before) throw notFound("Person not found");
     const saved = id ? await tx.departmentContributor.update({ where: { id }, data: c }) : await tx.departmentContributor.create({ data: { ...c, createdById: actor.id } });
-    await audit(tx, actor, { action: id ? "DEPT_CONTRIBUTOR_UPDATE" : "DEPT_CONTRIBUTOR_CREATE", entityType: "DepartmentContributor", entityId: saved.id, before: before ?? undefined, after: saved });
+    await audit(tx, actor, {
+      action: id ? "DEPT_CONTRIBUTOR_UPDATE" : "DEPT_CONTRIBUTOR_CREATE",
+      entityType: "DepartmentContributor",
+      entityId: saved.id,
+      before: before ?? undefined,
+      after: saved,
+    });
     return saved;
   });
 }
@@ -496,7 +540,13 @@ export async function setContributorIncome(actor: Actor, id: string, raw: unknow
       : before
         ? (await tx.contributorIncome.delete({ where: { id: before.id } }), null)
         : null;
-    await audit(tx, actor, { action: "DEPT_CONTRIBUTOR_INCOME", entityType: "DepartmentContributor", entityId: id, before: before ?? undefined, after: after ?? { month, amount: null } });
+    await audit(tx, actor, {
+      action: "DEPT_CONTRIBUTOR_INCOME",
+      entityType: "DepartmentContributor",
+      entityId: id,
+      before: before ?? undefined,
+      after: after ?? { month, amount: null },
+    });
     return { ok: true };
   });
 }
@@ -511,7 +561,9 @@ const MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "se
 
 /** "2026-04", "Apr 2026", "April 2026", "04/2026" or an Excel date → "2026-04"; null when it is not a month. */
 export function monthOf(v: unknown): string | null {
-  const s = String(v ?? "").trim().toLowerCase();
+  const s = String(v ?? "")
+    .trim()
+    .toLowerCase();
   let m = /^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/.exec(s);
   if (m && +m[2] >= 1 && +m[2] <= 12) return `${m[1]}-${m[2].padStart(2, "0")}`;
   m = /^([a-z]{3})[a-z]*[\s'-]*(\d{2}|\d{4})$/.exec(s);
@@ -536,7 +588,9 @@ const amountOf = (v: unknown) => {
  *    income they generated each month.
  */
 export async function importDepartmentWorkbook(actor: Actor, departmentId: string | null, fileName: string, buf: Buffer) {
-  requireAdmin(actor);
+  // The Admin imports for any department; a department head imports costs for their own department.
+  const admin = can(actor, "masters.manage");
+  if (!admin && !actor.headOfDepartmentId) throw forbidden("Only an Admin or a department head can import department costs");
   const all = await prisma.serviceDepartment.findMany({ where: { active: true }, select: { id: true, name: true } });
   const dept = departmentId ? all.find((d) => d.id === departmentId) : null;
   if (departmentId && !dept) throw notFound("Department not found");
@@ -552,6 +606,8 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
   const costs: { departmentId: string; label: string; amount: number; percent: number; fromMonth: string; toMonth: string | null; row: number }[] = [];
   const people: { name: string; pct: number; incomes: [string, number | null][]; row: number }[] = [];
   const errors: string[] = [];
+  // Month-grid sheets: one row per cost, one column per month (the department's monthly expenditure sheet).
+  const grid = new Map<string, { departmentId: string; label: string; months: Map<string, number>; from: string; to: string }>();
   for (const sh of sheets) {
     const hs = sh.headers.map(key);
     const col = (...names: string[]) => sh.headers[hs.findIndex((h) => names.map(key).includes(h))];
@@ -559,6 +615,48 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     const amountCol = col("amount per month", "amount", "monthly amount");
     const fromCol = col("from month", "from");
     const personCol = col("person", "name");
+    const catCol = col("category", "expense head", "head", "type");
+    const monthCols = sh.headers.map((h) => [h, monthOf(h)] as const).filter(([, m]) => m) as [string, string][];
+    if (catCol && monthCols.length && !amountCol && !personCol) {
+      // The department: "Department: Physiotherapy" above the table, else the tab's name, else the statement it was uploaded from.
+      const named = (sh.preamble ?? []).map((l) => /department\s*[:\-–]\s*(.+)/i.exec(l)?.[1]?.trim()).find(Boolean) ?? null;
+      const fromSheet = named ? findDept(named) : findDept(sh.name);
+      if (named && !fromSheet) {
+        errors.push(`${sh.name}: no department called "${named}"`);
+        continue;
+      }
+      if (fromSheet && dept && fromSheet.id !== dept.id) {
+        errors.push(`${sh.name} is for ${fromSheet.name}, not ${dept.name}: upload it from ${fromSheet.name}'s statement or with "Import costs for all departments"`);
+        continue;
+      }
+      const target = fromSheet ?? dept;
+      if (!target) {
+        errors.push(`${sh.name}: write "Department: <name>" above the table`);
+        continue;
+      }
+      const nameCol = col("name / item", "name item", "employee / item", "employee item", "item", "details", "what is it", "particulars");
+      const months = monthCols.map(([, m]) => m).sort();
+      for (const r of sh.rows) {
+        const cat = String(r.values[catCol] ?? "").trim();
+        const name = nameCol ? String(r.values[nameCol] ?? "").trim() : "";
+        if (!cat && !name) continue;
+        if (/^(grand )?total/i.test(cat) || /^(grand )?total/i.test(name)) continue;
+        const label = gridLabel(cat, name);
+        for (const [h, m] of monthCols) {
+          const a = amountOf(r.values[h]);
+          if (a === null || a === 0) continue;
+          if (Number.isNaN(a) || a < 0) {
+            errors.push(`${sh.name} row ${r.rowNumber}, ${h}: not an amount`);
+            continue;
+          }
+          const k = `${target.id}|${label}`;
+          const g = grid.get(k) ?? { departmentId: target.id, label: label.slice(0, 120), months: new Map(), from: months[0], to: months[months.length - 1] };
+          g.months.set(m, round2((g.months.get(m) ?? 0) + a));
+          grid.set(k, g);
+        }
+      }
+      continue;
+    }
     if (labelCol && amountCol && fromCol) {
       const untilCol = col("until month", "until", "to month", "to");
       const pctCol = col("% of department income", "percent of department income", "% of income");
@@ -590,7 +688,15 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
           errors.push(`${sh.name} row ${r.rowNumber}: last month is before the first month`);
           continue;
         }
-        costs.push({ departmentId: target.id, label: label.slice(0, 120), amount: hasAmount ? round2(amount!) : 0, percent: hasPct ? round2(percent!) : 0, fromMonth, toMonth, row: r.rowNumber });
+        costs.push({
+          departmentId: target.id,
+          label: label.slice(0, 120),
+          amount: hasAmount ? round2(amount!) : 0,
+          percent: hasPct ? round2(percent!) : 0,
+          fromMonth,
+          toMonth,
+          row: r.rowNumber,
+        });
       }
     } else if (personCol) {
       const pctCol = col("incentive %", "incentive", "incentive percent");
@@ -614,12 +720,34 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     }
   }
   if (errors.length) throw badRequest(`Nothing was saved. Fix these rows: ${errors.slice(0, 8).join("; ")}${errors.length > 8 ? ` (and ${errors.length - 8} more)` : ""}`);
-  if (!costs.length && !people.length)
-    throw badRequest('No costs or people found. Use a sheet with "What is it | Amount per month | From month | Until month" and/or one with "Person | Incentive % | <months>".');
+  if (!costs.length && !people.length && !grid.size)
+    throw badRequest(
+      'No amounts found. In the monthly expenditure sheet, type the names/items and the rupees paid under each month; or use a sheet with "What is it | Amount per month | From month | Until month".',
+    );
   if (people.length && !dept) throw badRequest("People and their income generated are imported from that department's statement (its Import from Excel button).");
+  if (!admin) {
+    const targets = new Set([...costs.map((c) => c.departmentId), ...[...grid.values()].map((g) => g.departmentId)]);
+    if (people.length || [...targets].some((t) => t !== actor.headOfDepartmentId)) throw forbidden("You can import costs only for the department you head");
+  }
   return prisma.$transaction(async (tx) => {
     let added = 0;
     let updated = 0;
+    // A month-grid replaces what was there for the same cost in the months it covers, so a corrected
+    // sheet can be uploaded again without counting anything twice. Equal amounts in a row become one range.
+    for (const g of grid.values()) {
+      const old = await tx.departmentCost.findMany({
+        where: { departmentId: g.departmentId, label: g.label, fromMonth: { lte: g.to }, OR: [{ toMonth: null }, { toMonth: { gte: g.from } }] },
+      });
+      if (!admin && old.some((o) => o.createdById !== actor.id)) throw forbidden(`"${g.label}" was entered by the Admin for these months — ask the Admin to change it`);
+      if (old.length) await tx.departmentCost.deleteMany({ where: { id: { in: old.map((o) => o.id) } } });
+      updated += old.length;
+      for (const r of monthRanges(g.months)) {
+        await tx.departmentCost.create({
+          data: { departmentId: g.departmentId, label: g.label, kind: "FIXED", amount: r.amount, percent: 0, fromMonth: r.from, toMonth: r.to, createdById: actor.id },
+        });
+        added++;
+      }
+    }
     for (const c of costs) {
       const existing = await tx.departmentCost.findFirst({ where: { departmentId: c.departmentId, label: c.label, fromMonth: c.fromMonth } });
       const data = { kind: c.percent ? "INCOME" : "FIXED", amount: c.amount, percent: c.percent, categoryId: null, toMonth: c.toMonth };
@@ -639,14 +767,65 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
         : await tx.departmentContributor.create({ data: { departmentId: dept!.id, name: p.name, incentivePct: p.pct, createdById: actor.id } });
       for (const [month, amount] of p.incomes) {
         if (amount) {
-          await tx.contributorIncome.upsert({ where: { contributorId_month: { contributorId: person.id, month } }, create: { contributorId: person.id, month, amount }, update: { amount } });
+          await tx.contributorIncome.upsert({
+            where: { contributorId_month: { contributorId: person.id, month } },
+            create: { contributorId: person.id, month, amount },
+            update: { amount },
+          });
           incomeMonths++;
         } else await tx.contributorIncome.deleteMany({ where: { contributorId: person.id, month } });
       }
     }
-    const perDepartment = [...new Set(costs.map((c) => c.departmentId))].map((id) => ({ name: all.find((d) => d.id === id)!.name, rows: costs.filter((c) => c.departmentId === id).length }));
-    const result = { department: dept?.name ?? "All departments", costsAdded: added, costsUpdated: updated, people: people.length, incomeMonths, departments: perDepartment };
+    const perDepartment = [...new Set([...costs.map((c) => c.departmentId), ...[...grid.values()].map((g) => g.departmentId)])].map((id) => ({
+      name: all.find((d) => d.id === id)!.name,
+      rows: costs.filter((c) => c.departmentId === id).length + [...grid.values()].filter((g) => g.departmentId === id).length,
+    }));
+    const result = {
+      department: dept?.name ?? (perDepartment.length === 1 ? perDepartment[0].name : "All departments"),
+      costsAdded: added,
+      costsUpdated: updated,
+      people: people.length,
+      incomeMonths,
+      departments: perDepartment,
+    };
     await audit(tx, actor, { action: "DEPT_IMPORT", entityType: "ServiceDepartment", entityId: dept?.id ?? "all", after: { fileName, ...result } });
     return result;
   });
+}
+
+/** "Salaries" + "Ravi" → "Salary — Ravi"; the kind in front makes costs group by kind on the statement. */
+export function gridLabel(category: string, name: string): string {
+  const c = norm(category);
+  const kind = /salar/.test(c)
+    ? "Salary"
+    : /repair|maint/.test(c)
+      ? "Repair & maintenance"
+      : /consum/.test(c)
+        ? "Consumables"
+        : /grocer/.test(c)
+          ? "Groceries"
+          : /equip/.test(c)
+            ? "Equipment"
+            : /incentive/.test(c)
+              ? "Incentive"
+              : /other|specify/.test(c) || !c
+                ? "Other"
+                : category.trim();
+  return name ? `${kind} — ${name}` : kind;
+}
+
+/** Months with amounts → ranges of consecutive months with the same amount. */
+export function monthRanges(months: Map<string, number>): { from: string; to: string; amount: number }[] {
+  const next = (m: string) => {
+    const [y, mo] = m.split("-").map(Number);
+    return mo === 12 ? `${y + 1}-01` : `${y}-${String(mo + 1).padStart(2, "0")}`;
+  };
+  const out: { from: string; to: string; amount: number }[] = [];
+  for (const m of [...months.keys()].sort()) {
+    const amount = months.get(m)!;
+    const last = out[out.length - 1];
+    if (last && last.amount === amount && next(last.to) === m) last.to = m;
+    else out.push({ from: m, to: m, amount });
+  }
+  return out;
 }
