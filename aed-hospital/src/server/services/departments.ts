@@ -86,7 +86,7 @@ export async function departmentAccounts(actor: Actor, q: { from?: string | null
   const from = (q.from && isISODate(q.from) ? q.from : `${today.slice(0, 4)}-01-01`) as ISODate;
   if (byDay && Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000) + 1 > MAX_DAYS) throw badRequest(`Day by day covers at most ${MAX_DAYS} days`);
   const fmt = byDay ? "YYYY-MM-DD" : "YYYY-MM";
-  const [depts, rows, costs, medicineRows] = await Promise.all([
+  const [depts, rows, costs, medicineRows, contributors] = await Promise.all([
     loadDepartments(),
     // Billed name per line: consultation type (OPD/SCP), lab test, diet service, IPD admission type.
     prisma.$queryRaw<{ m: string; stream: string; name: string | null; n: Prisma.Decimal; amount: Prisma.Decimal }[]>`
@@ -111,6 +111,7 @@ export async function departmentAccounts(actor: Actor, q: { from?: string | null
         FROM "PharmacyItemLine" l JOIN "PharmacyItem" i ON i.id = l."itemId"
        WHERE l.kind = 'SALE' AND l.status = 'ACTIVE' AND l.date BETWEEN ${toDbDate(from)} AND ${toDbDate(to)}
        GROUP BY 1, 2`,
+    prisma.departmentContributor.findMany({ where: { active: true }, include: { incomes: true }, orderBy: { name: "asc" } }),
   ]);
   // Columns: months, or days (monthly costs are then spread over the days of their month).
   const calendarMonths: string[] = [];
@@ -150,12 +151,13 @@ export async function departmentAccounts(actor: Actor, q: { from?: string | null
   const rest = finish([...unassigned.values()].sort((a, b) => b.total - a.total));
   const totals: Record<string, number> = {};
   for (const m of months) totals[m] = round2([...departments, ...rest].reduce((a, g) => a + (g.byMonth[m] ?? 0), 0));
-  const profit = await departmentProfit(depts, departments, months, calendarMonths, byDay, costs, medicineRows);
+  const profit = await departmentProfit(depts, departments, months, calendarMonths, byDay, costs, medicineRows, contributors);
   const result = {
     from,
     to,
     granularity: byDay ? "day" : "month",
     months,
+    calendarMonths,
     departments,
     unassigned: rest,
     totals,
@@ -217,6 +219,7 @@ async function departmentProfit(
   byDay: boolean,
   costs: { id: string; departmentId: string; label: string; kind: string; amount: Prisma.Decimal; percent: Prisma.Decimal; categoryId: string | null; fromMonth: string; toMonth: string | null }[],
   medicineRows: { m: string; name: string; amount: Prisma.Decimal; taxable: Prisma.Decimal | null; cost: Prisma.Decimal | null; nocost: bigint }[],
+  contributors: { id: string; departmentId: string; name: string; incentivePct: Prisma.Decimal; incomes: { month: string; amount: Prisma.Decimal }[] }[],
 ) {
   const categoryIds = [...new Set(costs.filter((c) => c.kind === "SHARE" && c.categoryId).map((c) => c.categoryId!))];
   const [byCategory, categories] = await Promise.all([
@@ -260,6 +263,24 @@ async function departmentProfit(
       const basis = c.kind === "SHARE" ? `${toNum(c.percent)}% of ${catName.get(c.categoryId ?? "") ?? "a deleted category"}` : `₹${toNum(c.amount).toLocaleString("en-IN")} a month`;
       costLines.push({ id: c.id, label: c.label, basis: `${basis} · ${c.fromMonth}${c.toMonth ? ` to ${c.toMonth}` : " onwards"}`, byMonth, total: sum(byMonth) });
     }
+    // People who bring income in: their incentive is a % of the income they generated that month.
+    const people = contributors
+      .filter((c) => c.departmentId === d.id)
+      .map((c) => {
+        const pct = toNum(c.incentivePct);
+        const generated: Money = {};
+        for (const i of c.incomes) if (calendarMonths.includes(i.month)) generated[i.month] = toNum(i.amount);
+        const pay: Money = {};
+        for (const m of months) {
+          const month = m.slice(0, 7);
+          const monthly = ((generated[month] ?? 0) * pct) / 100;
+          const v = round2(byDay ? monthly / daysIn(month) : monthly);
+          if (v) pay[m] = v;
+        }
+        return { id: c.id, name: c.name, incentivePct: pct, generated, totalGenerated: sum(generated), incentive: pay, totalIncentive: sum(pay) };
+      });
+    for (const p of people)
+      if (p.totalIncentive) costLines.push({ id: null, label: `Incentive — ${p.name}`, basis: `${p.incentivePct}% of the income they generated`, byMonth: p.incentive, total: p.totalIncentive });
     if (sum(incentive)) costLines.push({ id: null, label: `Staff incentive ${d.pharmacyIncentivePct}% of injection sales`, basis: "calculated from the pharmacy's medicine-wise sales", byMonth: incentive, total: sum(incentive) });
     const costTotal: Money = {};
     for (const l of costLines) for (const [m, v] of Object.entries(l.byMonth)) addTo(costTotal, m, v);
@@ -279,6 +300,7 @@ async function departmentProfit(
       medicines: [...medicines.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.sales - a.sales),
       missingCost,
       costsEntered: costLines.some((l) => l.id),
+      contributors: people.map((p) => ({ ...p, sharePct: totals.income ? round2((p.totalGenerated / totals.income) * 100) : null })),
     };
   });
   const partners = new Map<string, { name: string; pct: number; departments: string[]; profit: Money }>();
@@ -411,4 +433,60 @@ export async function departmentPatients(actor: Actor, q: { departmentId?: strin
   }
   const list = [...patients.values()].sort((a, b) => b.total - a.total);
   return { department: dept.name, from, to, patients: list, total: round2(list.reduce((a, p) => a + p.total, 0)) };
+}
+
+// ─────────────────────────── contributors and their incentives ───────────────────────────
+
+const contributorInput = z.object({
+  departmentId: z.string().min(1),
+  name: z.string().trim().min(1).max(80),
+  incentivePct: z.coerce.number().min(0).max(100).default(0),
+  active: z.boolean().default(true),
+});
+
+export async function saveContributor(actor: Actor, id: string | null, raw: unknown) {
+  requireAdmin(actor);
+  const parsed = contributorInput.safeParse(raw);
+  if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "Check the person");
+  const c = parsed.data;
+  if (!(await prisma.serviceDepartment.findUnique({ where: { id: c.departmentId } }))) throw notFound("Department not found");
+  return prisma.$transaction(async (tx) => {
+    const before = id ? await tx.departmentContributor.findUnique({ where: { id } }) : null;
+    if (id && !before) throw notFound("Person not found");
+    const saved = id ? await tx.departmentContributor.update({ where: { id }, data: c }) : await tx.departmentContributor.create({ data: { ...c, createdById: actor.id } });
+    await audit(tx, actor, { action: id ? "DEPT_CONTRIBUTOR_UPDATE" : "DEPT_CONTRIBUTOR_CREATE", entityType: "DepartmentContributor", entityId: saved.id, before: before ?? undefined, after: saved });
+    return saved;
+  });
+}
+
+export async function deleteContributor(actor: Actor, id: string) {
+  requireAdmin(actor);
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.departmentContributor.findUnique({ where: { id }, include: { incomes: true } });
+    if (!before) throw notFound("Person not found");
+    await tx.departmentContributor.delete({ where: { id } });
+    await audit(tx, actor, { action: "DEPT_CONTRIBUTOR_DELETE", entityType: "DepartmentContributor", entityId: id, before });
+    return { ok: true };
+  });
+}
+
+/** The income a person generated in one month (empty or 0 clears it). */
+export async function setContributorIncome(actor: Actor, id: string, raw: unknown) {
+  requireAdmin(actor);
+  const { month, amount } = z.object({ month: z.string().regex(MONTH, "Month as 2026-04"), amount: z.coerce.number().min(0).max(99_99_99_999).nullable() }).parse(raw);
+  return prisma.$transaction(async (tx) => {
+    if (!(await tx.departmentContributor.findUnique({ where: { id } }))) throw notFound("Person not found");
+    const before = await tx.contributorIncome.findUnique({ where: { contributorId_month: { contributorId: id, month } } });
+    const after = amount
+      ? await tx.contributorIncome.upsert({ where: { contributorId_month: { contributorId: id, month } }, create: { contributorId: id, month, amount }, update: { amount } })
+      : before
+        ? (await tx.contributorIncome.delete({ where: { id: before.id } }), null)
+        : null;
+    await audit(tx, actor, { action: "DEPT_CONTRIBUTOR_INCOME", entityType: "DepartmentContributor", entityId: id, before: before ?? undefined, after: after ?? { month, amount: null } });
+    return { ok: true };
+  });
+}
+
+function requireAdmin(actor: Actor) {
+  if (!can(actor, "masters.manage")) throw forbidden("Only an Admin can change incentives");
 }

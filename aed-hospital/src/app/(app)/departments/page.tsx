@@ -425,6 +425,167 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
   );
 }
 
+function Contributors({ st, months, onChanged }: { st: any; months: string[]; onChanged: () => void }) {
+  const can = useCan();
+  const toast = useToast();
+  const admin = can("masters.manage");
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [pct, setPct] = useState("");
+  const run = async (fn: () => Promise<unknown>, ok?: string) => {
+    try {
+      await fn();
+      if (ok) toast("success", ok);
+      onChanged();
+    } catch (e: any) {
+      toast("error", e.message);
+    }
+  };
+  const saveIncome = (id: string, month: string, value: string, old: number | undefined) => {
+    const amount = value.trim() === "" ? null : Number(value);
+    if ((amount ?? 0) === (old ?? 0) || (amount !== null && !Number.isFinite(amount))) return;
+    run(() => apiFetch(`/api/departments/contributors/${id}/income`, { method: "PUT", json: { month, amount } }));
+  };
+  if (!st.contributors.length && !admin) return null;
+  return (
+    <Card
+      title={`People bringing income to ${st.name} — income they generated and their incentive`}
+      actions={
+        admin && (
+          <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+            <Plus className="h-4 w-4" /> Add person
+          </Button>
+        )
+      }
+    >
+      <p className="mb-3 text-xs muted">
+        The income each person generated is entered here only to work out their incentive: it is not added to {st.name}&apos;s income, which comes from the bills. Each incentive appears
+        under Costs above.
+      </p>
+      {st.contributors.length === 0 ? (
+        <p className="text-sm muted">No one added yet.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Person</th>
+                <th className="num">Incentive %</th>
+                {months.map((m) => (
+                  <th key={m} className="num whitespace-nowrap">
+                    {colLabel(m)}
+                  </th>
+                ))}
+                <th className="num">Income generated</th>
+                <th className="num">Share of income</th>
+                <th className="num">Incentive</th>
+                {admin && <th />}
+              </tr>
+            </thead>
+            <tbody>
+              {st.contributors.map((c: any) => (
+                <tr key={c.id}>
+                  <td className="whitespace-nowrap font-medium">{c.name}</td>
+                  <td className="num">
+                    {admin ? (
+                      <input
+                        className="input !w-20 text-right"
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        defaultValue={c.incentivePct || ""}
+                        aria-label={`Incentive % for ${c.name}`}
+                        onBlur={(e) => {
+                          const v = Number(e.target.value) || 0;
+                          if (v !== c.incentivePct) run(() => apiFetch(`/api/departments/contributors/${c.id}`, { method: "PATCH", json: { departmentId: st.id, name: c.name, incentivePct: v } }), "Incentive % saved");
+                        }}
+                      />
+                    ) : c.incentivePct ? (
+                      `${c.incentivePct}%`
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  {months.map((m) => (
+                    <td key={m} className="num">
+                      {admin ? (
+                        <input
+                          key={`${c.id}|${m}|${c.generated[m] ?? ""}`}
+                          className="input !w-24 text-right"
+                          type="number"
+                          min={0}
+                          defaultValue={c.generated[m] ?? ""}
+                          aria-label={`${c.name} income generated ${colLabel(m)}`}
+                          onBlur={(e) => saveIncome(c.id, m, e.target.value, c.generated[m])}
+                        />
+                      ) : c.generated[m] ? (
+                        formatINRCompact(c.generated[m])
+                      ) : (
+                        ""
+                      )}
+                    </td>
+                  ))}
+                  <td className="num font-semibold">{money(c.totalGenerated)}</td>
+                  <td className="num muted">{c.sharePct === null ? "" : `${c.sharePct.toFixed(0)}%`}</td>
+                  <td className="num">{c.totalIncentive ? `−${formatINR(c.totalIncentive)}` : c.incentivePct ? "—" : <span className="text-xs muted">set the %</span>}</td>
+                  {admin && (
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        aria-label={`Remove ${c.name}`}
+                        onClick={() => {
+                          if (window.confirm(`Remove ${c.name} and the income recorded for them?`)) run(() => apiFetch(`/api/departments/contributors/${c.id}`, { method: "DELETE" }), "Removed");
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Modal
+        open={adding}
+        onClose={() => setAdding(false)}
+        title="Add a person who brings income"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setAdding(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                run(async () => {
+                  await apiFetch("/api/departments/contributors", { method: "POST", json: { departmentId: st.id, name, incentivePct: Number(pct) || 0 } });
+                  setAdding(false);
+                  setName("");
+                  setPct("");
+                }, "Person added")
+              }
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Field label="Name" required help="One person, or a pair who share an incentive (e.g. Dr. Harika & Deepika — the incentive is then split between them)">
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="Incentive (% of the income they generate)" help="Leave empty if not decided yet; their income can still be recorded">
+            <input className="input" type="number" min={0} max={100} step="0.01" value={pct} onChange={(e) => setPct(e.target.value)} />
+          </Field>
+        </div>
+      </Modal>
+    </Card>
+  );
+}
+
 function Patients({ departmentId, from, to }: { departmentId: string; from: string; to: string }) {
   const [show, setShow] = useState(false);
   const { data, error, loading } = useApi<any>(show ? `/api/departments/patients?departmentId=${departmentId}&from=${from}&to=${to}` : null);
@@ -710,6 +871,7 @@ function Inner() {
             return (
               <>
                 <Statement st={st} months={data.months} monthOptions={months} onChanged={reload} />
+                <Contributors st={st} months={data.calendarMonths} onChanged={reload} />
                 {partner && <PartnerCard partner={partner} months={data.months} />}
                 {byDay && (
                   <p className="text-xs muted">Day by day: each monthly cost is spread evenly over the days of its month. The partner&apos;s share is worked out month by month.</p>

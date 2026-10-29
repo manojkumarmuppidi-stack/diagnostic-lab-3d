@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { createTransaction } from "@/server/services/transactions";
 import { createMaster } from "@/server/services/masters";
-import { deleteDepartmentCost, departmentAccounts, departmentPatients, saveDepartmentCost } from "@/server/services/departments";
+import { deleteContributor, deleteDepartmentCost, departmentAccounts, departmentPatients, saveContributor, saveDepartmentCost, setContributorIncome } from "@/server/services/departments";
 import { DEFAULT_DEPARTMENTS } from "@/lib/departments";
 import { createUser, updateUser } from "@/server/services/misc";
 import { seedFixture, type Fixture } from "../helpers/db";
@@ -146,6 +146,28 @@ describe("department accounts", () => {
     const cleared = await updateUser(f.admin, u.id, { headOfDepartmentId: null });
     expect(cleared.headOfDepartment).toBeNull();
     await expect(updateUser(f.admin, u.id, { headOfDepartmentId: "nope" })).rejects.toThrow(/Department not found/);
+  });
+
+  it("records the income each person brings in and charges their incentive, without adding it to income", async () => {
+    const jjId = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "JJ Wellness" } })).id;
+    const person = await saveContributor(f.admin, null, { departmentId: jjId, name: "Counsellor A", incentivePct: 10 });
+    await setContributorIncome(f.admin, person.id, { month: "2026-09", amount: 90000 });
+    await setContributorIncome(f.admin, person.id, { month: "2026-10", amount: 75000 });
+    await setContributorIncome(f.admin, person.id, { month: "2026-10", amount: 70000 });
+    await expect(setContributorIncome(f.reception, person.id, { month: "2026-10", amount: 1 })).rejects.toThrow(/Admin/);
+    await expect(saveContributor({ ...f.reception, headOfDepartmentId: jjId }, null, { departmentId: jjId, name: "x" })).rejects.toThrow(/Admin/);
+
+    const d = await departmentAccounts(f.admin, { from: "2026-09-01", to: "2026-10-31" });
+    const jj = d.statements.find((x) => x.name === "JJ Wellness")!;
+    expect(jj.totals.income).toBe(0);
+    expect(jj.costLines.map((l) => [l.label, l.byMonth])).toEqual([["Incentive — Counsellor A", { "2026-09": 9000, "2026-10": 7000 }]]);
+    expect(jj.contributors[0]).toMatchObject({ name: "Counsellor A", totalGenerated: 160000, totalIncentive: 16000 });
+
+    await setContributorIncome(f.admin, person.id, { month: "2026-09", amount: null });
+    const head = await departmentAccounts({ ...f.reception, headOfDepartmentId: jjId }, { from: "2026-09-01", to: "2026-10-31" });
+    expect(head.statements[0].contributors[0]).toMatchObject({ totalGenerated: 70000, totalIncentive: 7000 });
+    await deleteContributor(f.admin, person.id);
+    expect(await prisma.contributorIncome.count()).toBe(0);
   });
 });
 

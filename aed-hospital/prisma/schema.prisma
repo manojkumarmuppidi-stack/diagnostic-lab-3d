@@ -962,8 +962,9 @@ model ServiceDepartment {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  costs DepartmentCost[]
-  heads User[]
+  costs        DepartmentCost[]
+  heads        User[]
+  contributors DepartmentContributor[]
 }
 
 /// A department's share of hospital costs, for department accounts only (it is not a hospital expense):
@@ -986,4 +987,34 @@ model DepartmentCost {
   updatedAt    DateTime          @updatedAt
 
   @@index([departmentId])
+}
+
+/// A person who brings income into a department (JJ Wellness: Swarna, Dr. Harika & Deepika). The income they
+/// generate is recorded per month only to work out their incentive; it is not added to the department's
+/// income, which already comes from the bills.
+model DepartmentContributor {
+  id           String              @id @default(cuid())
+  departmentId String
+  department   ServiceDepartment   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  name         String
+  incentivePct Decimal             @default(0) @db.Decimal(5, 2)
+  active       Boolean             @default(true)
+  createdById  String
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  incomes      ContributorIncome[]
+
+  @@index([departmentId])
+}
+
+model ContributorIncome {
+  id            String                @id @default(cuid())
+  contributorId String
+  contributor   DepartmentContributor @relation(fields: [contributorId], references: [id], onDelete: Cascade)
+  /// "2026-04"
+  month         String
+  amount        Decimal               @db.Decimal(12, 2)
+  updatedAt     DateTime              @updatedAt
+
+  @@unique([contributorId, month])
 }

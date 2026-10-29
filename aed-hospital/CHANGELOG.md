@@ -2,6 +2,9 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.19.0: Incentives on income generated
+- Department statement: "People bringing income" — the Admin adds each person (or pair) with their incentive %, and records the income they generated each month. Their incentive (% × income generated) appears under the department's costs; the income generated is not added to the department's income, which comes from the bills. Heads see it; only the Admin changes it (migration `20261102000000_department_contributors`).
+
 ## 0.18.0: Department heads and day-by-day view
 - Department statement: income lines are grouped by source (injections, tests, wellness share of combined bills, packages …; tap to expand), so the costs and profit are on the first screen; the card title shows income, costs and profit for the period.
 - The USG & 2D Echo room is shared 80% USG scan room / 20% Cardiac (2D Echo). Reception & Administration and the Lobby serve the whole hospital and are no longer departments; profit is before those common costs (migration `20261101020000_room_split_common_areas`).
