@@ -4,6 +4,7 @@ import { createTransaction } from "@/server/services/transactions";
 import { createMaster } from "@/server/services/masters";
 import { deleteDepartmentCost, departmentAccounts, departmentPatients, saveDepartmentCost } from "@/server/services/departments";
 import { DEFAULT_DEPARTMENTS } from "@/lib/departments";
+import { createUser, updateUser } from "@/server/services/misc";
 import { seedFixture, type Fixture } from "../helpers/db";
 
 let f: Fixture;
@@ -106,4 +107,45 @@ describe("department accounts", () => {
       ["P3", 200],
     ]);
   });
+
+  it("lets a department head see only their department and manage the costs they add; day by day spreads monthly costs", async () => {
+    const jjId = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "JJ Wellness" } })).id;
+    const labId = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Laboratory" } })).id;
+    const head = { ...f.reception, headOfDepartmentId: jjId };
+    await expect(departmentAccounts(f.reception, { from: "2026-10-01", to: "2026-10-31" })).rejects.toThrow(/department head/);
+
+    const adminCost = await saveDepartmentCost(f.admin, null, { departmentId: jjId, label: "Rent share", kind: "FIXED", amount: 31000, fromMonth: "2026-10" });
+    const own = await saveDepartmentCost(head, null, { departmentId: jjId, label: "AC maintenance", kind: "FIXED", amount: 3100, fromMonth: "2026-10", toMonth: "2026-10" });
+    await expect(saveDepartmentCost(head, null, { departmentId: labId, label: "x", kind: "FIXED", amount: 1, fromMonth: "2026-10" })).rejects.toThrow(/Admin/);
+    await expect(saveDepartmentCost(head, adminCost.id, { departmentId: jjId, label: "Rent share", kind: "FIXED", amount: 1, fromMonth: "2026-10" })).rejects.toThrow(/Admin/);
+    await expect(deleteDepartmentCost(head, adminCost.id)).rejects.toThrow(/Admin/);
+    await expect(departmentPatients(head, { departmentId: labId })).rejects.toThrow(/only the department you head/);
+
+    const mine = await departmentAccounts(head, { from: "2026-10-01", to: "2026-10-31" });
+    expect(mine.statements.map((x) => x.name)).toEqual(["JJ Wellness"]);
+    expect(mine.departments.map((x) => x.name)).toEqual(["JJ Wellness"]);
+    expect(mine.unassigned).toEqual([]);
+    expect(mine.statements[0].totals.costs).toBe(34100);
+
+    const days = await departmentAccounts(head, { from: "2026-10-01", to: "2026-10-31", granularity: "day" });
+    expect(days.months).toHaveLength(31);
+    expect(days.statements[0].costs["2026-10-05"]).toBe(1100);
+    expect(days.statements[0].totals.costs).toBe(34100);
+    expect(days.partners).toEqual([]);
+    await expect(departmentAccounts(f.admin, { from: "2026-01-01", to: "2026-10-31", granularity: "day" })).rejects.toThrow(/62 days/);
+
+    await deleteDepartmentCost(head, own.id);
+    expect(await prisma.departmentCost.count()).toBe(1);
+  });
+
+  it("an Admin makes a login the head of a department in Staff logins", async () => {
+    const jjId = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "JJ Wellness" } })).id;
+    const role = await prisma.role.findUniqueOrThrow({ where: { code: "RECEPTION" } });
+    const u = await createUser(f.admin, { username: "jj.head", name: "JJ Head", roleId: role.id, headOfDepartmentId: jjId, password: "Welcome123" });
+    expect(u.headOfDepartment).toEqual({ id: jjId, name: "JJ Wellness" });
+    const cleared = await updateUser(f.admin, u.id, { headOfDepartmentId: null });
+    expect(cleared.headOfDepartment).toBeNull();
+    await expect(updateUser(f.admin, u.id, { headOfDepartmentId: "nope" })).rejects.toThrow(/Department not found/);
+  });
 });
+

@@ -141,17 +141,34 @@ const userCreate = z.object({
   name: z.string().trim().min(2).max(80),
   email: z.string().trim().email().optional().or(z.literal("")).transform((v) => v || null),
   roleId: z.string().min(1),
+  headOfDepartmentId: z.string().min(1).nullable().optional(),
   password: z.string().min(8, "At least 8 characters").regex(/[A-Za-z]/, "Must contain a letter").regex(/\d/, "Must contain a digit"),
 });
 const userUpdate = z.object({
   name: z.string().trim().min(2).max(80).optional(),
   email: z.string().trim().email().optional().or(z.literal("")).transform((v) => v || null),
   roleId: z.string().min(1).optional(),
+  headOfDepartmentId: z.string().min(1).nullable().optional(),
   active: z.boolean().optional(),
   resetPassword: z.string().min(8).regex(/[A-Za-z]/).regex(/\d/).optional(),
 });
 
-const userSelect = { id: true, username: true, name: true, email: true, active: true, mustChangePassword: true, lastLoginAt: true, createdAt: true, role: { select: { id: true, code: true, name: true } } };
+const userSelect = {
+  id: true,
+  username: true,
+  name: true,
+  email: true,
+  active: true,
+  mustChangePassword: true,
+  lastLoginAt: true,
+  createdAt: true,
+  role: { select: { id: true, code: true, name: true } },
+  headOfDepartment: { select: { id: true, name: true } },
+};
+
+async function assertDepartment(id: string | null | undefined) {
+  if (id && !(await prisma.serviceDepartment.findUnique({ where: { id } }))) throw badRequest("Department not found");
+}
 
 export async function listUsers(actor: Actor) {
   requirePermission(actor, "users.manage");
@@ -162,9 +179,10 @@ export async function createUser(actor: Actor, raw: unknown) {
   requirePermission(actor, "users.manage");
   const d = userCreate.parse(raw);
   if (await prisma.user.findUnique({ where: { username: d.username } })) throw conflict("Username already taken");
+  await assertDepartment(d.headOfDepartmentId);
   return prisma.$transaction(async (tx) => {
     const u = await tx.user.create({
-      data: { username: d.username, name: d.name, email: d.email, roleId: d.roleId, passwordHash: hashPasswordSync(d.password), mustChangePassword: true },
+      data: { username: d.username, name: d.name, email: d.email, roleId: d.roleId, headOfDepartmentId: d.headOfDepartmentId ?? null, passwordHash: hashPasswordSync(d.password), mustChangePassword: true },
       select: userSelect,
     });
     await audit(tx, actor, { action: "USER_CREATE", entityType: "User", entityId: u.id, after: u });
@@ -176,6 +194,7 @@ export async function updateUser(actor: Actor, id: string, raw: unknown) {
   requirePermission(actor, "users.manage");
   const d = userUpdate.parse(raw);
   if (id === actor.id && (d.active === false || d.roleId)) throw forbidden("You cannot deactivate yourself or change your own role");
+  await assertDepartment(d.headOfDepartmentId);
   return prisma.$transaction(async (tx) => {
     const before = await tx.user.findUnique({ where: { id }, select: userSelect });
     if (!before) throw notFound();
@@ -190,12 +209,13 @@ export async function updateUser(actor: Actor, id: string, raw: unknown) {
         name: d.name,
         email: d.email,
         roleId: d.roleId,
+        headOfDepartmentId: d.headOfDepartmentId,
         active: d.active,
         ...(d.resetPassword ? { passwordHash: hashPasswordSync(d.resetPassword), mustChangePassword: true } : {}),
       },
       select: userSelect,
     });
-    if (d.active === false || d.resetPassword || d.roleId) await tx.session.deleteMany({ where: { userId: id } });
+    if (d.active === false || d.resetPassword || d.roleId || d.headOfDepartmentId !== undefined) await tx.session.deleteMany({ where: { userId: id } });
     await audit(tx, actor, { action: d.resetPassword ? "USER_PASSWORD_RESET" : "USER_UPDATE", entityType: "User", entityId: id, before, after: u });
     return u;
   });

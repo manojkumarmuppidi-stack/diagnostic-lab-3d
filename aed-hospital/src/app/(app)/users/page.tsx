@@ -12,15 +12,17 @@ function Users({ roles }: { roles: any[] }) {
   const toast = useToast();
   const me = useSession();
   const { data, error, reload } = useApi<any[]>("/api/users");
+  const { data: depts } = useApi<{ departments: { id: string; name: string }[] }>("/api/departments/costs");
   const [edit, setEdit] = useState<any | null>(null);
   const [v, setV] = useState<Record<string, any>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
   const save = async () => {
     try {
       if (edit.id) {
-        await apiFetch(`/api/users/${edit.id}`, { method: "PATCH", json: { name: v.name, email: v.email ?? "", roleId: v.roleId !== edit.role.id ? v.roleId : undefined, active: v.active, resetPassword: v.password || undefined } });
+        const head = (v.headOfDepartmentId || "") !== (edit.headOfDepartment?.id ?? "") ? v.headOfDepartmentId || null : undefined;
+        await apiFetch(`/api/users/${edit.id}`, { method: "PATCH", json: { name: v.name, email: v.email ?? "", roleId: v.roleId !== edit.role.id ? v.roleId : undefined, headOfDepartmentId: head, active: v.active, resetPassword: v.password || undefined } });
       } else {
-        await apiFetch("/api/users", { method: "POST", json: { username: v.username, name: v.name, email: v.email ?? "", roleId: v.roleId, password: v.password } });
+        await apiFetch("/api/users", { method: "POST", json: { username: v.username, name: v.name, email: v.email ?? "", roleId: v.roleId, headOfDepartmentId: v.headOfDepartmentId || null, password: v.password } });
       }
       toast("success", "User saved");
       setEdit(null);
@@ -56,14 +58,17 @@ function Users({ roles }: { roles: any[] }) {
               <tr key={u.id}>
                 <td>{u.name}</td>
                 <td>{u.username}</td>
-                <td>{u.role.name}</td>
+                <td>
+                  {u.role.name}
+                  {u.headOfDepartment && <span className="block text-xs muted">Head of {u.headOfDepartment.name}</span>}
+                </td>
                 <td>{formatDateTime(u.lastLoginAt)}</td>
                 <td>
                   {u.active ? <Badge tone="green">Active</Badge> : <Badge>Disabled</Badge>}
                   {u.mustChangePassword && <Badge tone="amber" className="ml-1">must change password</Badge>}
                 </td>
                 <td>
-                  <Button size="sm" variant="ghost" onClick={() => { setEdit(u); setV({ name: u.name, email: u.email, roleId: u.role.id, active: u.active }); setErrs({}); }}>
+                  <Button size="sm" variant="ghost" onClick={() => { setEdit(u); setV({ name: u.name, email: u.email, roleId: u.role.id, active: u.active, headOfDepartmentId: u.headOfDepartment?.id ?? "" }); setErrs({}); }}>
                     Edit
                   </Button>
                 </td>
@@ -90,6 +95,16 @@ function Users({ roles }: { roles: any[] }) {
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Department head of" htmlFor="u-head" help="They see this department's income, costs and profit in Department accounts and can add its costs (maintenance …).">
+            <select id="u-head" className="input" value={v.headOfDepartmentId ?? ""} onChange={(e) => setV({ ...v, headOfDepartmentId: e.target.value })}>
+              <option value="">Not a department head</option>
+              {(depts?.departments ?? []).map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
                 </option>
               ))}
             </select>

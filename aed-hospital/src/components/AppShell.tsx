@@ -100,7 +100,8 @@ function Shell({ children }: { children: ReactNode }) {
   const [quickOpen, setQuickOpen] = useState(false);
   const [quickModule, setQuickModule] = useState<ModuleKey | null>(null);
   const [q, setQ] = useState("");
-  const items = NAV.filter((n) => can(n.perm));
+  // A department head sees Department accounts for their own department, whatever their role.
+  const items = NAV.filter((n) => can(n.perm) || (n.href === "/departments" && !!user.headOfDepartmentId));
   const quick = QUICK.filter((x) => can(x.perm));
   const active = (href: string) => path === href || path.startsWith(`${href}/`);
 

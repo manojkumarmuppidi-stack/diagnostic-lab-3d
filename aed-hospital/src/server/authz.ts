@@ -10,6 +10,8 @@ export interface Actor {
   roleName: string;
   permissions: Set<string>;
   mustChangePassword: boolean;
+  /** Income department this login heads (department accounts for that department only). */
+  headOfDepartmentId?: string | null;
   ip?: string | null;
   userAgent?: string | null;
 }

@@ -12,6 +12,8 @@ export interface SessionUser {
   permissions: string[];
   hospitalName: string;
   today: string;
+  /** Income department this login heads, if any. */
+  headOfDepartmentId?: string | null;
 }
 
 const Ctx = createContext<SessionUser | null>(null);

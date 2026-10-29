@@ -114,6 +114,7 @@ export async function getActor(): Promise<Actor | null> {
     roleName: user.role.name,
     permissions: new Set(user.role.permissions.map((rp) => rp.permission.code)),
     mustChangePassword: user.mustChangePassword,
+    headOfDepartmentId: user.headOfDepartmentId,
     ip: meta.ip,
     userAgent: meta.userAgent,
   };

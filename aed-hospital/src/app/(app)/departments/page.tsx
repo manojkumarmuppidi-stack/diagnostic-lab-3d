@@ -8,17 +8,19 @@
 import { Fragment, Suspense, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, Info, Pencil, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Info, Pencil, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { apiFetch, useApi } from "@/lib/client";
 import { endOfMonth, todayISO } from "@/lib/dates";
 import { mLabel } from "@/lib/entities";
 import { formatINR, formatINRCompact, formatNumber } from "@/lib/money";
 import { recentMonths } from "@/lib/periods";
 import { STREAM_LABELS } from "@/lib/accounting";
-import { Badge, Button, Card, ConfirmDialog, ErrorState, Field, Modal, PageHeader, Spinner, useToast } from "@/components/ui";
-import { Guard } from "@/components/Guard";
-import { useCan } from "@/components/session";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Field, Modal, PageHeader, Spinner, useToast } from "@/components/ui";
+import { useCan, useSession } from "@/components/session";
 import { BarsChart, ChartCard, SLOT } from "@/components/charts/Charts";
+
+/** Column heading: "Oct 2026" for a month, "5 Oct" for a day. */
+const colLabel = (k: string) => (k.length > 7 ? `${Number(k.slice(8))} ${mLabel(k.slice(0, 7)).split(" ")[0]}` : mLabel(k));
 
 const money = (v: number | undefined) => (v ? formatINR(v) : "—");
 const signed = (v: number) => <span style={{ color: v < 0 ? "var(--status-bad)" : undefined }}>{formatINR(v)}</span>;
@@ -30,9 +32,31 @@ function Verdict({ st }: { st: any }) {
   return <Badge tone="neutral">Break-even</Badge>;
 }
 
-const EMPTY_COST = { label: "", kind: "FIXED", amount: "", percent: "", categoryId: "", fromMonth: "", toMonth: "" };
+const EMPTY_COST = {
+  label: "",
+  kind: "FIXED",
+  amount: "",
+  percent: "",
+  categoryId: "",
+  fromMonth: "",
+  toMonth: "",
+};
 
-function CostDialog({ open, onClose, onSaved, departmentId, cost, months }: { open: boolean; onClose: () => void; onSaved: () => void; departmentId: string; cost: any | null; months: { value: string; label: string }[] }) {
+function CostDialog({
+  open,
+  onClose,
+  onSaved,
+  departmentId,
+  cost,
+  months,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+  departmentId: string;
+  cost: any | null;
+  months: { value: string; label: string }[];
+}) {
   const toast = useToast();
   const { data: opts } = useApi<any>(open ? "/api/departments/costs" : null);
   const [v, setV] = useState<any>(EMPTY_COST);
@@ -41,14 +65,33 @@ function CostDialog({ open, onClose, onSaved, departmentId, cost, months }: { op
   useEffect(() => {
     if (!open) return;
     setErr(null);
-    setV(cost ? { ...cost, amount: cost.amount || "", percent: cost.percent || "", categoryId: cost.categoryId ?? "", toMonth: cost.toMonth ?? "" } : { ...EMPTY_COST, fromMonth: todayISO().slice(0, 7) });
+    setV(
+      cost
+        ? {
+            ...cost,
+            amount: cost.amount || "",
+            percent: cost.percent || "",
+            categoryId: cost.categoryId ?? "",
+            toMonth: cost.toMonth ?? "",
+          }
+        : { ...EMPTY_COST, fromMonth: todayISO().slice(0, 7) },
+    );
   }, [open, cost]);
   const set = (k: string, val: string) => setV((x: any) => ({ ...x, [k]: val }));
   const save = async () => {
     setBusy(true);
     setErr(null);
     try {
-      const body = { departmentId, label: v.label, kind: v.kind, amount: Number(v.amount) || 0, percent: Number(v.percent) || 0, categoryId: v.categoryId || null, fromMonth: v.fromMonth, toMonth: v.toMonth || null };
+      const body = {
+        departmentId,
+        label: v.label,
+        kind: v.kind,
+        amount: Number(v.amount) || 0,
+        percent: Number(v.percent) || 0,
+        categoryId: v.categoryId || null,
+        fromMonth: v.fromMonth,
+        toMonth: v.toMonth || null,
+      };
       await apiFetch(cost ? `/api/departments/costs/${cost.id}` : "/api/departments/costs", { method: cost ? "PATCH" : "POST", json: body });
       toast("success", cost ? "Cost updated" : "Cost added");
       onSaved();
@@ -129,7 +172,11 @@ function CostDialog({ open, onClose, onSaved, departmentId, cost, months }: { op
           </Field>
         </div>
         <p className="text-xs muted">This is for department accounts only. It is not a hospital expense and does not change the hospital&apos;s income or expenditure.</p>
-        {err && <p className="text-sm" style={{ color: "var(--status-bad)" }}>{err}</p>}
+        {err && (
+          <p className="text-sm" style={{ color: "var(--status-bad)" }}>
+            {err}
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -137,8 +184,12 @@ function CostDialog({ open, onClose, onSaved, departmentId, cost, months }: { op
 
 function Statement({ st, months, monthOptions, onChanged }: { st: any; months: string[]; monthOptions: { value: string; label: string }[]; onChanged: () => void }) {
   const can = useCan();
+  const me = useSession();
   const toast = useToast();
-  const edit = can("masters.manage");
+  const admin = can("masters.manage");
+  // Admins change any cost; the department's head adds costs and changes the ones they added.
+  const edit = admin || me.headOfDepartmentId === st.id;
+  const canChange = (c: any) => admin || (me.headOfDepartmentId === st.id && c.createdById === me.id);
   const [dialog, setDialog] = useState<{ cost: any | null } | null>(null);
   const [removing, setRemoving] = useState<any | null>(null);
   const { data: costs, reload } = useApi<any[]>(`/api/departments/costs?departmentId=${st.id}`);
@@ -147,7 +198,17 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
     onChanged();
   };
   const cols = months.length + 2;
-  const row = (label: ReactNode, byMonth: Record<string, number>, total: number, opts: { bold?: boolean; minus?: boolean; sub?: ReactNode; actions?: ReactNode } = {}) => (
+  const row = (
+    label: ReactNode,
+    byMonth: Record<string, number>,
+    total: number,
+    opts: {
+      bold?: boolean;
+      minus?: boolean;
+      sub?: ReactNode;
+      actions?: ReactNode;
+    } = {},
+  ) => (
     <tr className={opts.bold ? "font-semibold" : undefined}>
       <td className={opts.bold ? undefined : "pl-6"}>
         <div className="flex items-start justify-between gap-2">
@@ -191,7 +252,7 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
               <th />
               {months.map((m) => (
                 <th key={m} className="num whitespace-nowrap">
-                  {mLabel(m)}
+                  {colLabel(m)}
                 </th>
               ))}
               <th className="num">Total</th>
@@ -207,14 +268,19 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
               </tr>
             )}
             {st.incomeLines.map((l: any) => (
-              <Fragment key={`${l.stream}|${l.name}`}>{row(l.name, l.byMonth, l.total, { sub: l.count ? `${STREAM_LABELS[l.stream as keyof typeof STREAM_LABELS] ?? l.stream} · ${formatNumber(l.count)} bills/tests` : undefined })}</Fragment>
+              <Fragment key={`${l.stream}|${l.name}`}>
+                {row(l.name, l.byMonth, l.total, {
+                  sub: l.count ? `${STREAM_LABELS[l.stream as keyof typeof STREAM_LABELS] ?? l.stream} · ${formatNumber(l.count)} bills/tests` : undefined,
+                })}
+              </Fragment>
             ))}
             {row("Total income", st.income, st.totals.income, { bold: true })}
             {head("Costs — the shares you allocate to this department")}
             {st.costLines.length === 0 && (
               <tr>
                 <td colSpan={cols} className="pl-6 text-sm muted">
-                  No costs entered yet{edit ? " — use “Add cost” for its rent share, power share and the salaries of its staff." : "."}
+                  No costs entered yet
+                  {edit ? " — use “Add cost” for its rent share, power share and the salaries of its staff." : "."}
                 </td>
               </tr>
             )}
@@ -226,7 +292,7 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
                     minus: true,
                     sub: l.basis,
                     actions:
-                      edit && c ? (
+                      c && canChange(c) ? (
                         <span className="flex shrink-0 gap-1">
                           <button type="button" className="btn btn-ghost btn-sm" aria-label={`Edit ${l.label}`} onClick={() => setDialog({ cost: c })}>
                             <Pencil className="h-3.5 w-3.5" />
@@ -240,7 +306,10 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
                 </Fragment>
               );
             })}
-            {row("Total costs", st.costs, st.totals.costs, { bold: true, minus: true })}
+            {row("Total costs", st.costs, st.totals.costs, {
+              bold: true,
+              minus: true,
+            })}
           </tbody>
           <tfoot>
             <tr className="font-semibold">
@@ -267,7 +336,9 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
         confirmLabel="Remove"
         danger
         onConfirm={async () => {
-          await apiFetch(`/api/departments/costs/${removing.id}`, { method: "DELETE" });
+          await apiFetch(`/api/departments/costs/${removing.id}`, {
+            method: "DELETE",
+          });
           toast("success", "Cost removed");
           setRemoving(null);
           changed();
@@ -382,7 +453,7 @@ function PartnerCard({ partner, months }: { partner: any; months: string[] }) {
               <th />
               {months.map((m) => (
                 <th key={m} className="num whitespace-nowrap">
-                  {mLabel(m)}
+                  {colLabel(m)}
                 </th>
               ))}
               <th className="num">Total</th>
@@ -421,7 +492,9 @@ function PartnerCard({ partner, months }: { partner: any; months: string[] }) {
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-xs muted">The share is worked out month by month and only on a month in profit; a loss month gives {partner.name} nothing and is not carried forward.</p>
+      <p className="mt-2 text-xs muted">
+        The share is worked out month by month and only on a month in profit; a loss month gives {partner.name} nothing and is not carried forward.
+      </p>
     </Card>
   );
 }
@@ -433,7 +506,13 @@ function GroupRows({ g, months, grand, muted }: { g: any; months: string[]; gran
     <>
       <tr style={muted ? { opacity: 0.85 } : undefined}>
         <td className="whitespace-nowrap">
-          <button type="button" className="flex items-center gap-1 text-left font-medium hover:underline" onClick={() => setOpen((o) => !o)} aria-expanded={open} disabled={!g.items.length}>
+          <button
+            type="button"
+            className="flex items-center gap-1 text-left font-medium hover:underline"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            disabled={!g.items.length}
+          >
             {g.items.length ? open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" /> : <span className="inline-block w-4" />}
             {g.name}
           </button>
@@ -472,10 +551,13 @@ function Inner() {
   const router = useRouter();
   const path = usePathname();
   const can = useCan();
+  const all = can("analytics.view");
   const today = todayISO();
   const months = recentMonths(today, 24);
-  const from = sp.get("from") || `${today.slice(0, 4)}-01`;
-  const to = sp.get("to") || today.slice(0, 7);
+  const byDay = sp.get("view") === "day";
+  const dayMonth = sp.get("month") || today.slice(0, 7);
+  const from = byDay ? dayMonth : sp.get("from") || `${today.slice(0, 4)}-01`;
+  const to = byDay ? dayMonth : sp.get("to") || today.slice(0, 7);
   const set = (k: string, v: string) => {
     const n = new URLSearchParams(sp.toString());
     n.set(k, v);
@@ -483,15 +565,22 @@ function Inner() {
   };
   const toDate = endOfMonth(`${to}-01`) < today ? endOfMonth(`${to}-01`) : today;
   const deptParam = sp.get("dept");
-  const { data, error, loading, reload } = useApi<any>(from <= to ? `/api/departments?from=${from}-01&to=${toDate}` : null);
+  const { data, error, loading, reload } = useApi<any>(from <= to ? `/api/departments?from=${from}-01&to=${toDate}${byDay ? "&granularity=day" : ""}` : null);
   const chart = data ? data.departments.filter((d: any) => d.total).map((d: any) => ({ name: d.name, total: d.total })) : [];
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
-        {(["from", "to"] as const).map((k) => (
-          <label key={k} className="flex flex-col gap-1 text-xs text-2">
-            {k === "from" ? "From" : "To"}
-            <select className="input !w-auto" value={k === "from" ? from : to} onChange={(e) => set(k, e.target.value)}>
+        <label className="flex flex-col gap-1 text-xs text-2">
+          View
+          <select className="input !w-auto" value={byDay ? "day" : "month"} onChange={(e) => set("view", e.target.value)}>
+            <option value="month">Month by month</option>
+            <option value="day">Day by day (one month)</option>
+          </select>
+        </label>
+        {byDay && (
+          <label className="flex flex-col gap-1 text-xs text-2">
+            Month
+            <select className="input !w-auto" value={dayMonth} onChange={(e) => set("month", e.target.value)}>
               {months.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}
@@ -499,10 +588,36 @@ function Inner() {
               ))}
             </select>
           </label>
-        ))}
-        {data && (
+        )}
+        {!byDay && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() =>
+              router.replace(`${path}?${new URLSearchParams({ ...Object.fromEntries(sp.entries()), from: `${today.slice(0, 4)}-01`, to: today.slice(0, 7) }).toString()}`)
+            }
+          >
+            This year
+          </button>
+        )}
+        {!byDay &&
+          (["from", "to"] as const).map((k) => (
+            <label key={k} className="flex flex-col gap-1 text-xs text-2">
+              {k === "from" ? "From" : "To"}
+              <select className="input !w-auto" value={k === "from" ? from : to} onChange={(e) => set(k, e.target.value)}>
+                {months.map((m) => (
+                  <option key={m.value} value={m.value}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        {data && all && (
           <p className="text-sm muted">
-            AED income {formatINRCompact(data.grandTotal)} · in departments {formatINRCompact(data.departmentsTotal)} ({data.grandTotal ? ((data.departmentsTotal / data.grandTotal) * 100).toFixed(0) : 0}%)
+            AED income {formatINRCompact(data.grandTotal)} · in departments {formatINRCompact(data.departmentsTotal)} (
+            {data.grandTotal ? ((data.departmentsTotal / data.grandTotal) * 100).toFixed(0) : 0}
+            %)
           </p>
         )}
       </div>
@@ -519,62 +634,77 @@ function Inner() {
               <>
                 <Statement st={st} months={data.months} monthOptions={months} onChanged={reload} />
                 {partner && <PartnerCard partner={partner} months={data.months} />}
+                {byDay && (
+                  <p className="text-xs muted">Day by day: each monthly cost is spread evenly over the days of its month. The partner&apos;s share is worked out month by month.</p>
+                )}
                 <Patients key={`${st.id}|${from}|${toDate}`} departmentId={st.id} from={`${from}-01`} to={toDate} />
-                <Overview data={data} selected={st.id} onSelect={(id) => set("dept", id)} />
+                {all && <Overview data={data} selected={st.id} onSelect={(id) => set("dept", id)} />}
               </>
             );
           })()}
-          <Card title="Income by department, month by month — tap a department to see its billed items">
-            <div className="overflow-x-auto">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Department</th>
-                    {data.months.map((m: string) => (
-                      <th key={m} className="num whitespace-nowrap">
-                        {mLabel(m)}
-                      </th>
-                    ))}
-                    <th className="num">Total</th>
-                    <th className="num">Share</th>
-                    <th className="num">Bills / tests</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.departments.map((g: any) => (
-                    <GroupRows key={g.id} g={g} months={data.months} grand={data.grandTotal} />
-                  ))}
-                  {data.unassigned.length > 0 && (
+          {all && (
+            <Card title="Income by department, month by month — tap a department to see its billed items">
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead>
                     <tr>
-                      <td colSpan={data.months.length + 4} className="pt-4 text-xs font-semibold uppercase tracking-wide text-2">
-                        Not in any department — consultations, other lab tests, IPD, other income
-                      </td>
+                      <th>Department</th>
+                      {data.months.map((m: string) => (
+                        <th key={m} className="num whitespace-nowrap">
+                          {colLabel(m)}
+                        </th>
+                      ))}
+                      <th className="num">Total</th>
+                      <th className="num">Share</th>
+                      <th className="num">Bills / tests</th>
                     </tr>
-                  )}
-                  {data.unassigned.map((g: any) => (
-                    <Fragment key={g.id}>
-                      <GroupRows g={g} months={data.months} grand={data.grandTotal} muted />
-                    </Fragment>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="font-semibold">
-                    <td>AED income (all)</td>
-                    {data.months.map((m: string) => (
-                      <td key={m} className="num">
-                        {formatINRCompact(data.totals[m] ?? 0)}
-                      </td>
+                  </thead>
+                  <tbody>
+                    {data.departments.map((g: any) => (
+                      <GroupRows key={g.id} g={g} months={data.months} grand={data.grandTotal} />
                     ))}
-                    <td className="num">{formatINR(data.grandTotal)}</td>
-                    <td className="num">100%</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </Card>
-          {chart.length > 0 && (
-            <ChartCard title="Department income for the period" height={Math.max(220, chart.length * 34)} table={{ columns: [{ key: "name", label: "Department", format: "text" }, { key: "total", label: "Income", format: "money" }], rows: chart }}>
+                    {data.unassigned.length > 0 && (
+                      <tr>
+                        <td colSpan={data.months.length + 4} className="pt-4 text-xs font-semibold uppercase tracking-wide text-2">
+                          Not in any department — consultations, other lab tests, IPD, other income
+                        </td>
+                      </tr>
+                    )}
+                    {data.unassigned.map((g: any) => (
+                      <Fragment key={g.id}>
+                        <GroupRows g={g} months={data.months} grand={data.grandTotal} muted />
+                      </Fragment>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="font-semibold">
+                      <td>AED income (all)</td>
+                      {data.months.map((m: string) => (
+                        <td key={m} className="num">
+                          {formatINRCompact(data.totals[m] ?? 0)}
+                        </td>
+                      ))}
+                      <td className="num">{formatINR(data.grandTotal)}</td>
+                      <td className="num">100%</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </Card>
+          )}
+          {all && chart.length > 0 && (
+            <ChartCard
+              title="Department income for the period"
+              height={Math.max(220, chart.length * 34)}
+              table={{
+                columns: [
+                  { key: "name", label: "Department", format: "text" },
+                  { key: "total", label: "Income", format: "money" },
+                ],
+                rows: chart,
+              }}
+            >
               <BarsChart data={chart} xKey="name" horizontal series={[{ key: "total", label: "Income", color: SLOT(0) }]} />
             </ChartCard>
           )}
@@ -602,12 +732,25 @@ function Inner() {
 }
 
 export default function Page() {
+  const can = useCan();
+  const me = useSession();
+  if (!can("analytics.view") && !me.headOfDepartmentId)
+    return (
+      <EmptyState
+        icon={<ShieldAlert className="h-8 w-8" />}
+        title="You do not have access to this page"
+        detail="Department accounts need the analytics permission, or a login set as a department head. Ask an Admin."
+      />
+    );
   return (
-    <Guard perm="analytics.view">
-      <PageHeader title="Department accounts" subtitle="Income, own costs and profit of each department — USG, foot & physio, cardiac, JJ Wellness, ophthalmology, diet, SCP, short and long admissions" />
+    <>
+      <PageHeader
+        title="Department accounts"
+        subtitle="Income, own costs and profit of each department — USG, foot & physio, cardiac, JJ Wellness, ophthalmology, diet, SCP, short and long admissions"
+      />
       <Suspense fallback={<Spinner />}>
         <Inner />
       </Suspense>
-    </Guard>
+    </>
   );
 }

@@ -34,6 +34,7 @@ export async function actorForUsername(username: string): Promise<Actor> {
     roleName: user.role.name,
     permissions: new Set(user.role.permissions.map((rp) => rp.permission.code)),
     mustChangePassword: false,
+    headOfDepartmentId: user.headOfDepartmentId,
     ip: null,
     userAgent: "nightly JJ Wellness sync",
   };

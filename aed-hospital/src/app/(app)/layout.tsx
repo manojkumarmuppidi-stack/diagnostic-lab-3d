@@ -22,6 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         permissions: [...actor.permissions],
         hospitalName: settings.hospitalName,
         today: todayISO(),
+        headOfDepartmentId: actor.headOfDepartmentId ?? null,
       }}
     >
       {children}
