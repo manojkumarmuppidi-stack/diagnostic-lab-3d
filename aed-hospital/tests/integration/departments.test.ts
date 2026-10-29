@@ -284,6 +284,18 @@ describe("department accounts", () => {
     // Wrong statement, other heads and Admin-entered rows are refused.
     const usg = await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "USG scan room" } });
     await expect(importDepartmentWorkbook(f.admin, usg.id, "physio.xlsx", first)).rejects.toThrow(/is for Foot exam/);
+    // A blank tab for another department (the shared workbook) is skipped, not refused.
+    const shared = new ExcelJS.Workbook();
+    const other = shared.addWorksheet("USG");
+    other.addRow(["Department: USG scan room"]);
+    other.addRow(["Category", "Name / item", "Jan 2026"]);
+    other.addRow(["Salaries", "", null]);
+    other.addRow(["Total", "", { formula: "SUM(C3:C3)" } as unknown as number]); // never calculated: counts as blank
+    const mine = shared.addWorksheet("Physio");
+    mine.addRow(["Department: Foot exam, neuropathy & physiotherapy"]);
+    mine.addRow(["Category", "Name / item", "Jan 2026"]);
+    mine.addRow(["Consumables", "Gel", 600]);
+    expect(await importDepartmentWorkbook(f.admin, physio.id, "shared.xlsx", Buffer.from(await shared.xlsx.writeBuffer()))).toMatchObject({ costsAdded: 1 });
     await expect(importDepartmentWorkbook({ ...f.reception, headOfDepartmentId: usg.id }, null, "physio.xlsx", first)).rejects.toThrow(/only for the department you head/);
     const head = { ...f.reception, headOfDepartmentId: physio.id };
     await expect(importDepartmentWorkbook(head, physio.id, "physio.xlsx", first)).rejects.toThrow(/entered by the Admin/);

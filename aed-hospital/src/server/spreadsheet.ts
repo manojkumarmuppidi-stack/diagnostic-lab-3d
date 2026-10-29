@@ -49,6 +49,7 @@ function cellToValue(v: unknown): Cell {
   if (typeof v === "object") {
     const o = v as Record<string, unknown>;
     if ("result" in o) return cellToValue(o.result); // formula
+    if ("formula" in o || "sharedFormula" in o) return null; // formula never calculated (file not saved by Excel)
     if ("richText" in o && Array.isArray(o.richText)) return (o.richText as { text: string }[]).map((t) => t.text).join("").trim() || null;
     if ("text" in o) return cellToValue(o.text); // hyperlink
     if ("error" in o) return null;

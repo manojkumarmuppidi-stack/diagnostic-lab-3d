@@ -625,6 +625,16 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
         errors.push(`${sh.name}: no department called "${named}"`);
         continue;
       }
+      const hasAmounts = sh.rows.some(
+        (r) =>
+          !/^(grand )?total/i.test(String(r.values[catCol] ?? "")) &&
+          monthCols.some(([h]) => {
+            const a = amountOf(r.values[h]);
+            return a !== null && a !== 0;
+          }),
+      );
+      // Blank tabs (e.g. the other departments' tabs of the shared workbook) are skipped.
+      if (!hasAmounts) continue;
       if (fromSheet && dept && fromSheet.id !== dept.id) {
         errors.push(`${sh.name} is for ${fromSheet.name}, not ${dept.name}: upload it from ${fromSheet.name}'s statement or with "Import costs for all departments"`);
         continue;
