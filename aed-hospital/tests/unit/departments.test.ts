@@ -31,6 +31,8 @@ describe("department of a billed item (names as billed in OneGlance)", () => {
     ["SCP", "Sugar Control Plan", "SCP — Sugar Control Plans"],
     ["SCP", "F/u by bhagya", "SCP — Sugar Control Plans"],
     ["SCP", "Short admission by Spandana", "Short admissions"],
+    ["IPD", "Short Admission", "Short admissions"],
+    ["IPD", "Long Admission", "Long admissions"],
     ["IPD", "MMP admission", "JJ Wellness — MMP admissions"],
     ["OTHER", "JJ Wellness MMP package", "JJ Wellness — MMP admissions"],
   ])("%s %s → %s", (stream, name, expected) => expect(dept(stream, name)).toBe(expected));

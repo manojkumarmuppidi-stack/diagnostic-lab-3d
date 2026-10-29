@@ -123,6 +123,7 @@ export const DEFAULT_DEPARTMENTS: DeptDefault[] = [
   { name: "Diet", keywords: "diet, stream:DIET", expenseDepartments: "Diet & Nutrition" },
   { name: "SCP — Sugar Control Plans", keywords: "sugar control, scp, stream:SCP" },
   { name: "Short admissions", keywords: "short admission, short admissions, short adm" },
+  { name: "Long admissions", keywords: "long admission, long admissions, long adm" },
   {
     name: "JJ Wellness — MMP admissions",
     keywords: "mmp",
