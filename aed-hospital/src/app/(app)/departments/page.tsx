@@ -160,9 +160,14 @@ function CostDialog({
           <select className="input" value={v.kind} onChange={(e) => set("kind", e.target.value)}>
             <option value="FIXED">A fixed amount every month</option>
             <option value="SHARE">A % of what the hospital spends on an expense category that month</option>
+            <option value="INCOME">A % of this department&apos;s own billed income that month (incentives)</option>
           </select>
         </Field>
-        {v.kind === "FIXED" ? (
+        {v.kind === "INCOME" ? (
+          <Field label="Percent of the department's billed income (%)" required help="Packages, tests and consultations billed to this department that month — not the injection margin">
+            <input className="input" type="number" min={0} max={100} step="0.01" value={v.percent} onChange={(e) => set("percent", e.target.value)} />
+          </Field>
+        ) : v.kind === "FIXED" ? (
           <Field label="Amount per month (₹)" required>
             <input className="input" type="number" min={0} value={v.amount} onChange={(e) => set("amount", e.target.value)} />
           </Field>

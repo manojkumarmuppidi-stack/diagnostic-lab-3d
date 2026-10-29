@@ -113,7 +113,6 @@ export const DEFAULT_DEPARTMENTS: DeptDefault[] = [
     addOnKeywords: "consultation, wellness consultation, wellness",
     addOnAmount: 200,
     pharmacyItems: GLP_INJECTIONS,
-    pharmacyIncentivePct: 1,
     partnerName: "JJ Wellness",
     partnerSharePct: 20,
   },

@@ -257,11 +257,21 @@ async function departmentProfit(
       for (const m of months) {
         const month = m.slice(0, 7);
         if (!inMonths(c, month)) continue;
-        const monthly = c.kind === "SHARE" ? ((byCategory.get(c.categoryId ?? "")?.[month] ?? 0) * toNum(c.percent)) / 100 : toNum(c.amount);
-        const v = round2(byDay ? monthly / daysIn(month) : monthly);
+        let v: number;
+        // INCOME: a % of the department's own billed income in that column (incentives); not of the injection margin.
+        if (c.kind === "INCOME") v = round2(((g.byMonth[m] ?? 0) * toNum(c.percent)) / 100);
+        else {
+          const monthly = c.kind === "SHARE" ? ((byCategory.get(c.categoryId ?? "")?.[month] ?? 0) * toNum(c.percent)) / 100 : toNum(c.amount);
+          v = round2(byDay ? monthly / daysIn(month) : monthly);
+        }
         if (v) byMonth[m] = v;
       }
-      const basis = c.kind === "SHARE" ? `${toNum(c.percent)}% of ${catName.get(c.categoryId ?? "") ?? "a deleted category"}` : `₹${toNum(c.amount).toLocaleString("en-IN")} a month`;
+      const basis =
+        c.kind === "SHARE"
+          ? `${toNum(c.percent)}% of ${catName.get(c.categoryId ?? "") ?? "a deleted category"}`
+          : c.kind === "INCOME"
+            ? `${toNum(c.percent)}% of ${d.name}'s billed income (not the injection margin)`
+            : `₹${toNum(c.amount).toLocaleString("en-IN")} a month`;
       costLines.push({ id: c.id, label: c.label, basis: `${basis} · ${c.fromMonth}${c.toMonth ? ` to ${c.toMonth}` : " onwards"}`, byMonth, total: sum(byMonth) });
     }
     // People who bring income in: their incentive is a % of the income they generated that month.
@@ -334,7 +344,7 @@ const costInput = z
   .object({
     departmentId: z.string().min(1),
     label: z.string().trim().min(1).max(120),
-    kind: z.enum(["FIXED", "SHARE"]),
+    kind: z.enum(["FIXED", "SHARE", "INCOME"]),
     amount: z.coerce.number().min(0).max(99_99_99_999).default(0),
     percent: z.coerce.number().min(0).max(100).default(0),
     categoryId: z.string().nullable().optional(),
@@ -342,7 +352,10 @@ const costInput = z
     toMonth: z.string().regex(MONTH).nullable().optional(),
   })
   .refine((c) => !c.toMonth || c.toMonth >= c.fromMonth, { message: "The last month is before the first month", path: ["toMonth"] })
-  .refine((c) => (c.kind === "FIXED" ? c.amount > 0 : c.percent > 0 && !!c.categoryId), { message: "Enter the amount, or the % and the expense category", path: ["amount"] });
+  .refine((c) => (c.kind === "FIXED" ? c.amount > 0 : c.kind === "INCOME" ? c.percent > 0 : c.percent > 0 && !!c.categoryId), {
+    message: "Enter the amount, or the %, and for a share of hospital spending the expense category",
+    path: ["amount"],
+  });
 
 export async function listDepartmentCostOptions(actor: Actor) {
   const own = scopeOf(actor);
@@ -360,7 +373,7 @@ export async function saveDepartmentCost(actor: Actor, id: string | null, raw: u
   assertCanEditCost(actor, c.departmentId);
   if (!(await prisma.serviceDepartment.findUnique({ where: { id: c.departmentId } }))) throw notFound("Department not found");
   if (c.kind === "SHARE" && !(await prisma.expenseCategory.findUnique({ where: { id: c.categoryId! } }))) throw badRequest("Expense category not found");
-  const data = { ...c, amount: c.kind === "FIXED" ? c.amount : 0, percent: c.kind === "SHARE" ? c.percent : 0, categoryId: c.kind === "SHARE" ? c.categoryId! : null, toMonth: c.toMonth || null };
+  const data = { ...c, amount: c.kind === "FIXED" ? c.amount : 0, percent: c.kind === "FIXED" ? 0 : c.percent, categoryId: c.kind === "SHARE" ? c.categoryId! : null, toMonth: c.toMonth || null };
   return prisma.$transaction(async (tx) => {
     const before = id ? await tx.departmentCost.findUnique({ where: { id } }) : null;
     if (id && !before) throw notFound("Cost not found");
@@ -516,8 +529,9 @@ const amountOf = (v: unknown) => {
 
 /**
  * One workbook books a department's costs and people:
- *  - a sheet with "What is it | Amount per month | From month | Until month": fixed monthly costs
- *    (salaries, other expenses); a row with the same name and first month is updated, not repeated;
+ *  - a sheet with "What is it | Amount per month | From month | Until month" (and optionally
+ *    "% of department income" instead of an amount, for incentives): monthly costs (salaries, other
+ *    expenses, incentives); a row with the same name and first month is updated, not repeated;
  *  - a sheet with "Person | Incentive % | <one column per month>": people who bring income, with the
  *    income they generated each month.
  */
@@ -528,7 +542,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
   const { readSpreadsheet } = await import("../spreadsheet");
   const sheets = await readSpreadsheet(fileName, buf);
   const key = (h: string) => norm(h);
-  const costs: { label: string; amount: number; fromMonth: string; toMonth: string | null; row: number }[] = [];
+  const costs: { label: string; amount: number; percent: number; fromMonth: string; toMonth: string | null; row: number }[] = [];
   const people: { name: string; pct: number; incomes: [string, number | null][]; row: number }[] = [];
   const errors: string[] = [];
   for (const sh of sheets) {
@@ -540,21 +554,25 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     const personCol = col("person", "name");
     if (labelCol && amountCol && fromCol) {
       const untilCol = col("until month", "until", "to month", "to");
+      const pctCol = col("% of department income", "percent of department income", "% of income");
       for (const r of sh.rows) {
         const label = String(r.values[labelCol] ?? "").trim();
         if (!label) continue;
         const amount = amountOf(r.values[amountCol]);
+        const percent = pctCol ? amountOf(r.values[pctCol]) : null;
         const fromMonth = monthOf(r.values[fromCol]);
         const toMonth = untilCol ? monthOf(r.values[untilCol]) : null;
-        if (amount === null || Number.isNaN(amount) || amount <= 0 || !fromMonth) {
-          errors.push(`${sh.name} row ${r.rowNumber}: needs an amount and a first month`);
+        const hasAmount = amount !== null && !Number.isNaN(amount) && amount > 0;
+        const hasPct = percent !== null && !Number.isNaN(percent) && percent > 0 && percent <= 100;
+        if (!fromMonth || hasAmount === hasPct) {
+          errors.push(`${sh.name} row ${r.rowNumber}: needs a first month and either an amount or a % of department income`);
           continue;
         }
         if (toMonth && toMonth < fromMonth) {
           errors.push(`${sh.name} row ${r.rowNumber}: last month is before the first month`);
           continue;
         }
-        costs.push({ label: label.slice(0, 120), amount: round2(amount), fromMonth, toMonth, row: r.rowNumber });
+        costs.push({ label: label.slice(0, 120), amount: hasAmount ? round2(amount!) : 0, percent: hasPct ? round2(percent!) : 0, fromMonth, toMonth, row: r.rowNumber });
       }
     } else if (personCol) {
       const pctCol = col("incentive %", "incentive", "incentive percent");
@@ -585,7 +603,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     let updated = 0;
     for (const c of costs) {
       const existing = await tx.departmentCost.findFirst({ where: { departmentId, label: c.label, fromMonth: c.fromMonth } });
-      const data = { kind: "FIXED", amount: c.amount, percent: 0, categoryId: null, toMonth: c.toMonth };
+      const data = { kind: c.percent ? "INCOME" : "FIXED", amount: c.amount, percent: c.percent, categoryId: null, toMonth: c.toMonth };
       if (existing) {
         await tx.departmentCost.update({ where: { id: existing.id }, data });
         updated++;

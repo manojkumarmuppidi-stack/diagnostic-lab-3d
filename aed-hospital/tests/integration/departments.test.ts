@@ -76,6 +76,8 @@ describe("department accounts", () => {
     await expense("2026-10-21", f.ids.groceries, null, 0.01, wellness.id);
 
     const jjId = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "JJ Wellness" } })).id;
+    // The automatic incentive on injection sales is off for JJ Wellness by default; switched on here to test it.
+    await prisma.serviceDepartment.update({ where: { id: jjId }, data: { pharmacyIncentivePct: 1 } });
     await saveDepartmentCost(f.admin, null, { departmentId: jjId, label: "Salary — counsellor", kind: "FIXED", amount: 30000, fromMonth: "2026-10" });
     await saveDepartmentCost(f.admin, null, { departmentId: jjId, label: "Groceries share", kind: "SHARE", percent: 10, categoryId: f.ids.groceries, fromMonth: "2026-10" });
     const gone = await saveDepartmentCost(f.admin, null, { departmentId: jjId, label: "Old rent", kind: "FIXED", amount: 1, fromMonth: "2026-01", toMonth: "2026-09" });
@@ -199,6 +201,25 @@ describe("department accounts", () => {
     b.addRow(["What is it", "Amount per month", "From month", "Until month"]);
     b.addRow(["Salary — Staff C", "", "Apr 2026", ""]);
     await expect(importDepartmentWorkbook(f.admin, jjId, "bad.xlsx", Buffer.from(await bad.xlsx.writeBuffer()))).rejects.toThrow(/Nothing was saved/);
+  });
+
+  it("charges an incentive as a % of the department's own billed income, not of its injection margin", async () => {
+    const jjId = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "JJ Wellness" } })).id;
+    await createTransaction(f.admin, "other-income", { date: "2026-11-05", source: "JJ Wellness MMP package", amount: 100000, paymentModeId: f.ids.CASH });
+    const pen = await prisma.pharmacyItem.create({ data: { name: "INJ MOUNJARO KWIKPEN 5mg/0.6ml", form: "INJ" } });
+    await prisma.pharmacyItemLine.create({ data: { kind: "SALE", date: new Date("2026-11-10"), itemId: pen.id, qty: 1, amount: 21000, taxable: 20000, cost: 18000, fingerprint: "t-pen", createdById: f.admin.id } });
+    for (const who of ["A", "B", "C"]) await saveDepartmentCost(f.admin, null, { departmentId: jjId, label: `Incentive — ${who} (3%)`, kind: "INCOME", percent: 3, fromMonth: "2026-11" });
+    await expect(saveDepartmentCost(f.admin, null, { departmentId: jjId, label: "x", kind: "INCOME", fromMonth: "2026-11" })).rejects.toThrow(/%/);
+    const d = await departmentAccounts(f.admin, { from: "2026-11-01", to: "2026-11-30" });
+    const jj = d.statements.find((x) => x.name === "JJ Wellness")!;
+    expect(jj.totals.income).toBe(102000);
+    expect(jj.costLines.map((l) => [l.label, l.total])).toEqual([
+      ["Incentive — A (3%)", 3000],
+      ["Incentive — B (3%)", 3000],
+      ["Incentive — C (3%)", 3000],
+    ]);
+    const days = await departmentAccounts(f.admin, { from: "2026-11-01", to: "2026-11-30", granularity: "day" });
+    expect(days.statements.find((x) => x.name === "JJ Wellness")!.costs["2026-11-05"]).toBe(9000);
   });
 });
 

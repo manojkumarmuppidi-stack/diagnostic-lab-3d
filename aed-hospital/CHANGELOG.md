@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.19.1: Incentives as a % of a department's income
+- "Add cost" (and the Excel import, column "% of department income") can charge a % of the department's own billed income each month — packages, tests and consultations, not the injection margin — for incentives such as 3% each to three people.
+- JJ Wellness: the automatic 1% on injection sales is switched off; the incentives entered each month already include it (migration `20261102010000_jj_injection_incentive_off`). It can be switched back on in Master Data → Income departments.
+
 ## 0.19.0: Incentives on income generated
 - Department statement: "Import from Excel" (Admin) books salaries and other monthly costs (What is it · Amount per month · From month · Until month) and people with their incentive % and monthly income generated (Person · Incentive % · one column per month) in one upload; uploading again updates the same rows.
 - Department statement: "People bringing income" — the Admin adds each person (or pair) with their incentive %, and records the income they generated each month. Their incentive (% × income generated) appears under the department's costs; the income generated is not added to the department's income, which comes from the bills. Heads see it; only the Admin changes it (migration `20261102000000_department_contributors`).
