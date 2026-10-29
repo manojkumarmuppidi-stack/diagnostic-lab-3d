@@ -3,6 +3,8 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.19.1: Incentives as a % of a department's income
+- New role "Department head" with no other access: together with "Department head of" in Staff logins, the login sees only that department in Department accounts and lands there after sign-in.
+- Department Excel import: the "% of department income" column is recognised (the % sign was dropped when matching headers).
 - "Add cost" (and the Excel import, column "% of department income") can charge a % of the department's own billed income each month — packages, tests and consultations, not the injection margin — for incentives such as 3% each to three people.
 - JJ Wellness: the automatic 1% on injection sales is switched off; the incentives entered each month already include it (migration `20261102010000_jj_injection_incentive_off`). It can be switched back on in Master Data → Income departments.
 

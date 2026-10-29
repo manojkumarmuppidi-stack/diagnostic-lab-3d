@@ -196,6 +196,13 @@ describe("department accounts", () => {
       ["Incentive — Earner A", 3000],
     ]);
 
+    const pctBook = new ExcelJS.Workbook();
+    const pc = pctBook.addWorksheet("Costs");
+    pc.addRow(["What is it", "Amount per month", "% of department income", "From month", "Until month"]);
+    pc.addRow(["Incentive — Staff A (3%)", null, 3, "Nov 2026", null]);
+    expect(await importDepartmentWorkbook(f.admin, jjId, "pct.xlsx", Buffer.from(await pctBook.xlsx.writeBuffer()))).toMatchObject({ costsAdded: 1 });
+    expect(await prisma.departmentCost.findFirst({ where: { label: "Incentive — Staff A (3%)" } })).toMatchObject({ kind: "INCOME", fromMonth: "2026-11", toMonth: null });
+
     const bad = new ExcelJS.Workbook();
     const b = bad.addWorksheet("Costs");
     b.addRow(["What is it", "Amount per month", "From month", "Until month"]);

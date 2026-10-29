@@ -113,6 +113,11 @@ export const ROLE_DEFS: Record<string, { name: string; description: string; perm
     description: "Read-only dashboards, analytics and reports (patient names masked)",
     permissions: ["dashboard.view", "analytics.view", "reports.view", "reports.export", "search.use", ...viewAllTx, "accounts.view", "audit.view"],
   },
+  DEPARTMENT_HEAD: {
+    name: "Department head",
+    description: "Only Department accounts for the department set in their login (Staff logins → Department head of): its income, costs, profit and patients; adds its costs",
+    permissions: [],
+  },
 };
 
 export function hasPermission(granted: ReadonlySet<string> | readonly string[], code: PermissionCode): boolean {

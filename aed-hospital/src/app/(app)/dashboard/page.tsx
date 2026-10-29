@@ -1,19 +1,19 @@
 "use client";
 import { FreshnessBanner } from "@/components/FreshnessBanner";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, Info, OctagonAlert } from "lucide-react";
+import { AlertTriangle, Info, OctagonAlert, ShieldAlert } from "lucide-react";
 import { useApi, qs } from "@/lib/client";
 import { EXPENSE_LABELS, STREAM_LABELS, type Change, type Counts, type ExpenseByKind, type IncomeByStream, AED_INCOME_STREAMS } from "@/lib/accounting";
 import { addDays } from "@/lib/dates";
 import { formatINR, formatNumber, formatPct } from "@/lib/money";
 import type { Granularity, ResolvedPeriod } from "@/lib/periods";
-import { Card, ErrorState, PageHeader, Spinner } from "@/components/ui";
+import { Card, EmptyState, ErrorState, PageHeader, Spinner } from "@/components/ui";
 import { Kpi } from "@/components/Kpi";
 import { PeriodPicker, periodQuery, type PeriodValue } from "@/components/PeriodPicker";
 import { BarsChart, ChartCard, DonutChart, STREAM_COLORS } from "@/components/charts/Charts";
-import { useCan } from "@/components/session";
+import { useCan, useSession } from "@/components/session";
 import { STREAM_HREF, withRange } from "@/lib/drill";
 import { ComparisonCard, InsightList, type SectionData } from "@/components/insights/InsightViews";
 import { FileDown, Lightbulb, Presentation } from "lucide-react";
@@ -40,7 +40,20 @@ interface DashboardData {
 }
 
 
+/** Logins without the dashboard (a department head) land on what they can see instead. */
 export default function DashboardPage() {
+  const can = useCan();
+  const me = useSession();
+  const router = useRouter();
+  const allowed = can("dashboard.view");
+  useEffect(() => {
+    if (!allowed && me.headOfDepartmentId) router.replace("/departments");
+  }, [allowed, me.headOfDepartmentId, router]);
+  if (allowed) return <Dashboard />;
+  return me.headOfDepartmentId ? <Spinner /> : <EmptyState icon={<ShieldAlert className="h-8 w-8" />} title="No dashboard for this login" detail="Use the menu to open the pages your role allows." />;
+}
+
+function Dashboard() {
   const [period, setPeriod] = useState<PeriodValue>({ preset: "today", compareMode: "like_for_like" });
   const { data, error, loading, reload } = useApi<DashboardData>(period.preset === "custom" && (!period.from || !period.to) ? null : `/api/dashboard${qs(periodQuery(period))}`);
   const router = useRouter();

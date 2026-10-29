@@ -547,7 +547,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
   const errors: string[] = [];
   for (const sh of sheets) {
     const hs = sh.headers.map(key);
-    const col = (...names: string[]) => sh.headers[hs.findIndex((h) => names.includes(h))];
+    const col = (...names: string[]) => sh.headers[hs.findIndex((h) => names.map(key).includes(h))];
     const labelCol = col("what is it", "label", "cost", "description");
     const amountCol = col("amount per month", "amount", "monthly amount");
     const fromCol = col("from month", "from");
