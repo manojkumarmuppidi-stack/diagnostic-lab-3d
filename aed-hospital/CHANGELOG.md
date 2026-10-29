@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.21.1: Diet follow-ups and billed names
+- Correction (migration `20261103010000_plus_named_consultations`): imported bills named with "+" (consultation + ₹200 wellness share) that were filed under the same name without "+" are corrected like a manual correction — the record is superseded and a copy under the right consultation type points back to it, with an audit entry. The original name comes from the import record; amounts do not change.
 - OneGlance OP bill collection exported with "Bill Details: Particulars": the billed item (Particulars) is now the consultation name, specialty and New/Old, and decides Diet ("Diet Follow up") and SCP ("Sugar Control Plan"); Visit Purpose is used only when Particulars is empty.
 - Without Particulars, a Visit Purpose naming the dietitian ("f/u by deepika", "deppika") is a diet follow-up, and misspelt SCP staff names ("spadana", "spanadana", "sapadana", "sheebha", "baghya") are SCP.
 - Billed names that differ only by "+" stay different ("Old Thyroid & Diabetes+ Consultation" includes the ₹200 wellness share); they were matched to the name without "+".
