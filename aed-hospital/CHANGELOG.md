@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.21.0: Department monthly expenditure sheets
+- "Download blank sheet" on a department's statement (Admin and its head) and "Download sheet for all departments" (Admin): the expenditure sheet for the months selected on the page, ready to share with department heads and to import back.
 - One shared workbook with a tab per department: a head can upload it from their statement with only their tab filled; other departments' blank tabs are skipped. Formulas a file was saved with but never calculated (e.g. Total rows of a generated sheet) count as blank.
 - Department Excel import reads the monthly expenditure sheet: Category (Salaries, Maintenance & repair, Consumables, Groceries, Equipment, Other) · Name / item · one column per month, with "Department: …" above the table. Consecutive months with the same amount become one cost line; uploading a corrected sheet replaces that cost for the months it covers instead of adding it twice.
 - Department heads can import their own department's costs (their statement's Import from Excel); they cannot overwrite what the Admin entered. Cost groups include Groceries.

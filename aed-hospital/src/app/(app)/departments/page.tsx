@@ -8,8 +8,8 @@
 import { Fragment, Suspense, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, Info, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
-import { apiFetch, useApi } from "@/lib/client";
+import { ChevronDown, ChevronRight, Download, Info, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
+import { apiFetch, download, useApi } from "@/lib/client";
 import { endOfMonth, todayISO } from "@/lib/dates";
 import { formatINR, formatINRCompact, formatNumber } from "@/lib/money";
 import { recentMonths } from "@/lib/periods";
@@ -188,6 +188,32 @@ function CostDialog({
   );
 }
 
+/** Download the blank monthly expenditure sheet (one department, or every department) for the months shown. */
+function SheetButton({ departmentId, from, to, label = "Download blank sheet" }: { departmentId: string | null; from: string; to: string; label?: string }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      size="sm"
+      variant="secondary"
+      loading={busy}
+      title="Excel sheet for the department head to fill in: salaries, maintenance & repair, consumables, groceries, other — one column per month"
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await download(`/api/departments/sheet?${new URLSearchParams({ ...(departmentId ? { departmentId } : {}), from: from.slice(0, 7), to: to.slice(0, 7) }).toString()}`);
+        } catch (err: any) {
+          toast("error", err.message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <Download className="h-4 w-4" /> {label}
+    </Button>
+  );
+}
+
 /** Upload a costs workbook: for one department, or (with a Department column) for every department. */
 function ImportButton({ departmentId, label = "Import from Excel", onDone }: { departmentId: string | null; label?: string; onDone: () => void }) {
   const toast = useToast();
@@ -294,6 +320,7 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
       }
       actions={
         <span className="flex flex-wrap gap-2">
+          {edit && <SheetButton departmentId={st.id} from={months[0]} to={months[months.length - 1]} />}
           {edit && <ImportButton departmentId={st.id} onDone={changed} />}
           {edit && (
             <Button size="sm" onClick={() => setDialog({ cost: null })}>
@@ -930,7 +957,12 @@ function Inner() {
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                       <h2 className="text-base font-semibold">All departments</h2>
-                      {can("masters.manage") && <ImportButton departmentId={null} label="Import costs for all departments" onDone={reload} />}
+                      {can("masters.manage") && (
+                        <span className="flex flex-wrap gap-2">
+                          <SheetButton departmentId={null} from={data.months[0]} to={data.months[data.months.length - 1]} label="Download sheet for all departments" />
+                          <ImportButton departmentId={null} label="Import costs for all departments" onDone={reload} />
+                        </span>
+                      )}
                     </div>
                     <Overview data={data} selected={st.id} onSelect={(id) => set("dept", id)} />
                     <AllDepartmentsInsights data={data} />

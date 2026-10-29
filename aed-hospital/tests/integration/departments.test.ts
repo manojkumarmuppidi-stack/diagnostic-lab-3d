@@ -3,7 +3,7 @@ import { prisma } from "@/server/db";
 import { createTransaction } from "@/server/services/transactions";
 import { createMaster } from "@/server/services/masters";
 import ExcelJS from "exceljs";
-import { deleteContributor, deleteDepartmentCost, departmentAccounts, departmentPatients, importDepartmentWorkbook, saveContributor, saveDepartmentCost, setContributorIncome } from "@/server/services/departments";
+import { deleteContributor, deleteDepartmentCost, departmentAccounts, departmentPatients, expenditureSheet, importDepartmentWorkbook, saveContributor, saveDepartmentCost, setContributorIncome } from "@/server/services/departments";
 import { DEFAULT_DEPARTMENTS } from "@/lib/departments";
 import { createUser, updateUser } from "@/server/services/misc";
 import { seedFixture, type Fixture } from "../helpers/db";
@@ -308,6 +308,30 @@ describe("department accounts", () => {
     const st = d.statements.find((x) => x.id === physio.id)!;
     expect(st.costLines.filter((l) => l.label === "Salary — Therapist A").reduce((a, l) => a + l.total, 0)).toBe(63000);
     expect(st.costLines.find((l) => l.label === "Groceries")!.total).toBe(2400);
+  });
+
+  it("the downloaded blank sheet, once filled in, imports straight back", async () => {
+    const lab = await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Laboratory" } });
+    const all = await expenditureSheet(f.admin, { from: "2026-01", to: "2026-10" });
+    expect(all.fileName).toBe("AED-All-departments-expenditure-2026-01-to-2026-10.xlsx");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(all.buffer as unknown as ArrayBuffer);
+    expect(wb.worksheets.map((w) => w.name)).toContain("Laboratory");
+    const ws = wb.getWorksheet("Laboratory")!;
+    expect(ws.getRow(4).getCell(3).value).toBe("Jan 2026");
+    ws.getCell("B5").value = "Technician A";
+    ws.getCell("C5").value = 18000;
+    ws.getCell("D5").value = 18000;
+    const r = await importDepartmentWorkbook(f.admin, null, "filled.xlsx", Buffer.from(await wb.xlsx.writeBuffer()));
+    expect(r.departments).toEqual([{ name: "Laboratory", rows: 1 }]);
+    expect(await prisma.departmentCost.findFirst({ where: { departmentId: lab.id, label: "Salary — Technician A" } })).toMatchObject({ fromMonth: "2026-01", toMonth: "2026-02" });
+
+    // A department head gets only their own department; other logins get nothing.
+    const mine = await expenditureSheet({ ...f.reception, headOfDepartmentId: lab.id }, { from: "2026-11", to: "2026-11" });
+    const one = new ExcelJS.Workbook();
+    await one.xlsx.load(mine.buffer as unknown as ArrayBuffer);
+    expect(one.worksheets.map((w) => w.name)).toEqual(["Laboratory"]);
+    await expect(expenditureSheet(f.reception, {})).rejects.toThrow();
   });
 });
 

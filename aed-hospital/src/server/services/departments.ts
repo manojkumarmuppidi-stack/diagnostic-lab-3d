@@ -839,3 +839,110 @@ export function monthRanges(months: Map<string, number>): { from: string; to: st
   }
   return out;
 }
+
+// ─────────────────────────── blank monthly expenditure sheet ───────────────────────────
+
+const SHEET_SECTIONS: [string, number, string][] = [
+  ["Salaries", 8, "FFDDEBF7"],
+  ["Maintenance & repair", 4, "FFFCE4D6"],
+  ["Consumables", 4, "FFE2EFDA"],
+  ["Groceries", 3, "FFFFF2CC"],
+  ["Other (specify)", 4, "FFEDEDED"],
+];
+
+/**
+ * The monthly expenditure sheet department heads fill in (and the import reads back): one tab per
+ * department, cost rows down the side, one column per month. The Admin gets every department; a
+ * department head gets their own.
+ */
+export async function expenditureSheet(actor: Actor, q: { departmentId?: string | null; from?: string | null; to?: string | null }) {
+  const own = scopeOf(actor);
+  const admin = can(actor, "masters.manage");
+  if (!admin && !own) throw forbidden("Only an Admin or a department head can download the expenditure sheet");
+  const today = todayISO();
+  const from = monthOf(q.from) ?? `${today.slice(0, 4)}-01`;
+  const to = monthOf(q.to) ?? today.slice(0, 7);
+  if (to < from) throw badRequest("The last month is before the first month");
+  const months: string[] = [];
+  for (let m = `${from}-01` as ISODate; m.slice(0, 7) <= to; m = addMonths(m, 1)) months.push(m.slice(0, 7));
+  if (months.length > 24) throw badRequest("At most 24 months in one sheet");
+  const wanted = own ?? q.departmentId ?? null;
+  const depts = await prisma.serviceDepartment.findMany({ where: { active: true, ...(wanted ? { id: wanted } : {}) }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] });
+  if (!depts.length) throw notFound("Department not found");
+  const label = (m: string) => `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][+m.slice(5) - 1]} ${m.slice(0, 4)}`;
+  const period = `${label(months[0])} to ${label(months[months.length - 1])}`;
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  if (depts.length > 1) {
+    const readme = wb.addWorksheet("Read me");
+    readme.getColumn(1).width = 120;
+    [
+      `AED Hospital — department monthly expenditure, ${period}`,
+      "",
+      "1. Open the tab for YOUR department and fill only that tab.",
+      "2. Salaries: type each employee's name in 'Name / item' (one row per person) and the salary paid in each month.",
+      "3. Maintenance & repair, Consumables, Groceries, Other: write what it was (e.g. 'AC service', 'Gloves', 'Tea & sugar') and the rupees paid each month.",
+      "4. Numbers only. Leave a month blank if nothing was paid. Do not enter space, rent or current — already included.",
+      "5. Do not change the 'Department:' line. Save and send the file back to the Admin only (it has salaries).",
+    ].forEach((t, i) => {
+      readme.getCell(i + 1, 1).value = t;
+      if (i === 0) readme.getCell(i + 1, 1).font = { bold: true, size: 13 };
+    });
+  }
+  const used = new Set<string>();
+  for (const d of depts) {
+    let tab = d.name
+      .replace(/[\\/*?:[\]]/g, "")
+      .replace(/\s+/g, " ")
+      .slice(0, 31)
+      .trim();
+    while (used.has(tab)) tab = `${tab.slice(0, 28)} ${used.size}`;
+    used.add(tab);
+    const ws = wb.addWorksheet(tab, { views: [{ state: "frozen", xSplit: 2, ySplit: 4 }] });
+    ws.getCell("A1").value = `AED Hospital — ${d.name} — monthly expenditure, ${period}`;
+    ws.getCell("A1").font = { bold: true, size: 13 };
+    ws.getCell("A2").value = `Department: ${d.name}`;
+    ws.getCell("A2").font = { bold: true, color: { argb: "FF1F4E79" } };
+    ws.getCell("A3").value =
+      "Salaries — type each employee's name, one row per person. Other rows — write what it was. Enter the rupees paid in each month (numbers only); leave blank if nothing was paid. Space, rent and current are already included.";
+    const header = ws.getRow(4);
+    ["Category", "Name / item", ...months.map(label), "Total"].forEach((h, i) => {
+      const c = header.getCell(i + 1);
+      c.value = h;
+      c.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4E79" } };
+      c.alignment = { horizontal: "center", wrapText: true };
+    });
+    const lastCol = months.length + 3;
+    const colL = (n: number) => ws.getColumn(n).letter;
+    let r = 5;
+    for (const [cat, n, color] of SHEET_SECTIONS)
+      for (let i = 0; i < n; i++, r++) {
+        const row = ws.getRow(r);
+        row.getCell(1).value = cat;
+        for (let c = 1; c <= lastCol; c++) {
+          const cell = row.getCell(c);
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
+          cell.border = { top: { style: "thin", color: { argb: "FFBFBFBF" } }, bottom: { style: "thin", color: { argb: "FFBFBFBF" } } };
+          if (c >= 3) cell.numFmt = "#,##,##0";
+        }
+        row.getCell(1).dataValidation = { type: "list", allowBlank: true, formulae: ['"Salaries,Maintenance & repair,Consumables,Groceries,Equipment,Other (specify)"'] };
+        row.getCell(lastCol).value = { formula: `SUM(${colL(3)}${r}:${colL(lastCol - 1)}${r})` };
+        row.getCell(lastCol).font = { bold: true };
+      }
+    const total = ws.getRow(r);
+    total.getCell(1).value = "Total";
+    total.getCell(1).font = { bold: true };
+    for (let c = 3; c <= lastCol; c++) {
+      total.getCell(c).value = { formula: `SUM(${colL(c)}5:${colL(c)}${r - 1})` };
+      total.getCell(c).font = { bold: true };
+      total.getCell(c).numFmt = "#,##,##0";
+    }
+    ws.getColumn(1).width = 22;
+    ws.getColumn(2).width = 32;
+    for (let c = 3; c < lastCol; c++) ws.getColumn(c).width = 11;
+    ws.getColumn(lastCol).width = 13;
+  }
+  const name = depts.length === 1 ? depts[0].name.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") : "All-departments";
+  return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), fileName: `AED-${name}-expenditure-${months[0]}-to-${months[months.length - 1]}.xlsx` };
+}
