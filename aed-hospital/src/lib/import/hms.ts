@@ -23,6 +23,7 @@ import { norm } from "./text";
 import { classifyLabItem } from "./lab-category";
 import { classifyExpense, vendorFrom } from "./expense-category";
 import { suggestModeCode } from "../expenses";
+import { isDietName, isScpName } from "../scp";
 
 type Cell = string | number | boolean | null;
 export interface RawSheet {
@@ -218,7 +219,7 @@ function convertOpd(sheet: RawSheet): ConvertedSheet[] {
     };
     const firstVisit = !!pid && !seen.has(pid);
     if (pid) seen.add(pid);
-    if (/^diet\b/i.test(particulars)) {
+    if (/^diet\b/i.test(particulars) || isDietName(particulars)) {
       diet.push({ rowNumber, values: { ...base, Service: particulars } });
       continue;
     }
@@ -260,11 +261,16 @@ function convertOpdCollection(sheet: RawSheet): ConvertedSheet[] {
   const diet: Out[] = [];
   let split = 0;
   let unpaid = 0;
+  let withItems = 0;
   for (const { rowNumber, g } of ordered) {
     const purpose = cleanText(g("Visit Purpose"));
+    // The export with "Bill Details: Particulars" names the billed item ("Diet Follow up", "Sugar Control Plan",
+    // "Old Thyroid+Wellness Consultation"); it is the reliable name, Visit Purpose is free text.
+    const item = cleanText(g("Particulars"));
+    if (item) withItems++;
     const pid = g("PatientID");
     const idNum = num(pid);
-    let vt = visitTypeFor(purpose);
+    let vt = visitTypeFor(item || purpose);
     if (!vt) vt = !first && idNum > maxId ? "New" : "Old";
     if (idNum > maxId) maxId = idNum;
     first = false;
@@ -301,12 +307,12 @@ function convertOpdCollection(sheet: RawSheet): ConvertedSheet[] {
       Reference: `OP-${g("BillNo")}`,
       Remarks: notes.join(" · "),
     };
-    if (/\bdiet\b/i.test(purpose)) {
-      diet.push({ rowNumber, values: { ...base, Service: purpose || "Diet consultation" } });
+    if (item ? /^diet\b/i.test(item) || (isDietName(item) && !isScpName(item)) : isDietName(purpose)) {
+      diet.push({ rowNumber, values: { ...base, Service: item || purpose || "Diet consultation" } });
       continue;
     }
-    const consult = purpose ? purpose.charAt(0) + purpose.slice(1).toLowerCase() : "Consultation";
-    opd.push({ rowNumber, values: { ...base, Doctor: cleanDoctor(g("DoctorName")), Specialty: specialtyFor(purpose), "Consultation Type": consult, "New/Old": vt } });
+    const consult = item || (purpose ? purpose.charAt(0) + purpose.slice(1).toLowerCase() : "Consultation");
+    opd.push({ rowNumber, values: { ...base, Doctor: cleanDoctor(g("DoctorName")), Specialty: specialtyFor(item || purpose), "Consultation Type": consult, "New/Old": vt } });
   }
   const note =
     `${opd.length.toLocaleString("en-IN")} OPD bills` +
@@ -314,7 +320,9 @@ function convertOpdCollection(sheet: RawSheet): ConvertedSheet[] {
     ` with payment modes (Cash, Online → UPI, Cheque, Wallet → Other)` +
     (split ? `; ${split} bills paid in two modes are recorded under the larger one (split in Remarks)` : "") +
     (unpaid ? `; ${unpaid} bills with no payment are recorded under Other` : "") +
-    `. This export has no consultation name, so specialty is General unless Visit Purpose names one, and New/Old comes from the patient registration number. ` +
+    (withItems
+      ? `. Consultation, specialty and New/Old are read from Particulars (the billed item)` + (withItems < opd.length + diet.length ? `; bills without Particulars use Visit Purpose. ` : ". ")
+      : `. This export has no consultation name, so specialty is General unless Visit Purpose names one, and New/Old comes from the patient registration number. `) +
     `Bills already in the app (same OP bill number and date) are flagged as duplicates.`;
   return [
     ...byMonth("oneglance-opd-collection", sheet.name, "opd", "OPD", OPD_HEADERS, opd, note),

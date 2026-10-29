@@ -345,6 +345,18 @@ async function findExistingOneGlanceBills(ns: { module?: string | null; input?: 
   };
   await look("opd", prisma.consultation);
   await look("diet", prisma.dietTransaction);
+  // The same OneGlance bill already held under the other module (e.g. a diet follow-up imported as an
+  // OPD consultation before it was recognised) is the same bill too: never count it twice.
+  for (const [mine, other, del] of [["diet", "opd", prisma.consultation], ["opd", "diet", prisma.dietTransaction]] as const) {
+    const list = [...refs[mine]];
+    for (let i = 0; i < list.length; i += 5000) {
+      const rows = await (del as any).findMany({ where: { reference: { in: list.slice(i, i + 5000) }, status: "ACTIVE" }, select: { id: true, reference: true, date: true } });
+      for (const h of rows) {
+        const k = `${mine}|${h.reference}|${fromDbDate(h.date)}`;
+        if (!out.has(k)) out.set(k, { module: other, id: h.id });
+      }
+    }
+  }
   return out;
 }
 

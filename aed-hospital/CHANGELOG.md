@@ -2,6 +2,13 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.21.1: Diet follow-ups and billed names
+- OneGlance OP bill collection exported with "Bill Details: Particulars": the billed item (Particulars) is now the consultation name, specialty and New/Old, and decides Diet ("Diet Follow up") and SCP ("Sugar Control Plan"); Visit Purpose is used only when Particulars is empty.
+- Without Particulars, a Visit Purpose naming the dietitian ("f/u by deepika", "deppika") is a diet follow-up, and misspelt SCP staff names ("spadana", "spanadana", "sapadana", "sheebha", "baghya") are SCP.
+- Billed names that differ only by "+" stay different ("Old Thyroid & Diabetes+ Consultation" includes the ₹200 wellness share); they were matched to the name without "+".
+- A diet bill whose OPD bill number is already in the app under OPD (or the reverse) is flagged as a duplicate.
+- Correction (migration `20261103000000_diet_followups_from_opd`): diet follow-ups imported as OPD consultations are moved to Diet & Nutrition (the consultation is voided with the reason, both logged); consultation types with misspelt SCP names are marked SCP. Totals do not change, only the stream.
+
 ## 0.21.0: Department monthly expenditure sheets
 - "Download blank sheet" on a department's statement (Admin and its head) and "Download sheet for all departments" (Admin): the expenditure sheet for the months selected on the page, ready to share with department heads and to import back.
 - One shared workbook with a tab per department: a head can upload it from their statement with only their tab filled; other departments' blank tabs are skipped. Formulas a file was saved with but never calculated (e.g. Total rows of a generated sheet) count as blank.

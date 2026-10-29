@@ -51,6 +51,10 @@ export type MatchResult<T> = { item: T; exact: boolean; score: number } | null;
 export function matchByName<T extends NamedItem>(value: string, items: T[], threshold = 0.84): MatchResult<T> {
   const v = norm(value);
   if (!v) return null;
+  // "+" is meaningful in billed names: "Old Thyroid & Diabetes+ Consultation" includes the ₹200 wellness
+  // share, "Old Thyroid & Diabetes Consultation" does not. norm() drops it, so names must agree on it.
+  const plus = value.includes("+");
+  items = items.filter((it) => it.name.includes("+") === plus || (!!it.code && norm(it.code) === v));
   for (const it of items) {
     if (norm(it.name) === v || (it.code && norm(it.code) === v)) return { item: it, exact: true, score: 1 };
   }

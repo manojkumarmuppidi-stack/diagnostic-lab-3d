@@ -82,3 +82,20 @@ describe("JJ Wellness costs and injections", () => {
   );
   it.each(["TAB METFORMIN 500", "INJ HUMAN MIXTARD 30/70", "CAP PREGASTIN-M"])("%s is not", (name) => expect(pharmacyDepartmentFor(depts, name)).toBeNull());
 });
+
+describe("billed names that differ only by '+'", () => {
+  it("are different consultation types (the '+' means the ₹200 wellness share is included)", async () => {
+    const { matchByName } = await import("@/lib/import/text");
+    const items = [{ id: "plain", name: "Old Thyroid & Diabetes Consultation" }, { id: "plus", name: "Old Thyroid & Diabetes+ Consultation" }];
+    expect(matchByName("Old Thyroid & Diabetes+ Consultation", items)?.item.id).toBe("plus");
+    expect(matchByName("Old Thyroid & Diabetes Consultation", items)?.item.id).toBe("plain");
+    expect(matchByName("New Thyroid & Diabetes + Consultation", [items[0]])).toBeNull();
+    expect(matchByName("old thyroid & diabetes consultation", [items[1]])).toBeNull();
+  });
+  it("diet follow-ups and misspelt SCP staff names are recognised", async () => {
+    const { isDietName, isScpName } = await import("@/lib/scp");
+    for (const n of ["f/u by deepika", "F/U BY DEEPIKA", "f/u by deppika", "Diet F/u By Deepika", "Diet Follow up"]) expect(isDietName(n)).toBe(true);
+    for (const n of ["f/u by spadana", "F/u By Spanadana", "f/u by spadna", "f/u by sheebha", "f/u by baghya", "follow up sapadana", "s/u by sapandana"]) expect(isScpName(n)).toBe(true);
+    for (const n of ["Diabetes Old Consultation", "Old Thyroid+Wellness Consultation", "CONSULTATION"]) expect(isDietName(n) || isScpName(n)).toBe(false);
+  });
+});
