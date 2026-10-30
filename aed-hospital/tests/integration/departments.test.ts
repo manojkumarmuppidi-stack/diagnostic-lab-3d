@@ -337,9 +337,12 @@ describe("department accounts", () => {
       ["Salary — Therapist A", 22000, "2026-03", "2026-03"],
     ]);
 
-    // Wrong statement, other heads and Admin-entered rows are refused.
+    // The Admin's sheet goes to the department it names, whichever statement it is uploaded from; a head
+    // uploading another department's sheet, or changing Admin-entered rows, is refused.
     const usg = await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "USG scan room" } });
-    await expect(importDepartmentWorkbook(f.admin, usg.id, "physio.xlsx", first)).rejects.toThrow(/is for Foot exam/);
+    expect(await importDepartmentWorkbook(f.admin, usg.id, "physio.xlsx", first)).toMatchObject({ costsAdded: 4, costsUpdated: 4 });
+    expect(await prisma.departmentCost.count({ where: { departmentId: usg.id } })).toBe(0);
+    await expect(importDepartmentWorkbook({ ...f.reception, headOfDepartmentId: usg.id }, usg.id, "physio.xlsx", first)).rejects.toThrow(/is for Foot exam/);
     // A blank tab for another department (the shared workbook) is skipped, not refused.
     const shared = new ExcelJS.Workbook();
     const other = shared.addWorksheet("USG");

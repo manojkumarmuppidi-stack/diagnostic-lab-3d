@@ -851,7 +851,9 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
       );
       // Blank tabs (e.g. the other departments' tabs of the shared workbook) are skipped.
       if (!hasAmounts) continue;
-      if (fromSheet && dept && fromSheet.id !== dept.id) {
+      // A head uploading from their statement books only their own tab; the Admin's workbook goes tab by
+      // tab to the department each tab names, whichever statement it was uploaded from.
+      if (fromSheet && dept && fromSheet.id !== dept.id && !admin) {
         errors.push(`${sh.name} is for ${fromSheet.name}, not ${dept.name}: upload it from ${fromSheet.name}'s statement or with "Import costs for all departments"`);
         continue;
       }
