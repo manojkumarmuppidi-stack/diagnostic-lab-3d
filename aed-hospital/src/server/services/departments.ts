@@ -283,7 +283,8 @@ async function departmentProfit(
     const rows = await prisma.$queryRaw<{ b: string; amount: Prisma.Decimal }[]>`
       SELECT to_char(e.date, ${range.fmt}) AS b, SUM(e.amount) AS amount FROM "Expense" e
        WHERE e.status = 'ACTIVE' AND e.date BETWEEN ${toDbDate(range.from)} AND ${toDbDate(range.to)}
-         AND (lower(e.description) LIKE ANY(${patterns}) OR lower(COALESCE(e.vendor, '')) LIKE ANY(${patterns}))
+         AND (regexp_replace(lower(e.description), '[^a-z0-9]+', '', 'g') LIKE ANY(${patterns})
+              OR regexp_replace(lower(COALESCE(e.vendor, '')), '[^a-z0-9]+', '', 'g') LIKE ANY(${patterns}))
        GROUP BY 1`;
     matched.set(c.id, Object.fromEntries(rows.map((r) => [r.b, toNum(r.amount)])));
   }
@@ -337,7 +338,8 @@ async function departmentProfit(
         let v: number;
         // INCOME: a % of the department's own billed income in that column (incentives); not of the injection margin.
         if (c.kind === "INCOME") v = round2(((g.byMonth[m] ?? 0) * toNum(c.percent)) / 100);
-        else if (c.kind === "MATCH") v = round2(matched.get(c.id)?.[m] ?? 0);
+        // MATCH: the matched expenses, or the share of them in `percent` (0 = all of it).
+        else if (c.kind === "MATCH") v = round2(((matched.get(c.id)?.[m] ?? 0) * (toNum(c.percent) || 100)) / 100);
         else {
           const monthly =
             c.kind === "SHARE"
@@ -355,7 +357,7 @@ async function departmentProfit(
           : c.kind === "INCOME"
             ? `${toNum(c.percent)}% of ${d.name}'s billed income (not the injection margin)`
             : c.kind === "MATCH"
-              ? `hospital expenses mentioning "${c.matchText}"`
+              ? `${toNum(c.percent) ? `${toNum(c.percent)}% of ` : ""}hospital expenses mentioning "${c.matchText}"`
               : c.kind === "POOL"
                 ? pool
                   ? `${toNum(c.percent)}% of the first-floor pool (${pool.floorPct}% of ${poolNames} in the core accounts each month)`
@@ -440,13 +442,16 @@ const formatShort = (v: number) => `₹${Math.round(v).toLocaleString("en-IN")}`
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
 
-/** "Geetha Priya, Geeta Priya" → ["%geetha%priya%", "%geeta%priya%"] (also catches "Dr.GeethaPriya"). */
+/**
+ * "Geetha Priya, SN Diagnostics" → ["%geethapriya%", "%sndiagnostics%"]. Expense text is compared with
+ * spaces and punctuation removed, so "Dr.GeethaPriya", "S N Diagnostics" and "S.N. DIAGNOSTICS" all match.
+ */
 export function matchPatterns(text: string): string[] {
   return text
     .split(/[,\n]/)
-    .map((t) => norm(t).split(" ").filter(Boolean))
-    .filter((w) => w.length)
-    .map((w) => `%${w.join("%")}%`);
+    .map((t) => norm(t).replace(/ /g, ""))
+    .filter(Boolean)
+    .map((w) => `%${w}%`);
 }
 const costInput = z
   .object({
@@ -495,7 +500,7 @@ export async function saveDepartmentCost(actor: Actor, id: string | null, raw: u
   const data = {
     ...c,
     amount: c.kind === "FIXED" || c.kind === "POOL" ? c.amount : 0,
-    percent: c.kind === "SHARE" || c.kind === "INCOME" || c.kind === "POOL" ? c.percent : 0,
+    percent: c.kind === "SHARE" || c.kind === "INCOME" || c.kind === "POOL" || c.kind === "MATCH" ? c.percent : 0,
     categoryId: c.kind === "SHARE" ? c.categoryId! : null,
     matchText: c.kind === "MATCH" ? c.matchText! : null,
     toMonth: c.toMonth || null,
@@ -888,6 +893,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     }
     const listPctCol = col("% of department income", "percent of department income", "% of income");
     const matchCol = col("expenses containing", "expense containing", "expenses mentioning");
+    const shareCol = col("% of those expenses", "share of those expenses", "% share of expenses", "share %");
     if (labelCol && fromCol && (amountCol || listPctCol || matchCol)) {
       const untilCol = col("until month", "until", "to month", "to");
       const pctCol = listPctCol;
@@ -912,6 +918,12 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
         const hasAmount = amount !== null && !Number.isNaN(amount) && amount > 0;
         const hasPct = percent !== null && !Number.isNaN(percent) && percent > 0 && percent <= 100;
         const matchText = matchCol ? String(r.values[matchCol] ?? "").trim() : "";
+        // With words to find in expenses: the share of those expenses this department takes (blank = all).
+        const share = matchText && shareCol ? amountOf(r.values[shareCol]) : null;
+        if (share !== null && (Number.isNaN(share) || share <= 0 || share > 100)) {
+          errors.push(`${sh.name} row ${r.rowNumber}: the share of those expenses must be 1–100%`);
+          continue;
+        }
         if (!fromMonth || [hasAmount, hasPct, !!matchText].filter(Boolean).length !== 1) {
           errors.push(`${sh.name} row ${r.rowNumber}: needs a first month and one of: an amount, a % of department income, or words to find in expenses`);
           continue;
@@ -924,7 +936,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
           departmentId: target.id,
           label: label.slice(0, 120),
           amount: hasAmount ? round2(amount!) : 0,
-          percent: hasPct ? round2(percent!) : 0,
+          percent: hasPct ? round2(percent!) : share !== null ? round2(share) : 0,
           matchText: matchText || null,
           fromMonth,
           toMonth,

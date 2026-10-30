@@ -133,13 +133,18 @@ function CostDialog({
           </select>
         </Field>
         {v.kind === "MATCH" ? (
-          <Field
-            label="Expenses mentioning"
-            required
-            help="Every hospital expense entered with this in its description or vendor is counted here, month by month. Separate spellings with commas, e.g. Geetha Priya, Geethapriya"
-          >
-            <input className="input" value={v.matchText} onChange={(e) => set("matchText", e.target.value)} />
-          </Field>
+          <>
+            <Field
+              label="Expenses mentioning"
+              required
+              help="Every hospital expense entered with this in its description or vendor is counted here, month by month. Separate spellings with commas, e.g. Geetha Priya, Geethapriya"
+            >
+              <input className="input" value={v.matchText} onChange={(e) => set("matchText", e.target.value)} />
+            </Field>
+            <Field label="Share for this department (%)" help="Blank = all of it. E.g. 60 if the Lab uses 60% of a supplier's gloves and masks">
+              <input className="input" type="number" min={0} max={100} step="0.01" value={v.percent} onChange={(e) => set("percent", e.target.value)} />
+            </Field>
+          </>
         ) : v.kind === "POOL" ? (
           <Field label="Occupancy of the first floor (%)" required help="The pool itself is set once for all departments under All departments → First-floor cost pool">
             <input className="input" type="number" min={0} max={100} step="0.01" value={v.percent} onChange={(e) => set("percent", e.target.value)} />

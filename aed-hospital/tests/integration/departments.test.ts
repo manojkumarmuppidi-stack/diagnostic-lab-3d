@@ -566,4 +566,26 @@ describe("department accounts", () => {
     const own = await departmentStatementWorkbook({ ...f.reception, headOfDepartmentId: jj }, { from: "2026-10-01", to: "2026-10-31" });
     expect(own.fileName).toMatch(/JJ-Wellness/);
   });
+
+  it("books a supplier's hospital expenses to a department whatever the spacing, and only its share when given", async () => {
+    const lab = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Laboratory" } })).id;
+    const e = (description: string, vendor: string | null, amount: number) =>
+      prisma.expense.create({
+        data: { date: new Date("2026-10-10"), categoryId: f.ids.groceries, description, vendor, amount, fingerprint: `s-${amount}`, createdById: f.admin.id },
+      });
+    await e("Reagents", "S N Diagnostics", 1000);
+    await e("S.N. DIAGNOSTICS bill 223", null, 2000);
+    await e("Snacks for staff", null, 4);
+    await e("Gloves, masks", "Vijaya Pharma", 16000);
+    await e("Pharmacy stock", "Vijaya Medicals", 8);
+    const wb = new ExcelJS.Workbook();
+    const w = wb.addWorksheet("Lab suppliers");
+    w.addRow(["Department", "What is it", "Expenses containing", "% of those expenses", "From month"]);
+    w.addRow(["Laboratory", "Reagents — SN Diagnostics", "SN Diagnostics", null, "Jan 2026"]);
+    w.addRow(["Laboratory", "Gloves & masks — Vijaya Pharma", "Vijaya Pharma", 50, "Jan 2026"]);
+    await importDepartmentWorkbook(f.admin, null, "lab.xlsx", Buffer.from(await wb.xlsx.writeBuffer()));
+    const st = (await departmentAccounts(f.admin, { from: "2026-10-01", to: "2026-10-31" })).statements.find((s) => s.id === lab)!;
+    expect(Object.fromEntries(st.costLines.map((l) => [l.label, l.total]))).toEqual({ "Reagents — SN Diagnostics": 3000, "Gloves & masks — Vijaya Pharma": 8000 });
+    expect(st.costLines.find((l) => l.label.includes("Vijaya"))!.basis).toMatch(/^50% of hospital expenses mentioning "Vijaya Pharma"/);
+  });
 });
