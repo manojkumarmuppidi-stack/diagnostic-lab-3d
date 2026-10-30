@@ -40,6 +40,21 @@ async function uploadAndValidate(buf: Buffer, name = "opd.xlsx") {
 }
 
 describe("Excel import", () => {
+  it("refuses department accounts files (salaries, staff list) with a pointer to Department accounts", async () => {
+    const wb = new ExcelJS.Workbook();
+    const t = wb.addWorksheet("USG");
+    t.addRow(["AED Hospital — USG scan room — salaries"]);
+    t.addRow(["Department: USG scan room"]);
+    t.addRow(["Category", "Name / item", "Jan 2026", "Feb 2026"]);
+    t.addRow(["Salaries", "Tech A", 1000, 1000]);
+    await expect(uploadFile(f.admin, "dept.xlsx", Buffer.from(await wb.xlsx.writeBuffer()))).rejects.toThrow(/Department accounts/);
+    const st = new ExcelJS.Workbook();
+    st.addWorksheet("Staff").addRow(["Staff (as in the bank list)", "Also written as", "Department"]);
+    st.getWorksheet("Staff")!.addRow(["Tech A", "", "Laboratory"]);
+    await expect(uploadFile(f.admin, "staff.xlsx", Buffer.from(await st.xlsx.writeBuffer()))).rejects.toThrow(/Department accounts/);
+    expect(await prisma.importBatch.count()).toBe(0);
+  });
+
   it("detects header row, maps messy columns and validates", async () => {
     const { b, v } = await uploadAndValidate(await workbook({ "OPD Jan": OPD_ROWS }));
     expect(b.headerRow).toBe(2);
@@ -113,11 +128,22 @@ describe("Excel import", () => {
   });
 
   it("multi-sheet workbooks create one batch per sheet with the type guessed from the sheet name", async () => {
-    const up = await uploadFile(f.admin, "hospital.xlsx", await workbook({
-      "OPD": OPD_ROWS,
-      "Lab Register": [["Date", "Test Name", "Qty", "Amount", "Mode"], ["05/01/2026", "ECG", 1, 300, "cash"]],
-      "Expenses": [["Date", "Category", "Description", "Amount", "Mode"], ["05/01/2026", "Groceries", "Rice", 900, "cash"]],
-    }), "");
+    const up = await uploadFile(
+      f.admin,
+      "hospital.xlsx",
+      await workbook({
+        OPD: OPD_ROWS,
+        "Lab Register": [
+          ["Date", "Test Name", "Qty", "Amount", "Mode"],
+          ["05/01/2026", "ECG", 1, 300, "cash"],
+        ],
+        Expenses: [
+          ["Date", "Category", "Description", "Amount", "Mode"],
+          ["05/01/2026", "Groceries", "Rice", 900, "cash"],
+        ],
+      }),
+      "",
+    );
     expect(up.batches.map((b) => b.type)).toEqual(["opd", "lab", "expense"]);
     const lab = up.batches[1];
     await validateBatch(f.admin, lab.id, { type: "lab", mapping: lab.suggestion.mapping });
@@ -130,7 +156,7 @@ describe("Excel import", () => {
   });
 
   it("CSV import works too", async () => {
-    const csv = "Date,Test,Amt,Mode\n05/01/2026,ECG,300,Cash\n05/01/2026,Diabetic Profile,\"1,500\",UPI\n";
+    const csv = 'Date,Test,Amt,Mode\n05/01/2026,ECG,300,Cash\n05/01/2026,Diabetic Profile,"1,500",UPI\n';
     const up = await uploadFile(f.admin, "lab.csv", Buffer.from(csv), "lab");
     const b = up.batches[0];
     const v = await validateBatch(f.admin, b.id, { type: "lab", mapping: b.suggestion.mapping });
@@ -164,7 +190,8 @@ describe("bulk commit paths", () => {
 });
 
 describe("OneGlance HMS exports", () => {
-  const PREAMBLE = " Period:01/04/2026  - To:30/04/2026\nAdvanced Endocrine and Diabetes Hospital\nAED Hospital; KPHB\nHyderabad - 500072.\n9059600930\nOutpatient Collection Report(01/04/2026 to 30/04/2026)\n\n\n";
+  const PREAMBLE =
+    " Period:01/04/2026  - To:30/04/2026\nAdvanced Endocrine and Diabetes Hospital\nAED Hospital; KPHB\nHyderabad - 500072.\n9059600930\nOutpatient Collection Report(01/04/2026 to 30/04/2026)\n\n\n";
   const OPD_CSV =
     PREAMBLE +
     "BillNO,BillDate,BillTime,Patientid,PatientName,DoctorName,Particulars,Quantity,BillAmount,ToatlAmount,Discount,S/C,Refferby,Category,UHID,Area,Admit No\n" +
@@ -239,14 +266,15 @@ describe("pharmacy medicine lines", () => {
 describe("supplier payments", () => {
   it("are not expenses, mark invoices paid, measure credit days and reverse", async () => {
     const { supplierPayables } = await import("@/server/services/analytics");
-    const P = "Invoice No,Invoice Date,Stockiest Name,Mfg Name,HSN Code,Drug Name,Batch No,Expiry By,Batch Qty,Free Qty,Strip Qty,Mrp,Rate,Discount Amount,Net Value,Tax%,Tax Amount,Purchase Qty,Avail Qty,Purchase Value,Sales Value,Profit,Profit(%)\n";
+    const P =
+      "Invoice No,Invoice Date,Stockiest Name,Mfg Name,HSN Code,Drug Name,Batch No,Expiry By,Batch Qty,Free Qty,Strip Qty,Mrp,Rate,Discount Amount,Net Value,Tax%,Tax Amount,Purchase Qty,Avail Qty,Purchase Value,Sales Value,Profit,Profit(%)\n";
     const purchases =
-      "x\nx\nx\nx\nx\nPurchase/Sales Report\n\n\n" + P +
+      "x\nx\nx\nx\nx\nPurchase/Sales Report\n\n\n" +
+      P +
       '"INV-1","01-04-2026","DEMO DISTRIBUTORS","Demo","3004","TAB A","A1","Oct-2027","10","0","10","10","8","0","800","5","40","100","0","840","1000","160","19",\n' +
       '"INV-2","05-04-2026","DEMO DISTRIBUTORS","Demo","3004","TAB B","B1","Oct-2027","10","0","10","10","8","0","1000","5","50","100","0","1050","1250","200","19",\n';
     const payments =
-      "x\nx\nx\nx\nx\nPharmacy Invoice Report\n\n\nBillNo,Paid date,Stockiest Name,Details,Paid Amount\n" +
-      '"1","11-04-2026","Demo Distributors","555,INVOICE NO INV-1","840",\n';
+      "x\nx\nx\nx\nx\nPharmacy Invoice Report\n\n\nBillNo,Paid date,Stockiest Name,Details,Paid Amount\n" + '"1","11-04-2026","Demo Distributors","555,INVOICE NO INV-1","840",\n';
     const run = async (csv: string, name: string) => {
       const up = await uploadFile(f.admin, name, Buffer.from(csv));
       for (const b of up.batches) {
@@ -309,8 +337,11 @@ describe("OneGlance bill numbers", () => {
       await validateBatch(f.admin, b.id, { type: b.type, mapping: b.suggestion.mapping });
       await commitBatch(f.admin, b.id, { approveWarnings: true });
     }
-    const H = "BillNo,PatientID,Bill Date,BillTime,PatientName,DoctorName,TotalAmount,DiscAmount,BillAmount,PaidAmount,S/C,Due,Visit Purpose,Billby,Refferby,Category,Area,Admit No,BillID,ReceivedDate,paidvalue,Pstatus,paymentdetails,Cash,Cheque,Online,OneGlance Wallet\n";
-    const opdB = H + '"5001","9001","03-01-2026","08:00 AM","Miss.DEMO A(30)","Dr.Demo","600","0","600","600","0","0","CONSULTATION","Desk","","","","","","","","","","600","0","0","0"\n' +
+    const H =
+      "BillNo,PatientID,Bill Date,BillTime,PatientName,DoctorName,TotalAmount,DiscAmount,BillAmount,PaidAmount,S/C,Due,Visit Purpose,Billby,Refferby,Category,Area,Admit No,BillID,ReceivedDate,paidvalue,Pstatus,paymentdetails,Cash,Cheque,Online,OneGlance Wallet\n";
+    const opdB =
+      H +
+      '"5001","9001","03-01-2026","08:00 AM","Miss.DEMO A(30)","Dr.Demo","600","0","600","600","0","0","CONSULTATION","Desk","","","","","","","","","","600","0","0","0"\n' +
       '"5002","9002","03-01-2026","08:10 AM","Mr.DEMO B(40)","Dr.Demo","600","0","600","600","0","0","CONSULTATION","Desk","","","","","","","","","","0","0","600","0"\n';
     const up2 = await uploadFile(f.admin, "op2.csv", Buffer.from(opdB));
     expect(up2.batches.map((b) => b.type)).toEqual(["opd"]);
@@ -323,7 +354,8 @@ describe("OneGlance bill numbers", () => {
 
 describe("pharmacy daily totals vs bills", () => {
   it("a day already imported as daily totals is not imported again as bills", async () => {
-    const PH = "x\nx\nPharmacy Collection Report\n\nBill Date,Total Amount,Discount,Bill Amount,Paid Amount,DueAmount,Pending Collected,Refund Amount,Net Revenue,ReceivedDate,paidvalue,Pstatus,Cash,Card ,Cheque,Online,Adjust deposit,OneGlance Wallet,Phone Pay,G Pay\n" +
+    const PH =
+      "x\nx\nPharmacy Collection Report\n\nBill Date,Total Amount,Discount,Bill Amount,Paid Amount,DueAmount,Pending Collected,Refund Amount,Net Revenue,ReceivedDate,paidvalue,Pstatus,Cash,Card ,Cheque,Online,Adjust deposit,OneGlance Wallet,Phone Pay,G Pay\n" +
       '"01-04-2026","1000","0","1000","1000","0","0","0","1000","","1000","","1000","0","0","0","0","0","0","0",\n';
     const run = async (csv: string, name: string) => {
       const up = await uploadFile(f.admin, name, Buffer.from(csv));
@@ -336,17 +368,21 @@ describe("pharmacy daily totals vs bills", () => {
       return res;
     };
     await run(PH, "Pharmacy_Collection_Report.csv");
-    const H = "Bill No,Bill Date,Bill Time,Patientid,Patient Name,Reffered By,Total Amount,Discount,Bill Amount,Paid Amount,Due,Billby,BillID,ReceivedDate,paidvalue,paymentdetails,Cash,Card,Cheque,Online,Adjust deposit,OneGlance Wallet,Phone Pay,G Pay,Category,Area,Admit No\n";
-    const bills = H +
+    const H =
+      "Bill No,Bill Date,Bill Time,Patientid,Patient Name,Reffered By,Total Amount,Discount,Bill Amount,Paid Amount,Due,Billby,BillID,ReceivedDate,paidvalue,paymentdetails,Cash,Card,Cheque,Online,Adjust deposit,OneGlance Wallet,Phone Pay,G Pay,Category,Area,Admit No\n";
+    const bills =
+      H +
       '"227903","01-04-2026","09:00 AM","1","DEMO A","","1000","0","1000","1000","0","Desk","227903","","1000","","1000","0","0","0","0","0","0","0","","","",\n' +
       '"227990","02-04-2026","09:00 AM","2","DEMO B","","500","0","500","500","0","Desk","227990","","500","","0","0","0","0","0","0","0","500","","","",\n';
     const [s] = await run(bills, "Pharmacy_Bill_Collection.csv");
     expect(s).toMatchObject({ total: 2, duplicates: 1 });
     const sales = await prisma.pharmacySale.findMany({ where: { status: "ACTIVE" }, select: { invoiceNo: true, netAmount: true }, orderBy: { invoiceNo: "asc" } });
-    expect(sales.map((x) => [x.invoiceNo, Number(x.netAmount)])).toEqual([["PH-DAY-20260401-CASH", 1000], ["PHB-227990", 500]]);
+    expect(sales.map((x) => [x.invoiceNo, Number(x.netAmount)])).toEqual([
+      ["PH-DAY-20260401-CASH", 1000],
+      ["PHB-227990", 500],
+    ]);
   });
 });
-
 
 describe("historical backfill into closed days", () => {
   it("is refused by default, Admin-only when ticked, and keeps the day closed with refreshed totals", async () => {
@@ -356,7 +392,8 @@ describe("historical backfill into closed days", () => {
     const st = await getDailyStatement(f.admin, D);
     await saveReconciliation(f.admin, D, { lines: st.reconciliation.map((l) => ({ group: l.group, actual: l.expected })) });
     await changeDayStatus(f.admin, D, { action: "close" });
-    const csv = "Date,Category,Description,Amount,Payment Mode,Spread over month\n10-03-2026,Other,Old cash expense,700,Cash,\n31-03-2026,Other,Rent – Mar,31000,Bank Transfer,Yes\n";
+    const csv =
+      "Date,Category,Description,Amount,Payment Mode,Spread over month\n10-03-2026,Other,Old cash expense,700,Cash,\n31-03-2026,Other,Rent – Mar,31000,Bank Transfer,Yes\n";
     const up = await uploadFile(f.admin, "backfill.csv", Buffer.from(csv), "expense");
     const b = up.batches[0];
     const plain = await validateBatch(f.admin, b.id, { type: "expense", mapping: b.suggestion.mapping });

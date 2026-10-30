@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.22.0: Payroll → department salaries, expenses by name, long admissions
+- Excel Import (bills & expenses) refuses department accounts files — salary sheets, expenditure sheets, the staff list — and points to Department accounts → "Import costs for all departments"; before, their tabs were read as OPD/Diet/Lab bills with every row invalid.
 - Staff → department list (Department accounts → All departments, Admin): import a sheet with Staff · Also written as · Department · % to that department · Second department. Anyone marked Hospital-wide / Others is not charged. Remove a person to stop charging them.
 - Bank payroll files (NAME · AMOUNT · BANK · IFSC CODE · ACCOUNT NO) can be imported on Department accounts: the month comes from the file name ("November 2026 Salaries.xlsx") or the title above the table. Each mapped person's pay becomes "Salary — <name>" in their department(s) for that month; a corrected file for the same month replaces it. The toast lists who was not charged to any department. Payroll and the staff list are Admin-only. Department accounts only; the hospital's books do not change.
 - New cost kind "Hospital expenses mentioning …" (e.g. Dr. Geetha Priya): every active hospital expense whose description or vendor contains the name (spellings separated by commas) is counted in that department, month by month. Also importable from a list sheet with an "Expenses containing" column (no amount column needed).

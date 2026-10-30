@@ -53,10 +53,27 @@ export function guessType(sheetName: string, fallback?: string): ImportType | nu
 
 // ─────────────────────────── upload ───────────────────────────
 
+/** Sheets of the department accounts workbooks: these go to Department accounts, never into the books. */
+function isDepartmentSheet(sh: { headers: string[]; preamble?: string[] }): boolean {
+  const h = sh.headers.map((x) =>
+    String(x ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+  if (h.some((x) => x.startsWith("staff (as in"))) return true;
+  if (h.includes("expenses containing")) return true;
+  const monthCols = h.filter((x) => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* 20\d\d$/.test(x)).length;
+  return h.includes("category") && (h.includes("name / item") || (sh.preamble ?? []).some((l) => /^department\s*:/i.test(l))) && monthCols >= 2;
+}
+
 export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, typeHint?: string) {
   requirePermission(actor, "import.run");
   const safeName = fileName.replace(/[^\w.\- ()]/g, "_").slice(0, 150);
   const sheets = expandHmsReports(await readSpreadsheet(safeName, buf));
+  if (sheets.some(isDepartmentSheet))
+    throw badRequest(
+      'This is a department accounts file (department salaries, costs or the staff list), not bills or expenses. Upload it on Department accounts → All departments → "Import costs for all departments".',
+    );
   const fileHash = createHash("sha256").update(buf).digest("hex");
   const groupId = randomUUID();
   const previous = await prisma.importBatch.findMany({
@@ -100,7 +117,12 @@ export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, ty
         note: hms?.note ?? null,
       });
     }
-    await audit(tx, actor, { action: "IMPORT_UPLOAD", entityType: "ImportBatch", entityId: groupId, after: { fileName: safeName, fileHash, sheets: out.map((b) => ({ id: b.id, sheet: b.sheetName, rows: b.rows })) } });
+    await audit(tx, actor, {
+      action: "IMPORT_UPLOAD",
+      entityType: "ImportBatch",
+      entityId: groupId,
+      after: { fileName: safeName, fileHash, sheets: out.map((b) => ({ id: b.id, sheet: b.sheetName, rows: b.rows })) },
+    });
     return out;
   }, LONG_TX);
   return { groupId, fileName: safeName, batches };
@@ -224,10 +246,7 @@ export async function validateBatch(actor: Actor, batchId: string, raw: unknown)
   const side = SIDE_SPECS[type];
   if (side) return validateSideBatch(side, batchId, mapping);
 
-  const [records, ctx] = await Promise.all([
-    prisma.importRecord.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } }),
-    loadMasterCtx(),
-  ]);
+  const [records, ctx] = await Promise.all([prisma.importRecord.findMany({ where: { batchId }, orderBy: { rowNumber: "asc" } }), loadMasterCtx()]);
 
   // Pass 1: normalise every row.
   const results = records.map((rec) => {
@@ -347,7 +366,10 @@ async function findExistingOneGlanceBills(ns: { module?: string | null; input?: 
   await look("diet", prisma.dietTransaction);
   // The same OneGlance bill already held under the other module (e.g. a diet follow-up imported as an
   // OPD consultation before it was recognised) is the same bill too: never count it twice.
-  for (const [mine, other, del] of [["diet", "opd", prisma.consultation], ["opd", "diet", prisma.dietTransaction]] as const) {
+  for (const [mine, other, del] of [
+    ["diet", "opd", prisma.consultation],
+    ["opd", "diet", prisma.dietTransaction],
+  ] as const) {
     const list = [...refs[mine]];
     for (let i = 0; i < list.length; i += 5000) {
       const rows = await (del as any).findMany({ where: { reference: { in: list.slice(i, i + 5000) }, status: "ACTIVE" }, select: { id: true, reference: true, date: true } });
@@ -380,7 +402,10 @@ async function findPharmacyDayClashes(ns: { module?: string | null; input?: any 
     if (k) want[k.split("|")[0] as "day" | "bill"].add(k.split("|")[1]);
   }
   // Incoming daily totals clash with existing bills, and incoming bills with existing daily totals.
-  for (const [kind, other] of [["day", "PHB-"], ["bill", "PH-DAY-"]] as const) {
+  for (const [kind, other] of [
+    ["day", "PHB-"],
+    ["bill", "PH-DAY-"],
+  ] as const) {
     const dates = [...want[kind]];
     for (let i = 0; i < dates.length; i += 1000) {
       const rows = await prisma.pharmacySale.findMany({
@@ -569,7 +594,14 @@ async function validateSideBatch<I>(spec: SideSpec<I>, batchId: string, mapping:
         duplicateOf = `row:${inFile}`;
       } else seen.set(fingerprint, rec.rowNumber);
     }
-    return { status, normalized: n.input ? { module: spec.type, input: n.input, amount: n.amount, flags: [] } : { flags: [] }, errors: n.errors, warnings: n.warnings, fingerprint, duplicateOf };
+    return {
+      status,
+      normalized: n.input ? { module: spec.type, input: n.input, amount: n.amount, flags: [] } : { flags: [] },
+      errors: n.errors,
+      warnings: n.warnings,
+      fingerprint,
+      duplicateOf,
+    };
   });
   const summary = summarize(outcomes);
   summary.byModule = {};
@@ -596,13 +628,28 @@ async function validateSideBatch<I>(spec: SideSpec<I>, batchId: string, mapping:
     }
     await tx.importBatch.update({
       where: { id: batchId },
-      data: { module: spec.type, mapping, status: "VALIDATED", validatedAt: new Date(), validRows: summary.valid, warningRows: summary.warnings, invalidRows: summary.invalid, duplicateRows: summary.duplicates, totalAmount: summary.validAmount },
+      data: {
+        module: spec.type,
+        mapping,
+        status: "VALIDATED",
+        validatedAt: new Date(),
+        validRows: summary.valid,
+        warningRows: summary.warnings,
+        invalidRows: summary.invalid,
+        duplicateRows: summary.duplicates,
+        totalAmount: summary.validAmount,
+      },
     });
   }, LONG_TX);
   return { batchId, type: spec.type, summary };
 }
 
-async function commitSideBatch<I>(spec: SideSpec<I>, actor: Actor, batch: { id: string; fileName: string; sheetName: string | null; options: Prisma.JsonValue }, opts: z.infer<typeof commitInput>) {
+async function commitSideBatch<I>(
+  spec: SideSpec<I>,
+  actor: Actor,
+  batch: { id: string; fileName: string; sheetName: string | null; options: Prisma.JsonValue },
+  opts: z.infer<typeof commitInput>,
+) {
   const records = await prisma.importRecord.findMany({ where: { batchId: batch.id }, orderBy: { rowNumber: "asc" } });
   if ((opts.duplicatePolicy === "import" || records.some((r) => r.status === "DUPLICATE" && r.forceImport)) && !can(actor, "import.override_duplicates")) {
     throw new AppError(403, "Only an Admin can import duplicate rows", "FORBIDDEN");
@@ -642,7 +689,12 @@ async function commitSideBatch<I>(spec: SideSpec<I>, actor: Actor, batch: { id: 
       where: { id: batch.id },
       data: { imported, rejected: records.length - imported, totalAmount: amount, options: { ...((batch.options as Record<string, unknown> | null) ?? {}), ...opts } },
     });
-    await audit(tx, actor, { action: "IMPORT_COMMIT", entityType: "ImportBatch", entityId: batch.id, after: { fileName: batch.fileName, sheet: batch.sheetName, type: spec.type, found: records.length, imported, amount, newMasters } });
+    await audit(tx, actor, {
+      action: "IMPORT_COMMIT",
+      entityType: "ImportBatch",
+      entityId: batch.id,
+      after: { fileName: batch.fileName, sheet: batch.sheetName, type: spec.type, found: records.length, imported, amount, newMasters },
+    });
     return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected: records.length - imported, amount, newMasters };
   }, LONG_TX);
 }
@@ -705,7 +757,7 @@ async function createNewMasters(tx: Tx, actor: Actor, placeholders: Set<string>)
     const name = p.name;
     let created: { id: string };
     let isNew = false;
-    const make = <T,>(p: Promise<T>) => {
+    const make = <T>(p: Promise<T>) => {
       isNew = true;
       return p;
     };
@@ -741,8 +793,7 @@ async function createNewMasters(tx: Tx, actor: Actor, placeholders: Set<string>)
         break;
       case "expenseCategories":
         created =
-          (await find(tx.expenseCategory, { parentId: null })) ??
-          (await make(tx.expenseCategory.create({ data: { name, group: /^other/i.test(name) ? "OTHER" : "HOSPITAL" } })));
+          (await find(tx.expenseCategory, { parentId: null })) ?? (await make(tx.expenseCategory.create({ data: { name, group: /^other/i.test(name) ? "OTHER" : "HOSPITAL" } })));
         break;
       case "expenseSubcategories": {
         const parentId = p.parent?.startsWith(NEW_PREFIX) ? map.get(p.parent) : p.parent;
@@ -812,36 +863,39 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
     let amount = 0;
     // One bulk query replaces a duplicate lookup per row; rows that became duplicates since validation are skipped.
     const existing = await findExistingFingerprints(toImport.filter((r) => r.status !== "DUPLICATE" && r.fingerprint).map((r) => r.fingerprint!));
-    await withBulkCache(async () => {
-      const bulk: { module: ModuleKey; data: Record<string, unknown> }[] = [];
-      for (const r of toImport) {
-        const norm = replacePlaceholders(r.normalized as any, masterMap);
-        if (r.status !== "DUPLICATE" && r.fingerprint && existing.has(r.fingerprint)) {
-          outcome.set(r.id, { status: "SKIPPED", errors: [...((r.errors as string[]) ?? []), "Possible duplicate: a matching record was added after validation"] });
-          continue;
+    await withBulkCache(
+      async () => {
+        const bulk: { module: ModuleKey; data: Record<string, unknown> }[] = [];
+        for (const r of toImport) {
+          const norm = replacePlaceholders(r.normalized as any, masterMap);
+          if (r.status !== "DUPLICATE" && r.fingerprint && existing.has(r.fingerprint)) {
+            outcome.set(r.id, { status: "SKIPPED", errors: [...((r.errors as string[]) ?? []), "Possible duplicate: a matching record was added after validation"] });
+            continue;
+          }
+          try {
+            const main = await prepareRecord(tx, actor, norm.module, norm.input, batchId);
+            const extras = await Promise.all((norm.extras ?? []).map((ex: { module: ModuleKey; input: unknown }) => prepareRecord(tx, actor, ex.module, ex.input, batchId)));
+            let mainId = main.id;
+            if (main.needsSingleInsert) {
+              // e.g. IPD admission + initial payment: needs the created row, so insert it individually.
+              mainId = (await insertRecord(tx, actor, norm.module, norm.input, { importBatchId: batchId, allowDuplicate: true, quietAudit: true })).id;
+            } else bulk.push({ module: main.module, data: main.data });
+            for (const e of extras) bulk.push({ module: e.module, data: e.data });
+            touchedDates.add(main.date);
+            imported++;
+            amount = round2(amount + main.amount);
+            outcome.set(r.id, { status: "IMPORTED", entityIds: [mainId, ...extras.map((e) => e.id)] });
+          } catch (err) {
+            // Application-level rejections (e.g. day closed) skip the row; any database error aborts the
+            // whole import so nothing is half-imported.
+            if (err instanceof AppError) outcome.set(r.id, { status: "SKIPPED", errors: [...((r.errors as string[]) ?? []), err.message] });
+            else throw err;
+          }
         }
-        try {
-          const main = await prepareRecord(tx, actor, norm.module, norm.input, batchId);
-          const extras = await Promise.all((norm.extras ?? []).map((ex: { module: ModuleKey; input: unknown }) => prepareRecord(tx, actor, ex.module, ex.input, batchId)));
-          let mainId = main.id;
-          if (main.needsSingleInsert) {
-            // e.g. IPD admission + initial payment: needs the created row, so insert it individually.
-            mainId = (await insertRecord(tx, actor, norm.module, norm.input, { importBatchId: batchId, allowDuplicate: true, quietAudit: true })).id;
-          } else bulk.push({ module: main.module, data: main.data });
-          for (const e of extras) bulk.push({ module: e.module, data: e.data });
-          touchedDates.add(main.date);
-          imported++;
-          amount = round2(amount + main.amount);
-          outcome.set(r.id, { status: "IMPORTED", entityIds: [mainId, ...extras.map((e) => e.id)] });
-        } catch (err) {
-          // Application-level rejections (e.g. day closed) skip the row; any database error aborts the
-          // whole import so nothing is half-imported.
-          if (err instanceof AppError) outcome.set(r.id, { status: "SKIPPED", errors: [...((r.errors as string[]) ?? []), err.message] });
-          else throw err;
-        }
-      }
-      await bulkInsertPrepared(tx, bulk);
-    }, { allowClosed: opts.intoClosedDays });
+        await bulkInsertPrepared(tx, bulk);
+      },
+      { allowClosed: opts.intoClosedDays },
+    );
     // Rewrite the staging rows in bulk (one delete + chunked inserts instead of one UPDATE per row).
     await tx.importRecord.deleteMany({ where: { batchId } });
     const rewritten = records.map((r) => {
@@ -853,7 +907,7 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
         raw: r.raw as Prisma.InputJsonValue,
         normalized: (r.normalized ?? undefined) as Prisma.InputJsonValue | undefined,
         status: o ? o.status : r.status === "INVALID" ? r.status : ("SKIPPED" as ImportRowStatus),
-        errors: ((o?.errors ?? r.errors) ?? undefined) as Prisma.InputJsonValue | undefined,
+        errors: (o?.errors ?? r.errors ?? undefined) as Prisma.InputJsonValue | undefined,
         warnings: (r.warnings ?? undefined) as Prisma.InputJsonValue | undefined,
         fingerprint: r.fingerprint,
         duplicateOf: r.duplicateOf,
@@ -872,14 +926,25 @@ export async function commitBatch(actor: Actor, batchId: string, raw: unknown) {
       action: "IMPORT_COMMIT",
       entityType: "ImportBatch",
       entityId: batchId,
-      after: { fileName: batch.fileName, sheet: batch.sheetName, type: batch.module, found: records.length, imported, rejected, amount, options: opts, newMasters: [...masterMap.keys()].map((k) => parsePlaceholder(k)) },
+      after: {
+        fileName: batch.fileName,
+        sheet: batch.sheetName,
+        type: batch.module,
+        found: records.length,
+        imported,
+        rejected,
+        amount,
+        options: opts,
+        newMasters: [...masterMap.keys()].map((k) => parsePlaceholder(k)),
+      },
     });
     return { batch: { ...updated, totalAmount: toNum(updated.totalAmount) }, imported, rejected, amount, newMasters: createdCount, touchedDates: [...touchedDates] };
   }, LONG_TX);
   // Closed days that received backfilled rows keep their status; their closing totals are refreshed and logged.
   const { touchedDates: dates, ...rest } = result;
   let backfilledClosedDays = 0;
-  if (opts.intoClosedDays && dates.length) backfilledClosedDays = await refreshClosedDays(actor, dates, `Historical import: ${batch.fileName}${batch.sheetName ? ` (${batch.sheetName})` : ""}`);
+  if (opts.intoClosedDays && dates.length)
+    backfilledClosedDays = await refreshClosedDays(actor, dates, `Historical import: ${batch.fileName}${batch.sheetName ? ` (${batch.sheetName})` : ""}`);
   if (batch.module === "expense") await linkExpensesToHeads(prisma, { importBatchId: batchId });
   return { ...rest, backfilledClosedDays };
 }
@@ -899,7 +964,20 @@ export async function cancelBatch(actor: Actor, batchId: string) {
 
 // ─────────────────────────── reverse ───────────────────────────
 
-const IMPORT_TABLES = ["consultation", "ipdTransaction", "ipdAdmission", "labTransaction", "pharmacySale", "pharmacyReturn", "pharmacyPurchase", "dietTransaction", "otherIncome", "expense", "pharmacyItemLine", "supplierPayment"] as const;
+const IMPORT_TABLES = [
+  "consultation",
+  "ipdTransaction",
+  "ipdAdmission",
+  "labTransaction",
+  "pharmacySale",
+  "pharmacyReturn",
+  "pharmacyPurchase",
+  "dietTransaction",
+  "otherIncome",
+  "expense",
+  "pharmacyItemLine",
+  "supplierPayment",
+] as const;
 
 export async function reverseBatch(actor: Actor, batchId: string, raw: unknown) {
   requirePermission(actor, "import.reverse");
@@ -940,7 +1018,14 @@ export async function reverseBatch(actor: Actor, batchId: string, raw: unknown) 
     await tx.importRecord.updateMany({ where: { batchId, status: "IMPORTED" }, data: { status: "REVERSED" } });
     await tx.importBatch.update({ where: { id: batchId }, data: { status: "REVERSED", reversedAt: new Date(), reversedById: actor.id, reverseReason: reason } });
     for (const d of dates) await onDayMutated(tx, actor, d, `Import batch ${b.fileName} reversed`);
-    await audit(tx, actor, { action: "IMPORT_REVERSE", entityType: "ImportBatch", entityId: batchId, before: { status: "IMPORTED" }, after: { status: "REVERSED", counts }, reason });
+    await audit(tx, actor, {
+      action: "IMPORT_REVERSE",
+      entityType: "ImportBatch",
+      entityId: batchId,
+      before: { status: "IMPORTED" },
+      after: { status: "REVERSED", counts },
+      reason,
+    });
     return { reversed: Object.values(counts).reduce((a, b) => a + b, 0), counts, correctedRowsNotReversed: corrected };
   }, LONG_TX);
 }
@@ -955,7 +1040,10 @@ export async function importHistory(actor: Actor, q: { page?: string }) {
     prisma.importBatch.findMany({ where: mine, orderBy: { createdAt: "desc" }, skip: (page - 1) * 30, take: 30 }),
     prisma.importBatch.count({ where: mine }),
   ]);
-  const users = await prisma.user.findMany({ where: { id: { in: [...new Set(rows.flatMap((r) => [r.uploadedById, r.reversedById].filter(Boolean) as string[]))] } }, select: { id: true, name: true } });
+  const users = await prisma.user.findMany({
+    where: { id: { in: [...new Set(rows.flatMap((r) => [r.uploadedById, r.reversedById].filter(Boolean) as string[]))] } },
+    select: { id: true, name: true },
+  });
   return {
     total,
     page,
