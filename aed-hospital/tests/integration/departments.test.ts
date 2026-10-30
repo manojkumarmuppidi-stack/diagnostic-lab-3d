@@ -588,4 +588,39 @@ describe("department accounts", () => {
     expect(Object.fromEntries(st.costLines.map((l) => [l.label, l.total]))).toEqual({ "Reagents — SN Diagnostics": 3000, "Gloves & masks — Vijaya Pharma": 8000 });
     expect(st.costLines.find((l) => l.label.includes("Vijaya"))!.basis).toMatch(/^50% of hospital expenses mentioning "Vijaya Pharma"/);
   });
+
+  it("shows Hormonal Pharmacy's sales − purchases from the core accounts, less the injection margin JJ Wellness takes, plus its salaries", async () => {
+    await createTransaction(f.admin, "pharmacy-sale", { date: "2026-10-07", invoiceNo: "S1", grossAmount: 50000, discount: 1000, paymentModeId: f.ids.CASH });
+    await createTransaction(f.admin, "pharmacy-purchase", { date: "2026-10-08", supplier: "Demo", invoiceNo: "P1", amount: 30000, paymentModeId: f.ids.BANK });
+    await createTransaction(f.admin, "pharmacy-return", { date: "2026-10-09", invoiceNo: "S-R", amount: 1000, paymentModeId: f.ids.CASH });
+    const pen = await prisma.pharmacyItem.create({ data: { name: "INJ MOUNJARO KWIKPEN 5mg/0.6ml", form: "INJ" } });
+    await prisma.pharmacyItemLine.create({
+      data: {
+        kind: "SALE",
+        date: new Date("2026-10-10"),
+        itemId: pen.id,
+        qty: 1,
+        amount: 21000,
+        taxable: 20000,
+        tax: 1000,
+        cost: 18000,
+        fingerprint: "t-pen",
+        createdById: f.admin.id,
+      },
+    });
+    const ph = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Hormonal Pharmacy" } })).id;
+    await saveDepartmentCost(f.admin, null, { departmentId: ph, label: "Salary — Pharmacist A", kind: "FIXED", amount: 15000, fromMonth: "2026-10" });
+    const d = await departmentAccounts(f.admin, { from: "2026-10-01", to: "2026-10-31" });
+    const st = d.statements.find((s) => s.id === ph)!;
+    expect(st.incomeLines.map((l) => [l.name, l.total])).toEqual([["Medicine sales (after discount and returns)", 48000]]);
+    expect(st.costLines.map((l) => [l.label, l.total])).toEqual([
+      ["Medicine purchases (supplier invoices)", 30000],
+      ["Salary — Pharmacist A", 15000],
+      ["Margin on medicines credited to other departments", 2000],
+    ]);
+    expect(st.totals).toMatchObject({ income: 48000, costs: 47000, profit: 1000 });
+    // The AED totals at the top are unchanged: the pharmacy is not AED income.
+    expect(d.grandTotal).toBe(d.departmentsTotal + d.unassigned.reduce((a, u) => a + u.total, 0));
+    expect(d.statements.find((s) => s.name === "JJ Wellness")!.incomeLines.some((l) => l.name.startsWith("Injection margin"))).toBe(true);
+  });
 });

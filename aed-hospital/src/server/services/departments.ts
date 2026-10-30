@@ -299,6 +299,29 @@ async function departmentProfit(
   const poolNames = pool
     ? (await prisma.expenseCategory.findMany({ where: { id: { in: pool.categoryIds } }, orderBy: { name: "asc" }, select: { name: true } })).map((c) => c.name).join(", ")
     : "";
+  // The pharmacy as a department ("stream:PHARMACY"): its sales and supplier purchases straight from
+  // the core accounts (Sale − Purchase, as AED measures it), less the margin other departments already
+  // take on their medicines (JJ Wellness's GLP injections), so no rupee is counted in two departments.
+  const pharmacyDept = depts.find((d) => d.streams.includes("PHARMACY"));
+  const pharmacy = { net: {} as Money, purchases: {} as Money, bills: 0, credited: {} as Money };
+  if (pharmacyDept) {
+    const rows = await prisma.$queryRaw<{ b: string; net: Prisma.Decimal; purchases: Prisma.Decimal; bills: bigint }[]>`
+      SELECT b, SUM(net) AS net, SUM(purchases) AS purchases, SUM(bills) AS bills FROM (
+        SELECT to_char(date, ${range.fmt}) AS b, "grossAmount" - discount AS net, 0 AS purchases, 1 AS bills FROM "PharmacySale"
+         WHERE status = 'ACTIVE' AND date BETWEEN ${toDbDate(range.from)} AND ${toDbDate(range.to)}
+        UNION ALL SELECT to_char(date, ${range.fmt}), -amount, 0, 0 FROM "PharmacyReturn" WHERE status = 'ACTIVE' AND date BETWEEN ${toDbDate(range.from)} AND ${toDbDate(range.to)}
+        UNION ALL SELECT to_char(date, ${range.fmt}), 0, amount, 0 FROM "PharmacyPurchase" WHERE status = 'ACTIVE' AND date BETWEEN ${toDbDate(range.from)} AND ${toDbDate(range.to)}
+      ) x GROUP BY b`;
+    for (const r of rows) {
+      if (toNum(r.net)) pharmacy.net[r.b] = round2(toNum(r.net));
+      if (toNum(r.purchases)) pharmacy.purchases[r.b] = round2(toNum(r.purchases));
+      pharmacy.bills += Number(r.bills);
+    }
+    for (const r of medicineRows) {
+      const owner = pharmacyDepartmentFor(depts, r.name);
+      if (owner && owner.id !== pharmacyDept.id && r.cost !== null) addTo(pharmacy.credited, r.m, round2(toNum(r.taxable) - toNum(r.cost)));
+    }
+  }
   const statements = depts.map((d) => {
     const g = departments.find((x) => x.id === d.id)!;
     const income: Money = { ...g.byMonth };
@@ -392,6 +415,25 @@ async function departmentProfit(
         byMonth: incentive,
         total: sum(incentive),
       });
+    if (d.id === pharmacyDept?.id) {
+      incomeLines.push({ name: "Medicine sales (after discount and returns)", stream: "PHARMACY", count: pharmacy.bills, byMonth: pharmacy.net, total: sum(pharmacy.net) });
+      for (const [m, v] of Object.entries(pharmacy.net)) addTo(income, m, v);
+      costLines.unshift({
+        id: null,
+        label: "Medicine purchases (supplier invoices)",
+        basis: "the pharmacy's purchases in the core accounts",
+        byMonth: pharmacy.purchases,
+        total: sum(pharmacy.purchases),
+      });
+      if (sum(pharmacy.credited))
+        costLines.push({
+          id: null,
+          label: "Margin on medicines credited to other departments",
+          basis: "e.g. JJ Wellness's GLP injections — counted in that department, so not here",
+          byMonth: pharmacy.credited,
+          total: sum(pharmacy.credited),
+        });
+    }
     const costTotal: Money = {};
     for (const l of costLines) for (const [m, v] of Object.entries(l.byMonth)) addTo(costTotal, m, v);
     const profit: Money = {};

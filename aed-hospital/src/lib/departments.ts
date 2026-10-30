@@ -124,4 +124,5 @@ export const DEFAULT_DEPARTMENTS: DeptDefault[] = [
   // Whole streams: lab tests and consultations no department above claims.
   { name: "Laboratory", keywords: "stream:LAB" },
   { name: "Consultation chambers", keywords: "stream:OPD" },
+  { name: "Hormonal Pharmacy", keywords: "stream:PHARMACY" },
 ];

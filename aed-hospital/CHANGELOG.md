@@ -2,6 +2,9 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.25.0: Hormonal Pharmacy in department accounts
+- New department "Hormonal Pharmacy" (migration `20261106000000_pharmacy_department`): income = medicine sales after discount and returns, costs = supplier purchases — both read from the core accounts, as the AED vs Pharmacy P&L measures it — plus the pharmacists' salaries entered for it, less the margin on medicines other departments already take (JJ Wellness's GLP injections), so nothing is counted twice. AED income totals are unchanged.
+
 ## 0.24.0: Mark IPD admissions fully paid in one go
 - "Hospital expenses mentioning …" now ignores spaces and punctuation ("SN", "S N" and "S.N. Diagnostics" all match), and can take a share of those expenses ("% of those expenses", blank = all) — e.g. lab reagent suppliers booked to the Laboratory from the core expenses.
 - IPD → Outstanding: filter by admission dates (this month by default), tick the patients who have paid in full, choose how they paid and when (each patient's discharge date — admission date if not discharged — or one date for all), and "Mark selected as fully paid". Each gets a final settlement for exactly its balance, recorded like any payment: IPD income in the month received, closed days refused, audited, and voidable from Payments & refunds. Reception and Accounts can do it.
