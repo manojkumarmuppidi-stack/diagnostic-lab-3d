@@ -8,7 +8,7 @@
 import { Fragment, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronRight, Download, Info, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Info, Pencil, Plus, Printer, ShieldAlert, Trash2, Upload } from "lucide-react";
 import { apiFetch, download, useApi } from "@/lib/client";
 import { endOfMonth, todayISO } from "@/lib/dates";
 import { formatINR, formatINRCompact, formatNumber } from "@/lib/money";
@@ -128,6 +128,7 @@ function CostDialog({
             <option value="FIXED">A fixed amount every month</option>
             <option value="SHARE">A % of what the hospital spends on an expense category that month</option>
             <option value="INCOME">A % of this department&apos;s own billed income that month (incentives)</option>
+            <option value="POOL">Its occupancy % of the first-floor cost pool (space, rent &amp; utilities from the core accounts)</option>
             <option value="MATCH">The hospital expenses whose description or vendor mentions a name (e.g. a visiting doctor)</option>
           </select>
         </Field>
@@ -138,6 +139,10 @@ function CostDialog({
             help="Every hospital expense entered with this in its description or vendor is counted here, month by month. Separate spellings with commas, e.g. Geetha Priya, Geethapriya"
           >
             <input className="input" value={v.matchText} onChange={(e) => set("matchText", e.target.value)} />
+          </Field>
+        ) : v.kind === "POOL" ? (
+          <Field label="Occupancy of the first floor (%)" required help="The pool itself is set once for all departments under All departments → First-floor cost pool">
+            <input className="input" type="number" min={0} max={100} step="0.01" value={v.percent} onChange={(e) => set("percent", e.target.value)} />
           </Field>
         ) : v.kind === "INCOME" ? (
           <Field
@@ -200,6 +205,20 @@ function CostDialog({
   );
 }
 
+/** The department's account on paper: the printable page also downloads it as Excel. */
+function PrintLink({ departmentId, from, to, label = "Print / download" }: { departmentId: string | null; from: string; to: string; label?: string }) {
+  const q = new URLSearchParams({ ...(departmentId ? { dept: departmentId } : {}), from: from.slice(0, 7), to: to.slice(0, 7) });
+  return (
+    <Link
+      href={`/departments/statement?${q.toString()}`}
+      className="btn btn-secondary btn-sm"
+      title="A4 page of this account month by month — print, save as PDF, or download as Excel"
+    >
+      <Printer className="h-4 w-4" /> {label}
+    </Link>
+  );
+}
+
 /** Download the blank monthly expenditure sheet (one department, or every department) for the months shown. */
 function SheetButton({ departmentId, from, to, label = "Download blank sheet" }: { departmentId: string | null; from: string; to: string; label?: string }) {
   const toast = useToast();
@@ -223,6 +242,98 @@ function SheetButton({ departmentId, from, to, label = "Download blank sheet" }:
     >
       <Download className="h-4 w-4" /> {label}
     </Button>
+  );
+}
+
+/** Define the first-floor pool on core expense categories, with a month-by-month preview before saving. */
+function SpacePool({ onSaved }: { onSaved: () => void }) {
+  const toast = useToast();
+  const { data, reload } = useApi<any>("/api/departments/space-pool");
+  const [ids, setIds] = useState<string[] | null>(null);
+  const [pct, setPct] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!data) return;
+    setIds(data.config?.categoryIds ?? []);
+    setPct(data.config ? String(data.config.floorPct) : "");
+  }, [data]);
+  if (!data || !ids) return null;
+  const core = (m: string) => data.categories.filter((c: any) => ids.includes(c.id)).reduce((a: number, c: any) => a + (c.byMonth[m] ?? 0), 0);
+  const withData = data.months.filter((m: string) => core(m) > 0).slice(-3);
+  const avg = withData.length ? withData.reduce((a: number, m: string) => a + core(m), 0) / withData.length : 0;
+  const suggested = avg ? Math.round((data.fixedPool / avg) * 10000) / 100 : null;
+  const p = Number(pct) || 0;
+  const save = async (clear = false) => {
+    setBusy(true);
+    try {
+      await apiFetch("/api/departments/space-pool", { method: "PUT", json: clear ? { categoryIds: [], floorPct: 0 } : { categoryIds: ids, floorPct: p } });
+      toast("success", clear ? "Back to the fixed ₹1,51,607.10 a month" : "First-floor pool saved — department space costs now follow the core accounts");
+      reload();
+      onSaved();
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="space-y-3">
+      <p className="text-sm">
+        {data.config ? (
+          <>Space costs follow the core accounts: {data.config.floorPct}% of the categories ticked below, each month.</>
+        ) : (
+          <>Not set yet: every department is charged its % of a fixed {formatINR(data.fixedPool)} a month. Tick the core expenses the first floor shares and enter its %.</>
+        )}
+      </p>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        {data.categories.map((c: any) => (
+          <label key={c.id} className="flex items-center gap-1 text-sm">
+            <input type="checkbox" checked={ids.includes(c.id)} onChange={(e) => setIds(e.target.checked ? [...ids, c.id] : ids.filter((x) => x !== c.id))} />
+            {c.name}
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <Field
+          label="First floor's share of these (%)"
+          help={suggested ? `${suggested}% gives about ${formatINR(data.fixedPool)} on the last ${withData.length} months` : undefined}
+        >
+          <input className="input w-32" type="number" min={0} max={100} step="0.01" value={pct} onChange={(e) => setPct(e.target.value)} />
+        </Field>
+        <Button size="sm" loading={busy} onClick={() => save()} disabled={!ids.length || !(p > 0)}>
+          Save pool
+        </Button>
+        {data.config && (
+          <Button size="sm" variant="secondary" loading={busy} onClick={() => save(true)}>
+            Back to fixed amount
+          </Button>
+        )}
+      </div>
+      {ids.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Month</th>
+                <th className="text-right">Core expenses ticked</th>
+                <th className="text-right">First-floor pool at {p || 0}%</th>
+                <th className="text-right">Fixed figure</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.months.map((m: string) => (
+                <tr key={m}>
+                  <td>{colLabel(m)}</td>
+                  <td className="text-right">{formatINR(core(m))}</td>
+                  <td className="text-right">{formatINR(Math.round(core(m) * p) / 100)}</td>
+                  <td className="text-right muted">{formatINR(data.fixedPool)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -296,14 +407,28 @@ function ImportButton({ departmentId, label = "Import from Excel", onDone }: { d
           const file = e.target.files?.[0];
           e.target.value = "";
           if (!file) return;
-          const fd = new FormData();
-          fd.append("file", file);
-          if (departmentId) fd.append("departmentId", departmentId);
+          const send = (confirmPayroll: boolean) => {
+            const fd = new FormData();
+            fd.append("file", file);
+            if (departmentId) fd.append("departmentId", departmentId);
+            if (confirmPayroll) fd.append("confirmPayroll", "1");
+            return apiFetch("/api/departments/import", { method: "POST", body: fd });
+          };
           try {
-            const r: any = await apiFetch("/api/departments/import", { method: "POST", body: fd });
+            let r: any;
+            try {
+              r = await send(false);
+            } catch (err: any) {
+              // The payroll total differs from the salaries in the core accounts: the Admin decides.
+              if (err?.code !== "PAYROLL_CHECK" || !confirm(err.message)) throw err;
+              r = await send(true);
+            }
             const where = r.departments?.length > 1 ? `${r.departments.length} departments` : r.department;
+            const checks = (r.payroll?.check ?? [])
+              .map((c: any) => (c.matches ? `${c.month} matches the core salaries` : `${c.month} imported although it differs from the core salaries`))
+              .join("; ");
             const pay = r.payroll?.months?.length
-              ? ` Payroll ${r.payroll.months.join(", ")}: ${r.payroll.charged} people charged to departments${
+              ? ` Payroll ${r.payroll.months.join(", ")} (${checks}): ${r.payroll.charged} people charged to departments${
                   r.payroll.notCharged.length ? `; not in any department: ${r.payroll.notCharged.join(", ")}` : ""
                 }.`
               : "";
@@ -395,6 +520,7 @@ function Statement({ st, months, monthOptions, onChanged }: { st: any; months: s
       }
       actions={
         <span className="flex flex-wrap gap-2">
+          <PrintLink departmentId={st.id} from={months[0]} to={months[months.length - 1]} />
           {edit && <SheetButton departmentId={st.id} from={months[0]} to={months[months.length - 1]} />}
           {edit && <ImportButton departmentId={st.id} onDone={changed} />}
           {edit && (
@@ -1032,6 +1158,9 @@ function Inner() {
                   <>
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
                       <h2 className="text-base font-semibold">All departments</h2>
+                      <span className="flex flex-wrap gap-2">
+                        <PrintLink departmentId={null} from={data.months[0]} to={data.months[data.months.length - 1]} label="Print / download all departments" />
+                      </span>
                       {can("masters.manage") && (
                         <span className="flex flex-wrap gap-2">
                           <SheetButton departmentId={null} from={data.months[0]} to={data.months[data.months.length - 1]} label="Download sheet for all departments" />
@@ -1041,6 +1170,14 @@ function Inner() {
                     </div>
                     <Overview data={data} selected={st.id} onSelect={(id) => set("dept", id)} />
                     <AllDepartmentsInsights data={data} />
+                    {can("masters.manage") && (
+                      <Section
+                        title="First-floor cost pool (from the core accounts)"
+                        subtitle="Which core expenses make up the first floor's space, rent & utilities; each department is charged its occupancy % of it every month"
+                      >
+                        <SpacePool onSaved={reload} />
+                      </Section>
+                    )}
                     {can("masters.manage") && (
                       <Section
                         title="Staff → department (for payroll uploads)"

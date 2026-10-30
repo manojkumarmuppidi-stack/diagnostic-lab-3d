@@ -4,6 +4,9 @@ import { createTransaction } from "@/server/services/transactions";
 import { createMaster } from "@/server/services/masters";
 import ExcelJS from "exceljs";
 import {
+  departmentStatementWorkbook,
+  getSpacePool,
+  saveSpacePool,
   deleteContributor,
   deleteDepartmentCost,
   deleteStaffDepartment,
@@ -447,20 +450,24 @@ describe("department accounts", () => {
       ["New Person", 10000],
     ]);
     await expect(importDepartmentWorkbook(f.admin, null, "payroll.xlsx", nov)).rejects.toThrow(/which month/);
-    const r = await importDepartmentWorkbook(f.admin, null, "November 2026 Salaries.xlsx", nov);
-    expect(r.payroll).toEqual({ months: ["2026-11"], charged: 2, notCharged: ["Admin C", "New Person"] });
+    // No salaries booked in the core accounts for November yet: the Admin must confirm.
+    await expect(importDepartmentWorkbook(f.admin, null, "November 2026 Salaries.xlsx", nov)).rejects.toThrow(/does not match the core accounts.*Nov 2026.*not booked yet/);
+    const r = await importDepartmentWorkbook(f.admin, null, "November 2026 Salaries.xlsx", nov, { confirmPayroll: true });
+    expect(r.payroll).toMatchObject({ months: ["2026-11"], charged: 2, notCharged: ["Admin C", "New Person"] });
     const costs = await prisma.departmentCost.findMany({ include: { department: true }, orderBy: { label: "asc" } });
     expect(costs.map((c) => [c.department.name, c.label, Number(c.amount), c.fromMonth, c.toMonth])).toEqual([
       ["USG scan room", "Salary — Helper B", 15000, "2026-11", "2026-11"],
       ["Laboratory", "Salary — Tech A", 20000, "2026-11", "2026-11"],
     ]);
     // A corrected November file replaces November, it does not add to it.
-    await importDepartmentWorkbook(f.admin, null, "November 2026 Salaries.xlsx", await payroll([["Tech A", 21000]]));
+    await importDepartmentWorkbook(f.admin, null, "November 2026 Salaries.xlsx", await payroll([["Tech A", 21000]]), { confirmPayroll: true });
     expect((await prisma.departmentCost.findMany({ where: { label: "Salary — Tech A" } })).map((c) => Number(c.amount))).toEqual([21000]);
 
     const helper = (await listStaffDepartments(f.admin)).find((x) => x.label === "Helper B")!;
     await deleteStaffDepartment(f.admin, helper.id);
-    expect((await importDepartmentWorkbook(f.admin, null, "December 2026 Salaries.xlsx", await payroll([["Helper B", 1]]))).payroll.notCharged).toEqual(["Helper B"]);
+    expect((await importDepartmentWorkbook(f.admin, null, "December 2026 Salaries.xlsx", await payroll([["Helper B", 1]]), { confirmPayroll: true })).payroll.notCharged).toEqual([
+      "Helper B",
+    ]);
   });
 
   it("a row of 0s in the monthly sheet removes that cost for the sheet's months", async () => {
@@ -476,5 +483,84 @@ describe("department accounts", () => {
     expect(await prisma.departmentCost.count({ where: { label: "Salary — Nurse A" } })).toBe(2);
     expect(await importDepartmentWorkbook(f.admin, null, "b.xlsx", await sheet([0, 0, 0]))).toMatchObject({ costsAdded: 0, costsUpdated: 2 });
     expect(await prisma.departmentCost.count({ where: { label: "Salary — Nurse A" } })).toBe(0);
+  });
+
+  it("checks a payroll file against the salaries in the core accounts before charging departments", async () => {
+    const sal = (await prisma.expenseCategory.create({ data: { name: "Salaries & Wages", group: "HOSPITAL" } })).id;
+    await prisma.expense.create({
+      data: { date: new Date("2026-08-31"), categoryId: sal, description: "Salaries Aug", amount: 50000, fingerprint: "sal-aug", createdById: f.admin.id },
+    });
+    const wb = new ExcelJS.Workbook();
+    const w = wb.addWorksheet("Sheet1");
+    w.addRow(["SNO", "NAME", "AMOUNT", "BANK", "IFSC CODE", "ACCOUNT NO"]);
+    w.addRow([1, "Tech A", 30000, "BANK", "TEST0000001", "000"]);
+    w.addRow([2, "Admin C", 20000, "BANK", "TEST0000001", "000"]);
+    const aug = Buffer.from(await wb.xlsx.writeBuffer());
+    const r = await importDepartmentWorkbook(f.admin, null, "August 2026 Salaries.xlsx", aug);
+    expect(r.payroll.check).toEqual([{ month: "2026-08", file: 50000, core: 50000, matches: true }]);
+    // The same list uploaded as September (the wrong file): stopped, nothing saved, until confirmed.
+    await expect(importDepartmentWorkbook(f.admin, null, "September 2026 Salaries.xlsx", aug)).rejects.toMatchObject({ code: "PAYROLL_CHECK", status: 409 });
+    w.getCell("C2").value = 35000;
+    await expect(importDepartmentWorkbook(f.admin, null, "August 2026 Salaries.xlsx", Buffer.from(await wb.xlsx.writeBuffer()))).rejects.toThrow(
+      /Aug 2026 file ₹55,000, core salaries ₹50,000 \(difference ₹5,000\)/,
+    );
+  });
+
+  it("charges first-floor space as each department's % of a pool defined on core expenses", async () => {
+    const lab = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Laboratory" } })).id;
+    await saveDepartmentCost(f.admin, null, { departmentId: lab, label: "First-floor space — 15%", kind: "POOL", percent: 15, amount: 22741.07, fromMonth: "2026-01" });
+    const rent = (await prisma.expenseCategory.create({ data: { name: "Rent", group: "HOSPITAL" } })).id;
+    const power = (await prisma.expenseCategory.create({ data: { name: "Electricity", group: "HOSPITAL" } })).id;
+    const expense = (date: string, categoryId: string, amount: number) =>
+      prisma.expense.create({ data: { date: new Date(date), categoryId, description: "x", amount, fingerprint: `p-${date}-${amount}`, createdById: f.admin.id } });
+    await expense("2026-09-05", rent, 500000);
+    await expense("2026-09-10", power, 100000);
+    await expense("2026-10-05", rent, 500000);
+    const space = async () =>
+      (await departmentAccounts(f.admin, { from: "2026-09-01", to: "2026-10-31" })).statements
+        .find((s) => s.name === "Laboratory")!
+        .costLines.find((l) => l.label.startsWith("First-floor"))!;
+    // Not set: the fixed amount.
+    expect((await space()).byMonth).toEqual({ "2026-09": 22741.07, "2026-10": 22741.07 });
+    await expect(saveSpacePool(f.accounts, { categoryIds: [rent], floorPct: 25 })).rejects.toThrow();
+    await expect(saveSpacePool(f.admin, { categoryIds: [f.ids.veg], floorPct: 25 })).rejects.toThrow(/main expense categories/);
+    await saveSpacePool(f.admin, { categoryIds: [rent, power], floorPct: 25 });
+    // Sep: (5,00,000 + 1,00,000) × 25% = 1,50,000 → 15% = 22,500. Oct: 5,00,000 × 25% × 15% = 18,750.
+    const line = await space();
+    expect(line.byMonth).toEqual({ "2026-09": 22500, "2026-10": 18750 });
+    expect(line.basis).toMatch(/15% of the first-floor pool \(25% of Electricity, Rent/);
+    const g = await getSpacePool(f.admin, { year: "2026" });
+    expect(g.config).toEqual({ categoryIds: [rent, power], floorPct: 25 });
+    expect(g.categories.find((c) => c.id === rent)!.byMonth).toEqual({ "2026-09": 500000, "2026-10": 500000 });
+    await saveSpacePool(f.admin, { categoryIds: [], floorPct: 0 });
+    expect((await space()).byMonth).toEqual({ "2026-09": 22741.07, "2026-10": 22741.07 });
+  });
+
+  it("downloads a department's account as Excel, and every department's with a summary tab; heads only their own", async () => {
+    await createTransaction(f.admin, "other-income", { date: "2026-10-05", source: "JJ Wellness MMP package", amount: 100000, paymentModeId: f.ids.CASH, reference: "JJW-P9" });
+    const jj = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "JJ Wellness" } })).id;
+    await saveDepartmentCost(f.admin, null, { departmentId: jj, label: "Salary — counsellor", kind: "FIXED", amount: 30000, fromMonth: "2026-10" });
+    const one = await departmentStatementWorkbook(f.admin, { departmentId: jj, from: "2026-09-01", to: "2026-10-31" });
+    expect(one.fileName).toBe("AED-JJ-Wellness-account-2026-09-to-2026-10.xlsx");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(one.buffer as unknown as ArrayBuffer);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(["JJ Wellness"]);
+    const rows = wb.worksheets[0]
+      .getSheetValues()
+      .filter(Boolean)
+      .map((r: any) => r.slice(1));
+    const find = (label: string) => rows.find((r: any[]) => String(r[0]).trim() === label)!;
+    expect(find("")).toEqual(["", "Sep 2026", "Oct 2026", "Total"]);
+    expect(find("Total income")).toEqual(["Total income", 0, 100000, 100000]);
+    expect(find("Total costs")).toEqual(["Total costs", 0, 30000, 30000]);
+    expect(find("Profit")).toEqual(["Profit", 0, 70000, 70000]);
+    expect(find("AED keeps")).toEqual(["AED keeps", 0, 56000, 56000]);
+    const all = await departmentStatementWorkbook(f.admin, { from: "2026-10-01", to: "2026-10-31" });
+    const wb2 = new ExcelJS.Workbook();
+    await wb2.xlsx.load(all.buffer as unknown as ArrayBuffer);
+    expect(wb2.worksheets[0].name).toBe("All departments");
+    expect(wb2.worksheets.length).toBe((await prisma.serviceDepartment.count({ where: { active: true } })) + 1);
+    const own = await departmentStatementWorkbook({ ...f.reception, headOfDepartmentId: jj }, { from: "2026-10-01", to: "2026-10-31" });
+    expect(own.fileName).toMatch(/JJ-Wellness/);
   });
 });

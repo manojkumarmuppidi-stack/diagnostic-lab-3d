@@ -2,6 +2,11 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.23.0: Department accounts take their inputs from the core accounts
+- Print / download a department's account: "Print / download" on each statement opens an A4-landscape page (income lines, costs — one row per cost —, profit, margin and the JJ partner's share, month by month) to print or save as PDF, and "Download Excel" gives the same as a workbook. "Print / download all departments" does every department, one page each, with a summary tab in Excel. Heads get only their own department.
+- First-floor cost pool (Department accounts → All departments, Admin): tick the core expense categories the first floor shares (rent, electricity, maintenance…) and its %; each department's space cost is its occupancy % of that pool, month by month. A preview shows the pool each choice gives and the % that matches the earlier ₹1,51,607.10. Until it is set, the fixed figure is used. New cost kind "occupancy % of the first-floor pool". Migration `20261105000000_first_floor_pool` turns the first-floor space rows into their occupancy % (amounts unchanged until the pool is set).
+- Payroll uploads are checked against the salaries booked in the core accounts for the same month (main categories named "Salar…"). If the file total differs by more than 0.5%, or nothing is booked yet, nothing is saved and the Admin is asked to confirm; the result shows each month's check.
+
 ## 0.22.0: Payroll → department salaries, expenses by name, long admissions
 - Department monthly sheets: a row of typed 0s removes that cost for the sheet's months (blank cells still mean "not filled in"), so a cost booked by mistake can be taken out by uploading again.
 - Excel Import (bills & expenses) refuses department accounts files — salary sheets, expenditure sheets, the staff list — and points to Department accounts → "Import costs for all departments"; before, their tabs were read as OPD/Diet/Lab bills with every row invalid.

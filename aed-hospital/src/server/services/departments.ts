@@ -11,11 +11,12 @@ import { addDays, addMonths, endOfMonth, isISODate, startOfMonth, todayISO, toDb
 import { addOnSplit, compileDepartments, departmentFor, pharmacyDepartmentFor } from "@/lib/departments";
 import { STREAM_LABELS, type IncomeStream } from "@/lib/accounting";
 import { norm } from "@/lib/import/text";
+import { monthLabel } from "@/lib/expenses";
 import { round2, toNum } from "@/lib/money";
 import { can, type Actor } from "../authz";
 import { prisma } from "../db";
 import { audit } from "../audit";
-import { badRequest, forbidden, notFound } from "../errors";
+import { AppError, badRequest, forbidden, notFound } from "../errors";
 
 interface Item {
   name: string;
@@ -206,6 +207,43 @@ async function categoryTotals(ids: string[], months: string[]) {
   return out;
 }
 
+/**
+ * The first-floor cost pool, defined on core expenses: the chosen expense categories (rent, electricity,
+ * maintenance…) × the first floor's share of them. Departments' "POOL" costs take their occupancy % of it.
+ * Not set → each POOL cost uses its stored fixed amount.
+ */
+const SPACE_POOL_KEY = "spacePool";
+export interface SpacePool {
+  categoryIds: string[];
+  floorPct: number;
+}
+export async function spacePoolConfig(): Promise<SpacePool | null> {
+  const v = (await prisma.setting.findUnique({ where: { key: SPACE_POOL_KEY } }))?.value as SpacePool | undefined;
+  return v && Array.isArray(v.categoryIds) && v.categoryIds.length && v.floorPct > 0 ? v : null;
+}
+/** The pool, month by month: core expenses in the pool's categories × the first floor's %. */
+async function spacePoolByMonth(pool: SpacePool, months: string[]): Promise<Money> {
+  const byCat = await categoryTotals(pool.categoryIds, months);
+  const out: Money = {};
+  for (const m of months) {
+    const core = pool.categoryIds.reduce((a, id) => a + (byCat.get(id)?.[m] ?? 0), 0);
+    if (core) out[m] = round2((core * pool.floorPct) / 100);
+  }
+  return out;
+}
+
+/** What core accounts paid as salaries, month by month (top-level categories named "Salar…"). */
+async function coreSalaries(months: string[]): Promise<Money> {
+  const cats = await prisma.expenseCategory.findMany({ where: { parentId: null, name: { contains: "salar", mode: "insensitive" } }, select: { id: true } });
+  const byCat = await categoryTotals(
+    cats.map((c) => c.id),
+    months,
+  );
+  const out: Money = {};
+  for (const m of months) out[m] = round2(cats.reduce((a, c) => a + (byCat.get(c.id)?.[m] ?? 0), 0));
+  return out;
+}
+
 const inMonths = (c: { fromMonth: string; toMonth: string | null }, m: string) => m >= c.fromMonth && (!c.toMonth || m <= c.toMonth);
 
 /**
@@ -255,6 +293,11 @@ async function departmentProfit(
     prisma.expenseCategory.findMany({ where: { id: { in: categoryIds } }, select: { id: true, name: true } }),
   ]);
   const catName = new Map(categories.map((c) => [c.id, c.name]));
+  const pool = costs.some((c) => c.kind === "POOL") ? await spacePoolConfig() : null;
+  const poolMonths = pool ? await spacePoolByMonth(pool, calendarMonths) : {};
+  const poolNames = pool
+    ? (await prisma.expenseCategory.findMany({ where: { id: { in: pool.categoryIds } }, orderBy: { name: "asc" }, select: { name: true } })).map((c) => c.name).join(", ")
+    : "";
   const statements = depts.map((d) => {
     const g = departments.find((x) => x.id === d.id)!;
     const income: Money = { ...g.byMonth };
@@ -296,7 +339,12 @@ async function departmentProfit(
         if (c.kind === "INCOME") v = round2(((g.byMonth[m] ?? 0) * toNum(c.percent)) / 100);
         else if (c.kind === "MATCH") v = round2(matched.get(c.id)?.[m] ?? 0);
         else {
-          const monthly = c.kind === "SHARE" ? ((byCategory.get(c.categoryId ?? "")?.[month] ?? 0) * toNum(c.percent)) / 100 : toNum(c.amount);
+          const monthly =
+            c.kind === "SHARE"
+              ? ((byCategory.get(c.categoryId ?? "")?.[month] ?? 0) * toNum(c.percent)) / 100
+              : c.kind === "POOL" && pool
+                ? ((poolMonths[month] ?? 0) * toNum(c.percent)) / 100
+                : toNum(c.amount);
           v = round2(byDay ? monthly / daysIn(month) : monthly);
         }
         if (v) byMonth[m] = v;
@@ -308,7 +356,11 @@ async function departmentProfit(
             ? `${toNum(c.percent)}% of ${d.name}'s billed income (not the injection margin)`
             : c.kind === "MATCH"
               ? `hospital expenses mentioning "${c.matchText}"`
-              : `₹${toNum(c.amount).toLocaleString("en-IN")} a month`;
+              : c.kind === "POOL"
+                ? pool
+                  ? `${toNum(c.percent)}% of the first-floor pool (${pool.floorPct}% of ${poolNames} in the core accounts each month)`
+                  : `${toNum(c.percent)}% of the first floor — fixed ₹${toNum(c.amount).toLocaleString("en-IN")} a month until the first-floor pool is set`
+                : `₹${toNum(c.amount).toLocaleString("en-IN")} a month`;
       costLines.push({ id: c.id, label: c.label, basis: `${basis} · ${c.fromMonth}${c.toMonth ? ` to ${c.toMonth}` : " onwards"}`, byMonth, total: sum(byMonth) });
     }
     // People who bring income in: their incentive is a % of the income they generated that month.
@@ -400,7 +452,7 @@ const costInput = z
   .object({
     departmentId: z.string().min(1),
     label: z.string().trim().min(1).max(120),
-    kind: z.enum(["FIXED", "SHARE", "INCOME", "MATCH"]),
+    kind: z.enum(["FIXED", "SHARE", "INCOME", "MATCH", "POOL"]),
     amount: z.coerce.number().min(0).max(99_99_99_999).default(0),
     percent: z.coerce.number().min(0).max(100).default(0),
     categoryId: z.string().nullable().optional(),
@@ -411,7 +463,13 @@ const costInput = z
   .refine((c) => !c.toMonth || c.toMonth >= c.fromMonth, { message: "The last month is before the first month", path: ["toMonth"] })
   .refine(
     (c) =>
-      c.kind === "FIXED" ? c.amount > 0 : c.kind === "INCOME" ? c.percent > 0 : c.kind === "MATCH" ? matchPatterns(c.matchText ?? "").length > 0 : c.percent > 0 && !!c.categoryId,
+      c.kind === "FIXED"
+        ? c.amount > 0
+        : c.kind === "INCOME" || c.kind === "POOL"
+          ? c.percent > 0
+          : c.kind === "MATCH"
+            ? matchPatterns(c.matchText ?? "").length > 0
+            : c.percent > 0 && !!c.categoryId,
     {
       message: "Enter the amount, the %, the expense category, or the words to look for in expenses",
       path: ["amount"],
@@ -436,8 +494,8 @@ export async function saveDepartmentCost(actor: Actor, id: string | null, raw: u
   if (c.kind === "SHARE" && !(await prisma.expenseCategory.findUnique({ where: { id: c.categoryId! } }))) throw badRequest("Expense category not found");
   const data = {
     ...c,
-    amount: c.kind === "FIXED" ? c.amount : 0,
-    percent: c.kind === "SHARE" || c.kind === "INCOME" ? c.percent : 0,
+    amount: c.kind === "FIXED" || c.kind === "POOL" ? c.amount : 0,
+    percent: c.kind === "SHARE" || c.kind === "INCOME" || c.kind === "POOL" ? c.percent : 0,
     categoryId: c.kind === "SHARE" ? c.categoryId! : null,
     matchText: c.kind === "MATCH" ? c.matchText! : null,
     toMonth: c.toMonth || null,
@@ -560,6 +618,61 @@ export async function deleteContributor(actor: Actor, id: string) {
   });
 }
 
+/**
+ * The first-floor pool settings with what core accounts spent in each top-level expense category per
+ * month this year, so the Admin sees the pool each choice gives before saving it.
+ */
+export async function getSpacePool(actor: Actor, q: { year?: string | null } = {}) {
+  requireAdmin(actor);
+  const year = /^\d{4}$/.test(q.year ?? "") ? q.year! : todayISO().slice(0, 4);
+  const last = year === todayISO().slice(0, 4) ? todayISO().slice(0, 7) : `${year}-12`;
+  const months: string[] = [];
+  for (let m = 1; m <= 12 && `${year}-${String(m).padStart(2, "0")}` <= last; m++) months.push(`${year}-${String(m).padStart(2, "0")}`);
+  const cats = await prisma.expenseCategory.findMany({ where: { parentId: null, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } });
+  const byCat = await categoryTotals(
+    cats.map((c) => c.id),
+    months,
+  );
+  return {
+    config: await spacePoolConfig(),
+    fixedPool: FIXED_FIRST_FLOOR_POOL,
+    months,
+    categories: cats.map((c) => ({ ...c, byMonth: byCat.get(c.id) ?? {} })),
+  };
+}
+
+/** The pool before it was defined on core expenses (the figure management gave for Oct 2026). */
+const FIXED_FIRST_FLOOR_POOL = 151607.1;
+
+const poolInput = z.object({ categoryIds: z.array(z.string().min(1)).max(30), floorPct: z.coerce.number().min(0).max(100) });
+
+/** Save (or, with no categories, clear) the first-floor pool. Department accounts only. */
+export async function saveSpacePool(actor: Actor, raw: unknown) {
+  requireAdmin(actor);
+  const parsed = poolInput.safeParse(raw);
+  if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "Check the pool");
+  const { categoryIds, floorPct } = parsed.data;
+  if (categoryIds.length) {
+    if (!(floorPct > 0)) throw badRequest("Enter the first floor's share of these expenses (%)");
+    const found = await prisma.expenseCategory.count({ where: { id: { in: categoryIds }, parentId: null } });
+    if (found !== new Set(categoryIds).size) throw badRequest("Choose main expense categories only");
+  }
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.setting.findUnique({ where: { key: SPACE_POOL_KEY } });
+    const value = { categoryIds: [...new Set(categoryIds)], floorPct: round2(floorPct) };
+    if (categoryIds.length) await tx.setting.upsert({ where: { key: SPACE_POOL_KEY }, create: { key: SPACE_POOL_KEY, value }, update: { value } });
+    else if (before) await tx.setting.delete({ where: { key: SPACE_POOL_KEY } });
+    await audit(tx, actor, {
+      action: "DEPT_SPACE_POOL",
+      entityType: "Setting",
+      entityId: SPACE_POOL_KEY,
+      before: before?.value ?? undefined,
+      after: categoryIds.length ? value : undefined,
+    });
+    return { ok: true };
+  });
+}
+
 /** Who is charged to which department when a bank payroll file is uploaded. */
 export async function listStaffDepartments(actor: Actor) {
   requireAdmin(actor);
@@ -637,7 +750,7 @@ const amountOf = (v: unknown) => {
  *  - a sheet with "Person | Incentive % | <one column per month>": people who bring income, with the
  *    income they generated each month.
  */
-export async function importDepartmentWorkbook(actor: Actor, departmentId: string | null, fileName: string, buf: Buffer) {
+export async function importDepartmentWorkbook(actor: Actor, departmentId: string | null, fileName: string, buf: Buffer, opts: { confirmPayroll?: boolean } = {}) {
   // The Admin imports for any department; a department head imports costs for their own department.
   const admin = can(actor, "masters.manage");
   if (!admin && !actor.headOfDepartmentId) throw forbidden("Only an Admin or a department head can import department costs");
@@ -839,8 +952,37 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
   }
   if (errors.length) throw badRequest(`Nothing was saved. Fix these rows: ${errors.slice(0, 8).join("; ")}${errors.length > 8 ? ` (and ${errors.length - 8} more)` : ""}`);
   // Payroll: each listed person's pay goes to their department(s) by the staff list (this file's, else the saved one).
-  const payrollResult = { months: [] as string[], charged: 0, notCharged: [] as string[] };
+  const payrollResult = {
+    months: [] as string[],
+    charged: 0,
+    notCharged: [] as string[],
+    check: [] as { month: string; file: number; core: number; matches: boolean }[],
+  };
   if (payroll.length) {
+    // Core accounts are the source of truth: each month's file total is checked against the salaries
+    // booked there; a difference (e.g. the wrong month's file) stops the upload until the Admin confirms.
+    const fileMonths = [...new Set(payroll.map((p) => p.month))].sort();
+    const core = await coreSalaries(fileMonths);
+    for (const m of fileMonths) {
+      const file = round2(payroll.filter((p) => p.month === m).reduce((a, p) => a + p.amount, 0));
+      const c = core[m] ?? 0;
+      payrollResult.check.push({ month: m, file, core: c, matches: c > 0 && Math.abs(file - c) <= Math.max(1, c * 0.005) });
+    }
+    const off = payrollResult.check.filter((x) => !x.matches);
+    if (off.length && !opts.confirmPayroll) {
+      const inr = (n: number) => `₹${n.toLocaleString("en-IN")}`;
+      throw new AppError(
+        409,
+        `This payroll does not match the core accounts: ${off
+          .map(
+            (x) =>
+              `${monthLabel(x.month)} file ${inr(x.file)}, core salaries ${x.core ? inr(x.core) : "not booked yet"}${x.core ? ` (difference ${inr(round2(x.file - x.core))})` : ""}`,
+          )
+          .join("; ")}. Check it is the right month's file. Import it anyway?`,
+        "PAYROLL_CHECK",
+        payrollResult.check,
+      );
+    }
     const saved = await prisma.staffDepartment.findMany();
     const byLabel = new Map<string, { label: string; names: string; parts: { departmentId: string; percent: number }[] }>();
     for (const m of saved) {
@@ -1108,4 +1250,97 @@ export async function expenditureSheet(actor: Actor, q: { departmentId?: string 
   }
   const name = depts.length === 1 ? depts[0].name.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") : "All-departments";
   return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), fileName: `AED-${name}-expenditure-${months[0]}-to-${months[months.length - 1]}.xlsx` };
+}
+
+// ─────────────────────────── statement export ───────────────────────────
+
+/**
+ * A department's account as an Excel workbook, month by month: income lines, cost lines, profit and
+ * (JJ Wellness) the partner's share. One tab per department, plus a summary when there are several.
+ * Heads get only their own department.
+ */
+export async function departmentStatementWorkbook(actor: Actor, q: { departmentId?: string | null; from?: string | null; to?: string | null }) {
+  const data = await departmentAccounts(actor, { from: q.from, to: q.to });
+  const statements = q.departmentId ? data.statements.filter((s) => s.id === q.departmentId) : data.statements;
+  if (!statements.length) throw notFound("Department not found");
+  const ExcelJS = (await import("exceljs")).default;
+  const wb = new ExcelJS.Workbook();
+  const M = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const col = (m: string) => `${M[+m.slice(5, 7) - 1]} ${m.slice(0, 4)}`;
+  const period = `${col(data.months[0])} to ${col(data.months[data.months.length - 1])}`;
+  const money = "#,##,##0;[Red]-#,##,##0";
+  const bold = { bold: true };
+  const head = (ws: import("exceljs").Worksheet, title: string) => {
+    ws.addRow([`AED Hospital — ${title}`]).font = { bold: true, size: 14 };
+    ws.addRow([`Department account, ${period}. For department performance only: figures come from the core accounts and do not change them.`]).font = {
+      italic: true,
+      color: { argb: "FF555555" },
+    };
+    ws.addRow([]);
+  };
+  const used = new Set<string>();
+  const tabName = (n: string) => {
+    let t = n.replace(/[\\/?*[\]:]/g, " ").slice(0, 31);
+    while (used.has(t)) t = `${t.slice(0, 28)} ${used.size}`;
+    used.add(t);
+    return t;
+  };
+  if (statements.length > 1) {
+    const ws = wb.addWorksheet(tabName("All departments"));
+    head(ws, "all departments");
+    ws.addRow(["Department", "Income", "Costs", "Profit", "Margin %"]).font = bold;
+    for (const s of statements) ws.addRow([s.name, s.totals.income, s.totals.costs, s.totals.profit, s.marginPct ?? null]);
+    const t = statements.reduce((a, s) => ({ i: a.i + s.totals.income, c: a.c + s.totals.costs, p: a.p + s.totals.profit }), { i: 0, c: 0, p: 0 });
+    ws.addRow(["Total", round2(t.i), round2(t.c), round2(t.p), t.i ? round2((t.p / t.i) * 100) : null]).font = bold;
+    ws.getColumn(1).width = 40;
+    for (const c of [2, 3, 4]) ws.getColumn(c).numFmt = money;
+    for (const c of [2, 3, 4, 5]) ws.getColumn(c).width = 16;
+  }
+  for (const s of statements) {
+    const ws = wb.addWorksheet(tabName(s.name));
+    head(ws, s.name);
+    const cols = data.months;
+    const row = (label: string, byMonth: Record<string, number>, total: number, font?: object) => {
+      const r = ws.addRow([label, ...cols.map((m) => byMonth[m] ?? 0), total]);
+      if (font) r.font = font;
+      return r;
+    };
+    ws.addRow(["", ...cols.map(col), "Total"]).font = bold;
+    ws.addRow(["Income"]).font = { bold: true, color: { argb: "FF1F4E79" } };
+    for (const l of s.incomeLines) row(`  ${l.name}`, l.byMonth, l.total);
+    row("Total income", s.income, s.totals.income, bold);
+    ws.addRow([]);
+    ws.addRow(["Costs"]).font = { bold: true, color: { argb: "FF1F4E79" } };
+    // One row per cost: a cost entered as several month ranges (e.g. a salary that changed) is shown once.
+    const costs = new Map<string, { byMonth: Money; total: number }>();
+    for (const l of s.costLines) {
+      const e = costs.get(l.label) ?? { byMonth: {}, total: 0 };
+      for (const [m, v] of Object.entries(l.byMonth)) addTo(e.byMonth, m, v);
+      e.total = round2(e.total + l.total);
+      costs.set(l.label, e);
+    }
+    for (const [label, e] of costs) if (e.total) row(`  ${label}`, e.byMonth, e.total);
+    row("Total costs", s.costs, s.totals.costs, bold);
+    ws.addRow([]);
+    row("Profit", s.profit, s.totals.profit, bold);
+    ws.addRow(["Margin %", ...cols.map((m) => (s.income[m] ? round2(((s.profit[m] ?? 0) / s.income[m]) * 100) : null)), s.marginPct ?? null]);
+    const partner = data.partners.find((p) => p.departments.includes(s.name));
+    if (partner) {
+      ws.addRow([]);
+      row(`${partner.name} share (${partner.pct}% of profit in profit months)`, partner.share, partner.totals.share, bold);
+      const aed: Record<string, number> = {};
+      for (const m of cols) aed[m] = round2((s.profit[m] ?? 0) - (partner.share[m] ?? 0));
+      row("AED keeps", aed, partner.totals.aed, bold);
+    }
+    if (!s.costsEntered) ws.addRow(["No costs entered for this department yet: its profit is its income."]).font = { italic: true, color: { argb: "FFB45309" } };
+    ws.getColumn(1).width = 58;
+    for (let c = 2; c <= cols.length + 2; c++) {
+      ws.getColumn(c).width = 13;
+      ws.getColumn(c).numFmt = money;
+    }
+    ws.views = [{ state: "frozen", xSplit: 1, ySplit: 4 }];
+    ws.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  }
+  const name = statements.length === 1 ? statements[0].name.replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") : "All-departments";
+  return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), fileName: `AED-${name}-account-${data.months[0]}-to-${data.months[data.months.length - 1]}.xlsx` };
 }
