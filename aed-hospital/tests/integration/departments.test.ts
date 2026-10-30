@@ -462,4 +462,19 @@ describe("department accounts", () => {
     await deleteStaffDepartment(f.admin, helper.id);
     expect((await importDepartmentWorkbook(f.admin, null, "December 2026 Salaries.xlsx", await payroll([["Helper B", 1]]))).payroll.notCharged).toEqual(["Helper B"]);
   });
+
+  it("a row of 0s in the monthly sheet removes that cost for the sheet's months", async () => {
+    const sheet = async (vals: (number | null)[]) => {
+      const wb = new ExcelJS.Workbook();
+      const t = wb.addWorksheet("SCP");
+      t.addRow(["Department: SCP — Sugar Control Plans"]);
+      t.addRow(["Category", "Name / item", "Jan 2026", "Feb 2026", "Mar 2026"]);
+      t.addRow(["Salaries", "Nurse A", ...vals]);
+      return Buffer.from(await wb.xlsx.writeBuffer());
+    };
+    await importDepartmentWorkbook(f.admin, null, "a.xlsx", await sheet([1000, 1000, 1200]));
+    expect(await prisma.departmentCost.count({ where: { label: "Salary — Nurse A" } })).toBe(2);
+    expect(await importDepartmentWorkbook(f.admin, null, "b.xlsx", await sheet([0, 0, 0]))).toMatchObject({ costsAdded: 0, costsUpdated: 2 });
+    expect(await prisma.departmentCost.count({ where: { label: "Salary — Nurse A" } })).toBe(0);
+  });
 });

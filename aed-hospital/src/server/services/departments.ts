@@ -733,7 +733,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
           !/^(grand )?total/i.test(String(r.values[catCol] ?? "")) &&
           monthCols.some(([h]) => {
             const a = amountOf(r.values[h]);
-            return a !== null && a !== 0;
+            return a !== null;
           }),
       );
       // Blank tabs (e.g. the other departments' tabs of the shared workbook) are skipped.
@@ -757,14 +757,15 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
         const label = gridLabel(cat, name);
         for (const [h, m] of monthCols) {
           const a = amountOf(r.values[h]);
-          if (a === null || a === 0) continue;
+          if (a === null) continue;
           if (Number.isNaN(a) || a < 0) {
             errors.push(`${sh.name} row ${r.rowNumber}, ${h}: not an amount`);
             continue;
           }
+          // A typed 0 still counts: a row of 0s removes that cost for the sheet's months.
           const k = `${target.id}|${label}`;
           const g = grid.get(k) ?? { departmentId: target.id, label: label.slice(0, 120), months: new Map(), from: months[0], to: months[months.length - 1] };
-          g.months.set(m, round2((g.months.get(m) ?? 0) + a));
+          if (a) g.months.set(m, round2((g.months.get(m) ?? 0) + a));
           grid.set(k, g);
         }
       }
