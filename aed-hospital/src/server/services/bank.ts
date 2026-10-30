@@ -11,6 +11,7 @@ import { BANK_KIND_LABELS, parseSbiStatement, type BankKind } from "@/lib/import
 import { addDays, fromDbDate, isISODate, todayISO, toDbDate, type ISODate } from "@/lib/dates";
 import { round2, toNum } from "@/lib/money";
 import { writePerm } from "@/lib/modules";
+import { norm } from "@/lib/import/text";
 import { requirePermission, type Actor } from "../authz";
 import { prisma } from "../db";
 import { audit } from "../audit";
@@ -311,4 +312,88 @@ export async function bookBankPayments(actor: Actor, raw: unknown) {
   );
   if (b.intoClosedDays && touched.size) await refreshClosedDays(actor, [...touched], "Expenses entered from the bank statement");
   return { booked, amount, skipped };
+}
+
+/**
+ * The reviewed payments sheet (downloaded, checked, filled in): rows marked "Yes" with an expense head
+ * are entered as expenses through bookBankPayments, so each is re-checked against the core accounts and
+ * skipped if it is already there. Rows are found by date, amount and the bank's narration.
+ */
+export async function bookFromReviewedSheet(actor: Actor, fileName: string, buf: Buffer, opts: { intoClosedDays?: boolean } = {}) {
+  requirePermission(actor, writePerm("expense"));
+  const { readSpreadsheet } = await import("../spreadsheet");
+  const sheets = await readSpreadsheet(fileName, buf);
+  const n = (s: unknown) => norm(String(s ?? ""));
+  const sh = sheets.find((s) => s.headers.some((h) => n(h).startsWith("enter as expense")));
+  if (!sh) throw badRequest('Use the reviewed payments sheet: it needs the columns Date, Amount, Bank narration, "Enter as expense?" and "Expense head"');
+  const col = (start: string) => sh.headers.find((h) => n(h).startsWith(start));
+  const [cDate, cAmt, cNarr, cYes, cHead, cSub, cDept, cDesc] = [
+    "date",
+    "amount",
+    "bank narration",
+    "enter as expense",
+    "expense head",
+    "sub head",
+    "department",
+    "description",
+  ].map(col);
+  if (!cDate || !cAmt || !cNarr || !cHead) throw badRequest("The sheet is missing the Date, Amount, Bank narration or Expense head column");
+  const [cats, depts] = await Promise.all([
+    prisma.expenseCategory.findMany({ where: { active: true }, select: { id: true, name: true, parentId: true } }),
+    prisma.department.findMany({ where: { active: true }, select: { id: true, name: true } }),
+  ]);
+  const errors: string[] = [];
+  const groups = new Map<string, { categoryId: string; subcategoryId: string | null; departmentId: string | null; description: string | null; lineIds: string[] }>();
+  let notFound = 0;
+  for (const r of sh.rows) {
+    if (!/^y/i.test(String(r.values[cYes!] ?? "").trim())) continue;
+    const at = `row ${r.rowNumber}`;
+    // Dates come out of Excel as YYYY-MM-DD; a sheet re-saved with day-first text dates is read too.
+    const raw = String(r.values[cDate] ?? "").trim();
+    const dmy = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(raw);
+    const date = dmy ? `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}` : raw.slice(0, 10);
+    const amount = Number(String(r.values[cAmt] ?? "").replace(/,/g, ""));
+    if (!isISODate(date) || !(amount > 0)) {
+      errors.push(`${at}: date or amount missing`);
+      continue;
+    }
+    const cat = cats.find((c) => !c.parentId && n(c.name) === n(r.values[cHead]));
+    if (!cat) {
+      errors.push(`${at}: no expense head called "${r.values[cHead] ?? ""}"`);
+      continue;
+    }
+    const subName = cSub ? n(r.values[cSub]) : "";
+    const sub = subName ? cats.find((c) => c.parentId === cat.id && n(c.name) === subName) : null;
+    if (subName && !sub) {
+      errors.push(`${at}: "${r.values[cSub!]}" is not a sub-head of ${cat.name}`);
+      continue;
+    }
+    const deptName = cDept ? n(r.values[cDept]) : "";
+    const dept = deptName ? depts.find((d) => n(d.name) === deptName) : null;
+    if (deptName && !dept) {
+      errors.push(`${at}: no department called "${r.values[cDept!]}"`);
+      continue;
+    }
+    const line = await prisma.bankLine.findFirst({ where: { date: toDbDate(date as ISODate), debit: amount, description: String(r.values[cNarr] ?? "").trim() } });
+    if (!line) {
+      notFound++;
+      continue;
+    }
+    const description = cDesc ? String(r.values[cDesc] ?? "").trim() || null : null;
+    const k = [cat.id, sub?.id, dept?.id, description].join("|");
+    const g = groups.get(k) ?? { categoryId: cat.id, subcategoryId: sub?.id ?? null, departmentId: dept?.id ?? null, description, lineIds: [] };
+    g.lineIds.push(line.id);
+    groups.set(k, g);
+  }
+  if (errors.length) throw badRequest(`Nothing was entered. Fix these rows: ${errors.slice(0, 8).join("; ")}${errors.length > 8 ? ` (and ${errors.length - 8} more)` : ""}`);
+  let booked = 0;
+  let amount = 0;
+  let skipped = 0;
+  for (const g of groups.values()) {
+    const r = await bookBankPayments(actor, { ...g, intoClosedDays: opts.intoClosedDays });
+    booked += r.booked;
+    amount = round2(amount + r.amount);
+    skipped += r.skipped;
+  }
+  return { booked, amount, skipped, notFound };
 }

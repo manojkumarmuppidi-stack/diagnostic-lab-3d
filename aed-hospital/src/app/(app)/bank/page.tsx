@@ -71,6 +71,74 @@ function UploadButton({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** Upload the reviewed payments sheet: rows marked "Yes" become expenses, each re-checked first. */
+function ReviewedUpload({ onDone }: { onDone: () => void }) {
+  const can = useCan();
+  const [busy, setBusy] = useState(false);
+  const [closed, setClosed] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; lines: string[] } | null>(null);
+  return (
+    <>
+      <span className="flex items-center gap-2">
+        <label
+          className={`btn btn-secondary ${busy ? "pointer-events-none opacity-70" : "cursor-pointer"}`}
+          title='The payments sheet after you marked "Enter as expense?" Yes and chose the expense head'
+        >
+          {busy ? <Spinner /> : <Upload className="h-4 w-4" />} {busy ? "Entering…" : "Upload reviewed list"}
+          <input
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            className="sr-only"
+            disabled={busy}
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (!file) return;
+              const fd = new FormData();
+              fd.append("file", file);
+              if (closed) fd.append("intoClosedDays", "1");
+              setBusy(true);
+              try {
+                const r: any = await apiFetch("/api/bank/book-sheet", { method: "POST", body: fd });
+                setResult({
+                  ok: true,
+                  lines: [
+                    `${r.booked} expense${r.booked === 1 ? "" : "s"} entered, ${formatINR(r.amount)}.`,
+                    ...(r.skipped ? [`${r.skipped} skipped: already in the core accounts.`] : []),
+                    ...(r.notFound ? [`${r.notFound} rows not found among the uploaded bank lines (upload that month's statement first).`] : []),
+                  ],
+                });
+                onDone();
+              } catch (err: any) {
+                setResult({ ok: false, lines: String(err.message).split(/;\s+(?=row)/) });
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        </label>
+        {can("accounts.reopen") && (
+          <label className="flex items-center gap-1 text-xs">
+            <input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} /> allow closed days
+          </label>
+        )}
+      </span>
+      <Modal
+        open={!!result}
+        onClose={() => setResult(null)}
+        title={result?.ok ? "Expenses entered" : "Nothing was entered"}
+        footer={<Button onClick={() => setResult(null)}>OK</Button>}
+      >
+        <ul className="list-disc space-y-1 pl-5 text-sm" style={result?.ok ? undefined : { color: "var(--status-bad)" }}>
+          {result?.lines.map((l, i) => (
+            <li key={i}>{l}</li>
+          ))}
+        </ul>
+      </Modal>
+    </>
+  );
+}
+
 /** Enter one payee's payments that have no core entry as expenses (one per payment, on the bank's date). */
 function BookDialog({ row, lines, kinds, onClose, onDone }: { row: any; lines: any[]; kinds: Record<string, string>; onClose: () => void; onDone: () => void }) {
   const can = useCan();
@@ -219,6 +287,7 @@ function Report() {
           >
             <Download className="h-4 w-4" /> Download Excel
           </Button>
+          {can("expense.write") && <ReviewedUpload onDone={reload} />}
           {can("accounts.reconcile") && <UploadButton onDone={reload} />}
         </div>
       </div>
