@@ -8,6 +8,7 @@ import {
   BarChart3,
   BedDouble,
   BookCheck,
+  Landmark,
   CalendarCheck,
   ClipboardList,
   Download,
@@ -59,6 +60,7 @@ export const NAV: NavItem[] = [
   { href: "/diet", label: "Diet & Nutrition", icon: Salad, perm: "diet.view" },
   { href: "/expenses", label: "Expenses", icon: Receipt, perm: "expense.view" },
   { href: "/accounting", label: "Accounting & Reconciliation", icon: BookCheck, perm: "accounts.view" },
+  { href: "/bank", label: "Bank statement check", icon: Landmark, perm: "accounts.view" },
   { href: "/analytics", label: "Analytics", icon: BarChart3, perm: "analytics.view" },
   { href: "/meeting", label: "Board Meeting", icon: Presentation, perm: "analytics.view" },
   { href: "/reports", label: "Reports", icon: ClipboardList, perm: "reports.view" },
@@ -166,7 +168,10 @@ function Shell({ children }: { children: ReactNode }) {
 
       <div className="app-main flex min-w-0 flex-1 flex-col">
         {/* Top bar */}
-        <header className="sticky top-0 z-30 flex items-center gap-2 border-b px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] no-print sm:px-6" style={{ background: "color-mix(in srgb, var(--surface) 92%, transparent)", borderColor: "var(--border)", backdropFilter: "blur(8px)" }}>
+        <header
+          className="sticky top-0 z-30 flex items-center gap-2 border-b px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))] no-print sm:px-6"
+          style={{ background: "color-mix(in srgb, var(--surface) 92%, transparent)", borderColor: "var(--border)", backdropFilter: "blur(8px)" }}
+        >
           <button className="btn btn-ghost lg:hidden" onClick={() => setDrawer(true)} aria-label="Open menu">
             <Menu className="h-5 w-5" />
           </button>
@@ -238,10 +243,19 @@ function Shell({ children }: { children: ReactNode }) {
       )}
 
       {/* Mobile bottom navigation with central quick-add */}
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t pb-[env(safe-area-inset-bottom)] lg:hidden no-print" style={{ background: "var(--surface)", borderColor: "var(--border)" }} aria-label="Quick navigation">
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t pb-[env(safe-area-inset-bottom)] lg:hidden no-print"
+        style={{ background: "var(--surface)", borderColor: "var(--border)" }}
+        aria-label="Quick navigation"
+      >
         {[items.find((i) => i.href === "/dashboard"), items.find((i) => i.href === "/daily-accounts") ?? items[1]].map((n, i) =>
           n ? (
-            <Link key={n.href} href={n.href} className={cn("flex flex-col items-center gap-0.5 py-2 text-[11px]", active(n.href) ? "font-semibold" : "muted")} style={active(n.href) ? { color: "var(--brand)" } : undefined}>
+            <Link
+              key={n.href}
+              href={n.href}
+              className={cn("flex flex-col items-center gap-0.5 py-2 text-[11px]", active(n.href) ? "font-semibold" : "muted")}
+              style={active(n.href) ? { color: "var(--brand)" } : undefined}
+            >
               <n.icon className="h-5 w-5" aria-hidden />
               {n.label.split(" ")[0]}
             </Link>
@@ -251,7 +265,12 @@ function Shell({ children }: { children: ReactNode }) {
         )}
         <div className="flex items-center justify-center">
           {quick.length > 0 && (
-            <button onClick={() => setQuickOpen(true)} className="-mt-6 flex h-14 w-14 items-center justify-center rounded-full shadow-lg" style={{ background: "var(--brand)", color: "#fff" }} aria-label="Quick add">
+            <button
+              onClick={() => setQuickOpen(true)}
+              className="-mt-6 flex h-14 w-14 items-center justify-center rounded-full shadow-lg"
+              style={{ background: "var(--brand)", color: "#fff" }}
+              aria-label="Quick add"
+            >
               <Plus className="h-7 w-7" />
             </button>
           )}

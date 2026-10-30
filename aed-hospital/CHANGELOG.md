@@ -2,6 +2,10 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.26.0: Bank statement check
+- New page "Bank statement check" (Accounts): upload the bank's statements (SBI Account Statement .xls, several months at once; the running balance is checked line by line and the same line is never stored twice — a reversed-and-retried UPI payment is kept). Account numbers are kept as the last 4 digits only. Each line is classified (UPI/card settlements, UPI, cheques, NEFT/RTGS, rent, electricity, TDS/ESIC/PF, debit card, auto-debits, cash, transfers between AED's own accounts) with the payee read from the narration.
+- Money in: UPI/card settlements that reached the bank against the UPI/card collections recorded (AED and pharmacy), month by month. Money out: each payment matched to an expense or pharmacy purchase of the same amount (dated 45 days before to 5 days after); failed UPI payments and their reversals cancel out; own transfers and cash withdrawals are shown apart. Payments not found in the core accounts are listed by payee, and everything downloads as Excel. Nothing is booked from the bank. Migration `20261107000000_bank_lines`.
+
 ## 0.25.0: Hormonal Pharmacy in department accounts
 - New department "Hormonal Pharmacy" (migration `20261106000000_pharmacy_department`): income = medicine sales after discount and returns, costs = supplier purchases — both read from the core accounts, as the AED vs Pharmacy P&L measures it — plus the pharmacists' salaries entered for it, less the margin on medicines other departments already take (JJ Wellness's GLP injections), so nothing is counted twice. AED income totals are unchanged.
 
