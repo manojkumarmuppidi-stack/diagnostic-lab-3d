@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { createTransaction } from "@/server/services/transactions";
-import { bankReport, bankReportWorkbook, importBankStatements } from "@/server/services/bank";
+import { bankReport, bankReportWorkbook, bookBankPayments, importBankStatements } from "@/server/services/bank";
 import { seedFixture, type Fixture } from "../helpers/db";
 
 let f: Fixture;
@@ -70,5 +70,30 @@ describe("bank statement check", () => {
     const x = await bankReportWorkbook(f.management, { from: "2026-10-01", to: "2026-10-31" });
     expect(x.fileName).toBe("AED-bank-check-2026-10-01-to-2026-10-31.xlsx");
     await expect(importBankStatements(f.accounts, [{ name: "bad.xls", buf: Buffer.from("hello") }])).rejects.toThrow(/bad.xls: No transactions/);
+
+    // The payee's unmatched payments become expenses (vendor = payee, bank date, UPI); a second try enters nothing.
+    const geetha = r.unmatched.filter((u) => u.party === "GEETHA P").map((u) => u.id);
+    await expect(bookBankPayments(f.management, { lineIds: geetha, categoryId: f.ids.groceries })).rejects.toThrow();
+    expect(await bookBankPayments(f.admin, { lineIds: geetha, categoryId: f.ids.groceries, description: "Dr. Geetha Priya consultations" })).toEqual({
+      booked: 2,
+      amount: 14000,
+      skipped: 0,
+    });
+    const made = await prisma.expense.findMany({ where: { vendor: "GEETHA P" }, include: { paymentMode: true }, orderBy: { date: "asc" } });
+    expect(made.map((e) => [e.date.toISOString().slice(0, 10), Number(e.amount), e.paymentMode!.reconGroup, e.description])).toEqual([
+      ["2026-10-06", 7000, "UPI", "Dr. Geetha Priya consultations — paid by UPI"],
+      ["2026-10-08", 7000, "UPI", "Dr. Geetha Priya consultations — paid by UPI"],
+    ]);
+    expect((await bankReport(f.management, { from: "2026-10-01", to: "2026-10-31" })).unmatchedByPayee.map((x) => x.party)).toEqual(["ADURI SA"]);
+    expect(await bookBankPayments(f.admin, { lineIds: geetha, categoryId: f.ids.groceries })).toEqual({ booked: 0, amount: 0, skipped: 2 });
+    // A closed day refuses the entry unless the Admin allows closed days.
+    const aduri = r.unmatched.filter((u) => u.party === "ADURI SA").map((u) => u.id);
+    await prisma.dailyAccount.upsert({
+      where: { date: new Date("2026-10-09T00:00:00Z") },
+      create: { date: new Date("2026-10-09T00:00:00Z"), status: "CLOSED" },
+      update: { status: "CLOSED" },
+    });
+    await expect(bookBankPayments(f.admin, { lineIds: aduri, categoryId: f.ids.groceries })).rejects.toThrow();
+    expect(await bookBankPayments(f.admin, { lineIds: aduri, categoryId: f.ids.groceries, intoClosedDays: true })).toMatchObject({ booked: 1 });
   });
 });

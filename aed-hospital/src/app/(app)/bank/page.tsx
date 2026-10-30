@@ -12,7 +12,7 @@ import { todayISO } from "@/lib/dates";
 import { formatINR } from "@/lib/money";
 import { Button, Card, EmptyState, ErrorState, Field, Modal, PageHeader, Spinner, useToast } from "@/components/ui";
 import { Guard } from "@/components/Guard";
-import { useCan } from "@/components/session";
+import { masterOptions, useCan, useMasters } from "@/components/session";
 import { colLabel } from "@/components/departments/insights";
 
 const inr = (v: number) => (v ? formatINR(Math.round(v)) : "—");
@@ -71,6 +71,113 @@ function UploadButton({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** Enter one payee's payments that have no core entry as expenses (one per payment, on the bank's date). */
+function BookDialog({ row, lines, kinds, onClose, onDone }: { row: any; lines: any[]; kinds: Record<string, string>; onClose: () => void; onDone: () => void }) {
+  const can = useCan();
+  const toast = useToast();
+  const { masters } = useMasters();
+  const [cat, setCat] = useState("");
+  const [sub, setSub] = useState("");
+  const [dept, setDept] = useState("");
+  const [desc, setDesc] = useState(row.party === "(no name)" ? "" : row.party);
+  const [closed, setClosed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const total = lines.reduce((a, l) => a + l.amount, 0);
+  const subs = masterOptions(masters, "expenseSubcategories", { parentId: cat });
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r: any = await apiFetch("/api/bank/book", {
+        method: "POST",
+        json: { lineIds: lines.map((l) => l.id), categoryId: cat, subcategoryId: sub || null, departmentId: dept || null, description: desc, intoClosedDays: closed },
+      });
+      toast(
+        "success",
+        `${r.booked} expense${r.booked === 1 ? "" : "s"} entered, ${formatINR(r.amount)}${r.skipped ? ` · ${r.skipped} skipped (already in the core accounts)` : ""}`,
+      );
+      onDone();
+      onClose();
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Enter as expenses: ${row.party}`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={save} loading={busy} disabled={!cat}>
+            Enter {lines.length} expense{lines.length === 1 ? "" : "s"} · {inr(total)}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-sm">
+        <p>
+          {lines.length} payment{lines.length === 1 ? "" : "s"} by {kinds[row.kind] ?? row.kind} with no expense of the same amount near that date. Each becomes one expense on the
+          bank&apos;s date. Only enter them if they are AED&apos;s expenses — loans, owner payments, assets and transfers belong in the suspense list instead.
+        </p>
+        <div className="max-h-40 overflow-y-auto rounded border p-2 text-xs" style={{ borderColor: "var(--border)" }}>
+          {lines.map((l) => (
+            <div key={l.id} className="flex justify-between gap-2">
+              <span>{l.date}</span>
+              <span>{inr(l.amount)}</span>
+            </div>
+          ))}
+        </div>
+        <Field label="Expense head" required>
+          <select className="input" value={cat} onChange={(e) => (setCat(e.target.value), setSub(""))}>
+            <option value="">Choose…</option>
+            {masterOptions(masters, "expenseCategories").map((c: any) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {subs.length > 0 && (
+          <Field label="Sub-head">
+            <select className="input" value={sub} onChange={(e) => setSub(e.target.value)}>
+              <option value="">—</option>
+              {subs.map((c: any) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <Field label="Department (optional)">
+          <select className="input" value={dept} onChange={(e) => setDept(e.target.value)}>
+            <option value="">—</option>
+            {masterOptions(masters, "departments").map((d: any) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Description" help="The supplier's name is kept as the vendor, so department rules (e.g. Lab suppliers) find these expenses">
+          <input className="input" value={desc} onChange={(e) => setDesc(e.target.value)} />
+        </Field>
+        {can("accounts.reopen") && (
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} /> Allow entering on days that are already closed (their closing totals are
+            refreshed)
+          </label>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
 function Report() {
   const can = useCan();
   const toast = useToast();
@@ -78,6 +185,8 @@ function Report() {
   const [from, setFrom] = useState(`${today.slice(0, 4)}-01-01`);
   const [to, setTo] = useState(today);
   const [all, setAll] = useState(false);
+  const [booking, setBooking] = useState<any>(null);
+  const canBook = can("expense.write");
   const { data, error, reload } = useApi<any>(`/api/bank?from=${from}&to=${to}`);
   const tot = (rows: any[], k: string) => rows.reduce((a, r) => a + (r[k] ?? 0), 0);
   return (
@@ -210,6 +319,7 @@ function Report() {
                     <th className="num">Payments</th>
                     <th className="num">Amount</th>
                     <th>Months</th>
+                    {canBook && <th />}
                   </tr>
                 </thead>
                 <tbody>
@@ -220,6 +330,13 @@ function Report() {
                       <td className="num">{r.count}</td>
                       <td className="num">{inr(r.amount)}</td>
                       <td className="text-xs">{r.months.map((m: string) => colLabel(m)).join(", ")}</td>
+                      {canBook && (
+                        <td className="text-right">
+                          <Button size="sm" variant="secondary" onClick={() => setBooking(r)}>
+                            Enter as expenses
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -231,6 +348,15 @@ function Report() {
               </Button>
             )}
           </Card>
+          {booking && (
+            <BookDialog
+              row={booking}
+              lines={data.unmatched.filter((u: any) => u.kind === booking.kind && (u.party ?? "(no name)").toLowerCase() === booking.party.toLowerCase())}
+              kinds={data.kinds}
+              onClose={() => setBooking(null)}
+              onDone={reload}
+            />
+          )}
         </>
       )}
     </div>

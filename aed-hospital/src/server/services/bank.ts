@@ -5,14 +5,19 @@
  * decide; nothing is booked from the bank.
  */
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { createHash } from "node:crypto";
 import { BANK_KIND_LABELS, parseSbiStatement, type BankKind } from "@/lib/import/bank";
 import { addDays, fromDbDate, isISODate, todayISO, toDbDate, type ISODate } from "@/lib/dates";
 import { round2, toNum } from "@/lib/money";
+import { writePerm } from "@/lib/modules";
 import { requirePermission, type Actor } from "../authz";
 import { prisma } from "../db";
 import { audit } from "../audit";
 import { badRequest } from "../errors";
+import { withBulkCache } from "../bulk-cache";
+import { insertRecord } from "./transactions";
+import { refreshClosedDays } from "./daily";
 
 export async function importBankStatements(actor: Actor, files: { name: string; buf: Buffer }[]) {
   requirePermission(actor, "accounts.reconcile");
@@ -226,4 +231,84 @@ export async function bankReportWorkbook(actor: Actor, q: { from?: string | null
     [3],
   );
   return { buffer: Buffer.from(await wb.xlsx.writeBuffer()), fileName: `AED-bank-check-${r.from}-to-${r.to}.xlsx` };
+}
+
+const bookInput = z.object({
+  lineIds: z.array(z.string().min(1)).min(1, "Choose the payments").max(500),
+  categoryId: z.string().min(1, "Choose the expense head"),
+  subcategoryId: z.string().nullable().optional(),
+  departmentId: z.string().nullable().optional(),
+  description: z.string().trim().max(200).nullable().optional(),
+  intoClosedDays: z.boolean().optional(),
+});
+
+/**
+ * Enters bank payments that have no entry in the core accounts as expenses — one expense per payment,
+ * on the bank's date, paid by bank or UPI. Each payment is checked again first: one that now matches an
+ * expense (entered meanwhile, or already booked from here) is skipped, so nothing is entered twice.
+ */
+export async function bookBankPayments(actor: Actor, raw: unknown) {
+  requirePermission(actor, writePerm("expense"));
+  const parsed = bookInput.safeParse(raw);
+  if (!parsed.success) throw badRequest(parsed.error.issues[0]?.message ?? "Check the details");
+  const b = parsed.data;
+  if (b.intoClosedDays) requirePermission(actor, "accounts.reopen");
+  const chosen = await prisma.bankLine.findMany({ where: { id: { in: b.lineIds } } });
+  if (chosen.length !== new Set(b.lineIds).size) throw badRequest("Some bank lines were not found — refresh and try again");
+  const dates = chosen.map((l) => fromDbDate(l.date)).sort();
+  const report = await bankReport(actor, { from: `${dates[0].slice(0, 4)}-01-01`, to: dates[dates.length - 1] });
+  const stillMissing = new Set(report.unmatched.map((u) => u.id));
+  const modes = await prisma.paymentMode.findMany({ where: { active: true, reconGroup: { in: ["BANK", "UPI"] } }, orderBy: { name: "asc" } });
+  const modeFor = (kind: string) => modes.find((m) => m.reconGroup === (kind === "UPI_OUT" ? "UPI" : "BANK")) ?? modes[0];
+  if (!modes.length) throw badRequest("Add a Bank or UPI payment mode in Master Data first");
+  const how: Record<string, string> = { UPI_OUT: "UPI", CHEQUE: "cheque", TRANSFER_OUT: "bank transfer", CARD: "debit card", ACH: "auto-debit" };
+  const touched = new Set<ISODate>();
+  let booked = 0;
+  let amount = 0;
+  let skipped = 0;
+  await prisma.$transaction(
+    (tx) =>
+      withBulkCache(
+        async () => {
+          for (const l of chosen) {
+            if (!stillMissing.has(l.id)) {
+              skipped++;
+              continue;
+            }
+            const date = fromDbDate(l.date);
+            await insertRecord(
+              tx,
+              actor,
+              "expense",
+              {
+                date,
+                categoryId: b.categoryId,
+                subcategoryId: b.subcategoryId || null,
+                departmentId: b.departmentId || null,
+                description: `${b.description || l.party || "Bank payment"} — paid by ${how[l.kind] ?? "bank"}`.slice(0, 300),
+                vendor: l.party?.slice(0, 120) ?? null,
+                billNumber: `BANK-${date}-${l.id.slice(-6)}`,
+                amount: toNum(l.debit),
+                paymentModeId: modeFor(l.kind)!.id,
+                remarks: `From the bank statement: ${l.description}`.slice(0, 500),
+              },
+              { allowDuplicate: true, quietAudit: true },
+            );
+            touched.add(date);
+            booked++;
+            amount = round2(amount + toNum(l.debit));
+          }
+          await audit(tx, actor, {
+            action: "BANK_BOOK_EXPENSES",
+            entityType: "BankLine",
+            entityId: "bank",
+            after: { lines: b.lineIds.length, booked, amount, categoryId: b.categoryId },
+          });
+        },
+        { allowClosed: b.intoClosedDays },
+      ),
+    { timeout: 120_000, maxWait: 10_000 },
+  );
+  if (b.intoClosedDays && touched.size) await refreshClosedDays(actor, [...touched], "Expenses entered from the bank statement");
+  return { booked, amount, skipped };
 }
