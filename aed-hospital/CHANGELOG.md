@@ -2,6 +2,9 @@
 
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
+## 0.24.0: Mark IPD admissions fully paid in one go
+- IPD → Outstanding: filter by admission dates (this month by default), tick the patients who have paid in full, choose how they paid and when (each patient's discharge date — admission date if not discharged — or one date for all), and "Mark selected as fully paid". Each gets a final settlement for exactly its balance, recorded like any payment: IPD income in the month received, closed days refused, audited, and voidable from Payments & refunds. Reception and Accounts can do it.
+
 ## 0.23.0: Department accounts take their inputs from the core accounts
 - Department Excel imports show "Uploading…" and a result box that stays until closed (each department and how many costs it got, or why nothing was saved), instead of a message that disappeared after a few seconds.
 - The Admin can upload the all-departments workbook from any department's "Import from Excel": each tab goes to the department it names (before, tabs for other departments were refused and nothing was saved). Department heads still upload only their own tab.
