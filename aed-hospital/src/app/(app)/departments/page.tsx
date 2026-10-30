@@ -395,56 +395,77 @@ function StaffList({ version }: { version: unknown }) {
 
 /** Upload a costs workbook: for one department, or (with a Department column) for every department. */
 function ImportButton({ departmentId, label = "Import from Excel", onDone }: { departmentId: string | null; label?: string; onDone: () => void }) {
-  const toast = useToast();
+  const [busy, setBusy] = useState<string | null>(null);
+  // The outcome stays on screen until closed: a refused file must not go unnoticed.
+  const [result, setResult] = useState<{ ok: boolean; file: string; lines: string[] } | null>(null);
   return (
-    <label className="btn btn-secondary btn-sm cursor-pointer" title="Salaries, repairs and other costs (and people's income generated) from one Excel file">
-      <Upload className="h-4 w-4" /> {label}
-      <input
-        type="file"
-        accept=".xlsx,.xls,.csv"
-        className="sr-only"
-        onChange={async (e) => {
-          const file = e.target.files?.[0];
-          e.target.value = "";
-          if (!file) return;
-          const send = (confirmPayroll: boolean) => {
-            const fd = new FormData();
-            fd.append("file", file);
-            if (departmentId) fd.append("departmentId", departmentId);
-            if (confirmPayroll) fd.append("confirmPayroll", "1");
-            return apiFetch("/api/departments/import", { method: "POST", body: fd });
-          };
-          try {
-            let r: any;
+    <>
+      <label
+        className={`btn btn-secondary btn-sm ${busy ? "pointer-events-none opacity-70" : "cursor-pointer"}`}
+        title="Salaries, repairs and other costs (and people's income generated) from one Excel file"
+      >
+        {busy ? <Spinner /> : <Upload className="h-4 w-4" />} {busy ? "Uploading…" : label}
+        <input
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          className="sr-only"
+          disabled={!!busy}
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            const send = (confirmPayroll: boolean) => {
+              const fd = new FormData();
+              fd.append("file", file);
+              if (departmentId) fd.append("departmentId", departmentId);
+              if (confirmPayroll) fd.append("confirmPayroll", "1");
+              return apiFetch("/api/departments/import", { method: "POST", body: fd });
+            };
+            setBusy(file.name);
             try {
-              r = await send(false);
+              let r: any;
+              try {
+                r = await send(false);
+              } catch (err: any) {
+                // The payroll total differs from the salaries in the core accounts: the Admin decides.
+                if (err?.code !== "PAYROLL_CHECK" || !confirm(err.message)) throw err;
+                r = await send(true);
+              }
+              const lines = [
+                `${r.costsAdded} cost lines added, ${r.costsUpdated} replaced.`,
+                ...(r.departments ?? []).map((d: any) => `${d.name}: ${d.rows} cost${d.rows === 1 ? "" : "s"} from this file`),
+              ];
+              if (r.people) lines.push(`${r.people} people, ${r.incomeMonths} months of income generated.`);
+              if (r.staff) lines.push(`${r.staff} staff saved in the Staff → department list.`);
+              if (r.payroll?.months?.length) {
+                for (const c of r.payroll.check ?? [])
+                  lines.push(`Payroll ${c.month}: file ${formatINR(c.file)}, core salaries ${formatINR(c.core)}${c.matches ? " — matches" : " — imported although different"}.`);
+                lines.push(`${r.payroll.charged} people charged to departments.`);
+                if (r.payroll.notCharged.length) lines.push(`Not in any department: ${r.payroll.notCharged.join(", ")}.`);
+              }
+              setResult({ ok: true, file: file.name, lines });
+              onDone();
             } catch (err: any) {
-              // The payroll total differs from the salaries in the core accounts: the Admin decides.
-              if (err?.code !== "PAYROLL_CHECK" || !confirm(err.message)) throw err;
-              r = await send(true);
+              setResult({ ok: false, file: file.name, lines: String(err.message ?? err).split(/;\s+(?=\S)/) });
+            } finally {
+              setBusy(null);
             }
-            const where = r.departments?.length > 1 ? `${r.departments.length} departments` : r.department;
-            const checks = (r.payroll?.check ?? [])
-              .map((c: any) => (c.matches ? `${c.month} matches the core salaries` : `${c.month} imported although it differs from the core salaries`))
-              .join("; ");
-            const pay = r.payroll?.months?.length
-              ? ` Payroll ${r.payroll.months.join(", ")} (${checks}): ${r.payroll.charged} people charged to departments${
-                  r.payroll.notCharged.length ? `; not in any department: ${r.payroll.notCharged.join(", ")}` : ""
-                }.`
-              : "";
-            toast(
-              "success",
-              `${where}: ${r.costsAdded} costs added, ${r.costsUpdated} updated${r.people ? `, ${r.people} people, ${r.incomeMonths} months of income generated` : ""}${
-                r.staff ? `, ${r.staff} staff mapped to departments` : ""
-              }.${pay}`,
-            );
-            onDone();
-          } catch (err: any) {
-            toast("error", err.message);
-          }
-        }}
-      />
-    </label>
+          }}
+        />
+      </label>
+      <Modal open={!!result} onClose={() => setResult(null)} title={result?.ok ? "Imported" : "Nothing was saved"} footer={<Button onClick={() => setResult(null)}>OK</Button>}>
+        {result && (
+          <div className="space-y-2 text-sm">
+            <p className="muted">{result.file}</p>
+            <ul className="list-disc space-y-1 pl-5" style={result.ok ? undefined : { color: "var(--status-bad)" }}>
+              {result.lines.map((l, i) => (
+                <li key={i}>{l}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Modal>
+    </>
   );
 }
 
