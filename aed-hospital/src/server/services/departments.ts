@@ -812,6 +812,11 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
   };
   const { readSpreadsheet } = await import("../spreadsheet");
   const sheets = await readSpreadsheet(fileName, buf);
+  // The reviewed bank payments list creates core expenses: it is uploaded on Bank statement check.
+  if (sheets.some((sh) => sh.headers.some((h) => norm(h).startsWith("enter as expense"))))
+    throw badRequest(
+      'This is the bank payments list. Upload it on Bank statement check → "Upload reviewed list": it enters the expenses in the core accounts, and the departments pick them up from there.',
+    );
   const key = (h: string) => norm(h);
   const costs: { departmentId: string; label: string; amount: number; percent: number; matchText: string | null; fromMonth: string; toMonth: string | null; row: number }[] = [];
   const people: { name: string; pct: number; incomes: [string, number | null][]; row: number }[] = [];

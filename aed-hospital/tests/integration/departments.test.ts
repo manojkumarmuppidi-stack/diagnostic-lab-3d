@@ -623,4 +623,11 @@ describe("department accounts", () => {
     expect(d.grandTotal).toBe(d.departmentsTotal + d.unassigned.reduce((a, u) => a + u.total, 0));
     expect(d.statements.find((s) => s.name === "JJ Wellness")!.incomeLines.some((l) => l.name.startsWith("Injection margin"))).toBe(true);
   });
+
+  it("points the bank payments list to Bank statement check", async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("Payments").addRow(["Date", "Paid to", "Amount", "Bank narration", "Enter as expense?", "Expense head"]);
+    wb.getWorksheet("Payments")!.addRow(["2026-10-05", "GEETHA P", 100, "x", "Yes", "Doctor & consultant fees"]);
+    await expect(importDepartmentWorkbook(f.admin, null, "g.xlsx", Buffer.from(await wb.xlsx.writeBuffer()))).rejects.toThrow(/Upload reviewed list/);
+  });
 });
