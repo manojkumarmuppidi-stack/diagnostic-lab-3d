@@ -25,6 +25,11 @@ export async function importBankStatements(actor: Actor, files: { name: string; 
   if (!files.length) throw badRequest("Choose the statement files");
   const out: { file: string; account: string; from: string; to: string; lines: number; added: number }[] = [];
   const parsed = files.map((f) => {
+    // An Excel workbook (zip) is not an SBI statement download — most likely the reviewed payments list.
+    if (f.buf.subarray(0, 2).toString("latin1") === "PK")
+      throw badRequest(
+        `${f.name} is an Excel workbook, not an SBI statement. For the reviewed payments list use "Upload reviewed list"; here upload the statement files downloaded from SBI (.xls).`,
+      );
     try {
       return { name: f.name, st: parseSbiStatement(f.buf.toString("latin1")) };
     } catch (e) {

@@ -70,6 +70,7 @@ describe("bank statement check", () => {
     const x = await bankReportWorkbook(f.management, { from: "2026-10-01", to: "2026-10-31" });
     expect(x.fileName).toBe("AED-bank-check-2026-10-01-to-2026-10-31.xlsx");
     await expect(importBankStatements(f.accounts, [{ name: "bad.xls", buf: Buffer.from("hello") }])).rejects.toThrow(/bad.xls: No transactions/);
+    await expect(importBankStatements(f.accounts, [{ name: "review.xlsx", buf: Buffer.from("PK\u0003\u0004xx") }])).rejects.toThrow(/Upload reviewed list/);
 
     // The payee's unmatched payments become expenses (vendor = payee, bank date, UPI); a second try enters nothing.
     const geetha = r.unmatched.filter((u) => u.party === "GEETHA P").map((u) => u.id);

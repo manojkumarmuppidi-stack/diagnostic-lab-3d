@@ -105,7 +105,11 @@ function ReviewedUpload({ onDone }: { onDone: () => void }) {
                   lines: [
                     `${r.booked} expense${r.booked === 1 ? "" : "s"} entered, ${formatINR(r.amount)}.`,
                     ...(r.skipped ? [`${r.skipped} skipped: already in the core accounts.`] : []),
-                    ...(r.notFound ? [`${r.notFound} rows not found among the uploaded bank lines (upload that month's statement first).`] : []),
+                    ...(r.notFound
+                      ? [
+                          `${r.notFound} rows were not found among the bank lines in the app: upload those months' SBI statements first (Upload bank statements), then this list again.`,
+                        ]
+                      : []),
                   ],
                 });
                 onDone();
