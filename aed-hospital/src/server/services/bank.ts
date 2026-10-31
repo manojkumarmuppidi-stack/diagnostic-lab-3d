@@ -17,7 +17,8 @@ import { prisma } from "../db";
 import { audit } from "../audit";
 import { badRequest } from "../errors";
 import { withBulkCache } from "../bulk-cache";
-import { insertRecord } from "./transactions";
+import { applyVoid, insertRecord } from "./transactions";
+import { matchPatterns } from "./departments";
 import { refreshClosedDays } from "./daily";
 
 export async function importBankStatements(actor: Actor, files: { name: string; buf: Buffer }[]) {
@@ -401,4 +402,125 @@ export async function bookFromReviewedSheet(actor: Actor, fileName: string, buf:
     skipped += r.skipped;
   }
   return { booked, amount, skipped, notFound };
+}
+
+const LAB_WORDS = /lab|reagent|diagnos|kit|scientific|pathlab|consumable|medical suppl|bio/i;
+
+/** Smallest set (up to 6 bills) whose amounts add up to `target` (to the rupee); nearest dates are tried first. */
+function subsetSum(bills: { id: string; amount: number }[], target: number): string[] | null {
+  const cents = Math.round(target * 100);
+  const list = bills.slice(0, 22).map((b) => ({ id: b.id, c: Math.round(b.amount * 100) }));
+  for (let size = 1; size <= 6; size++) {
+    const pick: number[] = [];
+    const walk = (start: number, left: number): boolean => {
+      if (pick.length === size) return Math.abs(left) <= 100;
+      for (let i = start; i < list.length; i++) {
+        if (list[i].c > left + 100) continue;
+        pick.push(i);
+        if (walk(i + 1, left - list[i].c)) return true;
+        pick.pop();
+      }
+      return false;
+    };
+    if (walk(0, cents)) return pick.map((i) => list[i].id);
+  }
+  return null;
+}
+
+/**
+ * Lab payments entered from the bank, checked against the lab bills that were already in the core
+ * accounts: when bills dated from 60 days before to 31 days after a cheque add up exactly to it, the bank entry is a
+ * duplicate (the bills were entered, the cheque paid them). With `apply`, duplicates are voided — and
+ * "probable" ones too when asked: the supplier has bills around then, but no exact total.
+ */
+export async function labBankDuplicates(actor: Actor, opts: { apply?: boolean; includeProbable?: boolean; intoClosedDays?: boolean } = {}) {
+  requirePermission(actor, writePerm("expense"));
+  if (opts.apply && opts.intoClosedDays) requirePermission(actor, "accounts.reopen");
+  const lab = await prisma.serviceDepartment.findFirst({ where: { name: "Laboratory" }, include: { costs: { where: { kind: "MATCH" } } } });
+  const rules = (lab?.costs ?? []).map((c) => ({ label: c.label, patterns: matchPatterns(c.matchText ?? "").map((p) => p.slice(1, -1)) })).filter((r) => r.patterns.length);
+  const compact = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const ruleOf = (text: string) => rules.find((r) => r.patterns.some((p) => compact(text).includes(p)))?.label ?? null;
+  const all = await prisma.expense.findMany({
+    where: { status: "ACTIVE" },
+    select: {
+      id: true,
+      date: true,
+      amount: true,
+      description: true,
+      vendor: true,
+      billNumber: true,
+      remarks: true,
+      category: { select: { name: true } },
+      subcategory: { select: { name: true } },
+    },
+    orderBy: { date: "asc" },
+  });
+  const fromBank = all.filter((e) => e.billNumber?.startsWith("BANK-"));
+  const bills = all
+    .filter((e) => !e.billNumber?.startsWith("BANK-"))
+    .map((e) => {
+      const text = `${e.vendor ?? ""} ${e.description} ${e.category.name} ${e.subcategory?.name ?? ""}`;
+      return { id: e.id, date: fromDbDate(e.date), amount: toNum(e.amount), text, rule: ruleOf(text), labLike: LAB_WORDS.test(text), used: false };
+    })
+    .filter((b) => b.rule || b.labLike);
+  const results: {
+    id: string;
+    date: string;
+    supplier: string | null;
+    amount: number;
+    status: "duplicate" | "probable" | "keep";
+    matchedBills: { date: string; amount: number; text: string }[];
+  }[] = [];
+  for (const e of fromBank) {
+    const text = `${e.vendor ?? ""} ${e.description}`;
+    const rule = ruleOf(text);
+    if (!rule && !LAB_WORDS.test(`${text} ${e.category.name} ${e.subcategory?.name ?? ""}`)) continue; // only lab entries
+    const d = fromDbDate(e.date);
+    // Bills dated up to 60 days before the payment, or up to 31 days after (entered when the invoice arrived).
+    const near = bills.filter((b) => !b.used && b.date >= addDays(d, -60) && b.date <= addDays(d, 31));
+    const dist = (b: { date: string }) => Math.abs(+new Date(b.date) - +new Date(d));
+    const same = near.filter((b) => rule && b.rule === rule).sort((a, b) => dist(a) - dist(b));
+    const generic = near.filter((b) => !b.rule).sort((a, b) => dist(a) - dist(b));
+    const amount = toNum(e.amount);
+    const hit = subsetSum(same, amount) ?? subsetSum(generic, amount);
+    const status = hit ? "duplicate" : same.length ? "probable" : "keep";
+    const matched = hit ? bills.filter((b) => hit.includes(b.id)) : [];
+    for (const b of matched) b.used = true;
+    results.push({
+      id: e.id,
+      date: d,
+      supplier: e.vendor,
+      amount,
+      status,
+      matchedBills: (hit ? matched : same.slice(0, 5)).map((b) => ({ date: b.date, amount: b.amount, text: b.text.trim().slice(0, 120) })),
+    });
+  }
+  const sumOf = (s: string) => round2(results.filter((r) => r.status === s).reduce((a, r) => a + r.amount, 0));
+  const summary = {
+    checked: results.length,
+    duplicate: { count: results.filter((r) => r.status === "duplicate").length, amount: sumOf("duplicate") },
+    probable: { count: results.filter((r) => r.status === "probable").length, amount: sumOf("probable") },
+    keep: { count: results.filter((r) => r.status === "keep").length, amount: sumOf("keep") },
+    removed: 0,
+  };
+  if (opts.apply) {
+    const remove = results.filter((r) => r.status === "duplicate" || (opts.includeProbable && r.status === "probable"));
+    const touched = new Set<ISODate>();
+    await prisma.$transaction(
+      (tx) =>
+        withBulkCache(
+          async () => {
+            for (const r of remove) {
+              await applyVoid(tx, actor, "expense", r.id, `Entered from the bank statement, but the lab bills it paid were already in the accounts (${r.status})`);
+              touched.add(r.date as ISODate);
+            }
+          },
+          { allowClosed: opts.intoClosedDays },
+        ),
+      { timeout: 120_000, maxWait: 10_000 },
+    );
+    if (opts.intoClosedDays && touched.size) await refreshClosedDays(actor, [...touched], "Duplicate lab entries from the bank removed");
+    summary.removed = remove.length;
+  }
+  return { summary, results };
 }

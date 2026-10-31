@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { createTransaction } from "@/server/services/transactions";
-import { bankReport, bankReportWorkbook, bookBankPayments, importBankStatements } from "@/server/services/bank";
+import { bankReport, bankReportWorkbook, bookBankPayments, importBankStatements, labBankDuplicates } from "@/server/services/bank";
+import { DEFAULT_DEPARTMENTS } from "@/lib/departments";
+import { saveDepartmentCost } from "@/server/services/departments";
 import { seedFixture, type Fixture } from "../helpers/db";
 
 let f: Fixture;
@@ -96,5 +98,46 @@ describe("bank statement check", () => {
     });
     await expect(bookBankPayments(f.admin, { lineIds: aduri, categoryId: f.ids.groceries })).rejects.toThrow();
     expect(await bookBankPayments(f.admin, { lineIds: aduri, categoryId: f.ids.groceries, intoClosedDays: true })).toMatchObject({ booked: 1 });
+  });
+
+  it("finds lab entries from the bank whose bills were already entered, and removes only those", async () => {
+    for (const [i, d] of DEFAULT_DEPARTMENTS.entries()) await prisma.serviceDepartment.create({ data: { ...d, sortOrder: (i + 1) * 10 } });
+    const lab = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Laboratory" } })).id;
+    for (const [label, matchText] of [
+      ["Reagents — SN Diagnostics", "SN Diagnostic"],
+      ["Reagents — Tulasi", "Tulasi Scientific"],
+      ["Reagents — Alchemy", "Alchemy Diagnostic"],
+    ])
+      await saveDepartmentCost(f.admin, null, { departmentId: lab, label, kind: "MATCH", matchText, fromMonth: "2026-01" });
+    const bill = (date: string, description: string, vendor: string | null, amount: number) =>
+      createTransaction(f.admin, "expense", { date, categoryId: f.ids.groceries, description, vendor, amount, paymentModeId: f.ids.BANK });
+    await bill("2026-01-05", "Reagents bill 101", "S N Diagnostics", 60000);
+    await bill("2026-01-12", "Reagents bill 102", "S N Diagnostics", 40000);
+    await bill("2026-05-03", "Lab reagents purchase", null, 30000);
+    await bill("2026-05-08", "Lab reagents purchase", null, 20000);
+    await bill("2026-06-01", "Kits", "Alchemy Diagnostics", 70000);
+    await bill("2026-08-02", "Reagents invoice", "S N Diagnostics", 25000); // invoice dated after the cheque
+    const st = file([
+      ["20 Jan 2026", "20 Jan 2026", "TO CLEARING-Chq 1 Sess 2 S N DIAGNOSTICS 26--1", "", "1", "1,00,000.00", " ", "0.00"],
+      ["15 May 2026", "15 May 2026", "TO CLEARING-Chq 2 Sess 2 TULASI SCIENTIFIC INS 26--2", "", "1", "50,000.00", " ", "-50,000.00"],
+      ["10 Jun 2026", "10 Jun 2026", "TO CLEARING-Chq 3 Sess 2 ALCHEMY DIAGNOSTICS D 26--3", "", "1", "45,000.00", " ", "-95,000.00"],
+      ["10 Jul 2026", "10 Jul 2026", "TO CLEARING-Chq 4 Sess 2 S N DIAGNOSTICS 26--4", "", "1", "25,000.00", " ", "-1,20,000.00"],
+    ]);
+    await importBankStatements(f.admin, [{ name: "s.xls", buf: st }]);
+    const lines = await prisma.bankLine.findMany();
+    // Entered from the bank: none of them has a same-amount bill, so all four go in (the case to undo).
+    expect(await bookBankPayments(f.admin, { lineIds: lines.map((l) => l.id), categoryId: f.ids.groceries, description: "" })).toMatchObject({ booked: 4 });
+    const chk = await labBankDuplicates(f.admin);
+    expect(chk.results.map((r) => [r.date, r.status])).toEqual([
+      ["2026-01-20", "duplicate"], // 60,000 + 40,000 named bills
+      ["2026-05-15", "duplicate"], // 30,000 + 20,000 unnamed lab bills
+      ["2026-06-10", "probable"], // Alchemy has a 70,000 bill, no exact total
+      ["2026-07-10", "duplicate"], // invoice entered 23 days after the cheque
+    ]);
+    expect(chk.summary).toMatchObject({ duplicate: { count: 3, amount: 175000 }, probable: { count: 1, amount: 45000 }, keep: { count: 0 } });
+    expect((await labBankDuplicates(f.admin, { apply: true })).summary.removed).toBe(3);
+    const left = await prisma.expense.findMany({ where: { billNumber: { startsWith: "BANK-" }, status: "ACTIVE" } });
+    expect(left.map((e) => Number(e.amount))).toEqual([45000]);
+    expect(await prisma.auditLog.count({ where: { action: "VOID", entityType: "Expense" } })).toBe(3);
   });
 });

@@ -71,6 +71,102 @@ function UploadButton({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** Lab payments entered from the bank vs the lab bills already in the core accounts: remove the duplicates. */
+function LabDuplicates({ onDone }: { onDone: () => void }) {
+  const can = useCan();
+  const toast = useToast();
+  const [data, setData] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [probable, setProbable] = useState(false);
+  const [closed, setClosed] = useState(false);
+  const check = async () => {
+    setBusy(true);
+    try {
+      setData(await apiFetch("/api/bank/lab-duplicates"));
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try {
+      const r: any = await apiFetch("/api/bank/lab-duplicates", { method: "POST", json: { includeProbable: probable, intoClosedDays: closed } });
+      toast("success", `${r.summary.removed} duplicate lab entr${r.summary.removed === 1 ? "y" : "ies"} removed`);
+      await check();
+      onDone();
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const rows = (data?.results ?? []).filter((r: any) => r.status !== "keep");
+  return (
+    <Card title="Lab entries from the bank — duplicate check">
+      <p className="text-sm muted">
+        For each lab payment entered from the bank, the lab bills that were already in the core accounts (same supplier, or any lab bill, from 60 days before to 31 days after) are
+        checked: when some of them add up exactly to the payment, the bank entry is a duplicate. &quot;Probable&quot;: the supplier has bills around then, but no exact total.
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <Button variant="secondary" onClick={check} loading={busy && !data}>
+          Check now
+        </Button>
+        {data && (
+          <span className="text-sm">
+            Checked {data.summary.checked}: <b>{data.summary.duplicate.count} duplicates</b> ({inr(data.summary.duplicate.amount)}) · {data.summary.probable.count} probable (
+            {inr(data.summary.probable.amount)}) · {data.summary.keep.count} genuinely missing — kept ({inr(data.summary.keep.amount)})
+          </span>
+        )}
+      </div>
+      {data && rows.length > 0 && (
+        <>
+          <div className="mt-3 max-h-96 overflow-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Bank date</th>
+                  <th>Supplier</th>
+                  <th className="num">Amount</th>
+                  <th>Result</th>
+                  <th>Bills already in the accounts</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r: any) => (
+                  <tr key={r.id}>
+                    <td>{r.date}</td>
+                    <td>{r.supplier}</td>
+                    <td className="num">{inr(r.amount)}</td>
+                    <td>{r.status === "duplicate" ? "Duplicate" : "Probable"}</td>
+                    <td className="text-xs">{r.matchedBills.map((b: any) => `${b.date} ${inr(b.amount)} ${b.text}`).join(" · ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {can("expense.write") && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-1 text-sm">
+                <input type="checkbox" checked={probable} onChange={(e) => setProbable(e.target.checked)} /> also remove the probable ones
+              </label>
+              {can("accounts.reopen") && (
+                <label className="flex items-center gap-1 text-sm">
+                  <input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} /> allow closed days
+                </label>
+              )}
+              <Button onClick={remove} loading={busy} disabled={!data.summary.duplicate.count && !(probable && data.summary.probable.count)}>
+                Remove {data.summary.duplicate.count + (probable ? data.summary.probable.count : 0)} entries
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
 /** Upload the reviewed payments sheet: rows marked "Yes" become expenses, each re-checked first. */
 function ReviewedUpload({ onDone }: { onDone: () => void }) {
   const can = useCan();
@@ -421,6 +517,7 @@ function Report() {
               </Button>
             )}
           </Card>
+          <LabDuplicates onDone={reload} />
           {booking && (
             <BookDialog
               row={booking}
