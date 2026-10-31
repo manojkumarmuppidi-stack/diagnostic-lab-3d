@@ -3,6 +3,8 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.26.0: Bank statement check
+- Expense heads (migration `20261108000000_donations_head`, only when missing): Donations; Equipment (capital) → Vehicles; Salaries & Wages → Partner remuneration.
+- Entries made from a bank line are tied to that line (its bill number), so two payments of the same amount never claim each other's entry; the reviewed list finds amounts with paise reliably, gives each of two identical payments its own line, and names any row it cannot find.
 - Restore: re-enters lab payments from the bank that the duplicate check removed as "probable", from a chosen month on (picked by the reason saved on each removed entry, re-checked so none is entered twice); exact duplicates stay removed.
 - "Lab entries from the bank — duplicate check": each lab payment entered from the bank is compared with the lab bills already in the core accounts (same supplier by the Laboratory rules, or any lab bill, up to 60 days before); when some bills add up exactly to the payment it is a duplicate, and "Remove" voids those entries (audited; optionally the probable ones too). Genuinely missing payments are kept.
 - "Upload reviewed list": the bank payments sheet after review ("Enter as expense?" Yes, Expense head, optional Sub-head, Department, Description) — each Yes row is found by date, amount and narration and entered through the same re-check, so payments already in the core accounts are skipped; uploading it again enters nothing.
