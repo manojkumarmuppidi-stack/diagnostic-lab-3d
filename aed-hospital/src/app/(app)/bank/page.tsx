@@ -233,7 +233,7 @@ function ReviewedUpload({ onDone }: { onDone: () => void }) {
                     ...(r.skipped ? [`${r.skipped} skipped: already in the core accounts.`] : []),
                     ...(r.notFound
                       ? [
-                          `${r.notFound} rows were not found among the bank lines in the app: upload those months' SBI statements first (Upload bank statements), then this list again.`,
+                          `${r.notFound} rows were not found among the bank lines in the app (${(r.notFoundRows ?? []).join(", ")}): upload those months' SBI statements first (Upload bank statements), then this list again.`,
                         ]
                       : []),
                   ],

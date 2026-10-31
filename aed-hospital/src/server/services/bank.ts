@@ -113,13 +113,19 @@ export async function bankReport(actor: Actor, q: { from?: string | null; to?: s
   const [expenses, purchases] = await Promise.all([
     prisma.expense.findMany({
       where: { status: { in: ["ACTIVE", "PENDING"] }, date: { gte: lo, lte: hi } },
-      select: { id: true, date: true, amount: true, description: true, vendor: true, category: { select: { name: true } } },
+      select: { id: true, date: true, amount: true, description: true, vendor: true, billNumber: true, category: { select: { name: true } } },
     }),
     prisma.pharmacyPurchase.findMany({ where: { status: "ACTIVE", date: { gte: lo, lte: hi } }, select: { id: true, date: true, amount: true, supplier: true } }),
   ]);
   const pool = new Map<string, { id: string; date: string; what: string; used: boolean }[]>();
   const key = (n: number) => Math.round(n * 100).toString();
+  // An expense entered from a bank line belongs to that line (its bill number names it), so two payments
+  // of the same amount never claim each other's entry.
+  const fromLine = new Map<string, { id: string; date: string; what: string }>();
   for (const e of expenses)
+    if (e.billNumber?.startsWith("BANK-")) fromLine.set(e.billNumber, { id: e.id, date: fromDbDate(e.date), what: `Expense: ${e.category.name} — ${e.vendor || e.description}` });
+  const linked = new Set([...fromLine.values()].map((x) => x.id));
+  for (const e of expenses.filter((x) => !linked.has(x.id)))
     pool.set(key(toNum(e.amount)), [
       ...(pool.get(key(toNum(e.amount))) ?? []),
       { id: e.id, date: fromDbDate(e.date), what: `Expense: ${e.category.name} — ${e.vendor || e.description}`, used: false },
@@ -136,6 +142,12 @@ export async function bankReport(actor: Actor, q: { from?: string | null; to?: s
     add(outBy.total, m, amt);
     if (NOT_MATCHED.includes(l.kind as BankKind)) {
       add(outBy.notExpense, m, amt);
+      continue;
+    }
+    const own = fromLine.get(`BANK-${d}-${l.id.slice(-6)}`);
+    if (own) {
+      add(outBy.matched, m, amt);
+      matchedList.push({ date: d, party: l.party, amount: amt, with: own.what, withDate: own.date });
       continue;
     }
     const cands = (pool.get(key(amt)) ?? []).filter((c) => !c.used && c.date >= addDays(d, -45) && c.date <= addDays(d, 5));
@@ -351,6 +363,8 @@ export async function bookFromReviewedSheet(actor: Actor, fileName: string, buf:
   const errors: string[] = [];
   const groups = new Map<string, { categoryId: string; subcategoryId: string | null; departmentId: string | null; description: string | null; lineIds: string[] }>();
   let notFound = 0;
+  const notFoundRows: string[] = [];
+  const picked = new Set<string>();
   for (const r of sh.rows) {
     if (!/^y/i.test(String(r.values[cYes!] ?? "").trim())) continue;
     const at = `row ${r.rowNumber}`;
@@ -380,11 +394,22 @@ export async function bookFromReviewedSheet(actor: Actor, fileName: string, buf:
       errors.push(`${at}: no department called "${r.values[cDept!]}"`);
       continue;
     }
-    const line = await prisma.bankLine.findFirst({ where: { date: toDbDate(date as ISODate), debit: amount, description: String(r.values[cNarr] ?? "").trim() } });
+    // Amounts with paise come back from Excel as binary fractions: compare to the half paisa.
+    const line = await prisma.bankLine.findFirst({
+      where: {
+        date: toDbDate(date as ISODate),
+        debit: { gte: amount - 0.005, lte: amount + 0.005 },
+        description: String(r.values[cNarr] ?? "").trim(),
+        // Two identical payments on a day are two rows: each takes its own bank line.
+        id: { notIn: [...picked] },
+      },
+    });
     if (!line) {
       notFound++;
+      notFoundRows.push(`${date} ₹${amount.toLocaleString("en-IN")} (row ${r.rowNumber})`);
       continue;
     }
+    picked.add(line.id);
     const description = cDesc ? String(r.values[cDesc] ?? "").trim() || null : null;
     const k = [cat.id, sub?.id, dept?.id, description].join("|");
     const g = groups.get(k) ?? { categoryId: cat.id, subcategoryId: sub?.id ?? null, departmentId: dept?.id ?? null, description, lineIds: [] };
@@ -401,7 +426,7 @@ export async function bookFromReviewedSheet(actor: Actor, fileName: string, buf:
     amount = round2(amount + r.amount);
     skipped += r.skipped;
   }
-  return { booked, amount, skipped, notFound };
+  return { booked, amount, skipped, notFound, notFoundRows: notFoundRows.slice(0, 20) };
 }
 
 const LAB_WORDS = /lab|reagent|diagnos|kit|scientific|pathlab|consumable|medical suppl|bio/i;
