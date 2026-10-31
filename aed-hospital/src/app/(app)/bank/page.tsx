@@ -479,7 +479,7 @@ function Report() {
                     <th>Month</th>
                     <th className="num">Paid from the bank</th>
                     <th className="num">Matched to an entry</th>
-                    <th className="num">Own transfers &amp; cash</th>
+                    <th className="num">Own transfers, cash &amp; assets</th>
                     <th className="num">Not found in core</th>
                   </tr>
                 </thead>

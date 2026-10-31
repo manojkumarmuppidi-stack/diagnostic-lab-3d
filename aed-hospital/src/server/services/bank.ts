@@ -18,6 +18,7 @@ import { audit } from "../audit";
 import { badRequest } from "../errors";
 import { withBulkCache } from "../bulk-cache";
 import { applyVoid, insertRecord } from "./transactions";
+import { assetBankLineIds } from "./assets";
 import { matchPatterns } from "./departments";
 import { refreshClosedDays } from "./daily";
 
@@ -133,6 +134,8 @@ export async function bankReport(actor: Actor, q: { from?: string | null; to?: s
   for (const p of purchases)
     pool.set(key(toNum(p.amount)), [...(pool.get(key(toNum(p.amount))) ?? []), { id: p.id, date: fromDbDate(p.date), what: `Pharmacy purchase: ${p.supplier}`, used: false }]);
   const outBy = { total: {} as Money, matched: {} as Money, notExpense: {} as Money, unmatched: {} as Money };
+  // Payments for a fixed asset (vehicle, equipment) are accounted for in the asset register.
+  const forAssets = await assetBankLineIds();
   const unmatched: { id: string; date: string; kind: string; party: string | null; description: string; amount: number }[] = [];
   const matchedList: { date: string; party: string | null; amount: number; with: string; withDate: string }[] = [];
   for (const l of lines.filter((x) => toNum(x.debit) > 0)) {
@@ -140,7 +143,7 @@ export async function bankReport(actor: Actor, q: { from?: string | null; to?: s
     const m = d.slice(0, 7);
     const amt = toNum(l.debit);
     add(outBy.total, m, amt);
-    if (NOT_MATCHED.includes(l.kind as BankKind)) {
+    if (NOT_MATCHED.includes(l.kind as BankKind) || forAssets.has(l.id)) {
       add(outBy.notExpense, m, amt);
       continue;
     }
@@ -223,7 +226,7 @@ export async function bankReportWorkbook(actor: Actor, q: { from?: string | null
   );
   sheet(
     "Money out",
-    ["Month", "Paid from bank", "Matched to core entries", "Own transfers & cash withdrawn", "Not found in core accounts"],
+    ["Month", "Paid from bank", "Matched to core entries", "Own transfers, cash & assets", "Not found in core accounts"],
     r.moneyOut.map((x) => [x.month, x.total, x.matched, x.notExpense, x.unmatched]),
     [10, 16, 22, 26, 24],
     [2, 3, 4, 5],

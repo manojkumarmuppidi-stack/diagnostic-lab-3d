@@ -1061,3 +1061,25 @@ model BankLine {
 
   @@index([date])
 }
+
+/// A fixed asset (vehicle, equipment): recorded once at cost — not an expense — and depreciated
+/// each financial year (April–March); the year's depreciation is posted as an expense when the year
+/// is closed. bankLineIds are the bank payments that bought it, so the bank check counts them as paid.
+model FixedAsset {
+  id              String   @id @default(cuid())
+  name            String
+  category        String   @default("Vehicles")
+  purchaseDate    DateTime @db.Date
+  cost            Decimal  @db.Decimal(14, 2)
+  /// "SLM" (straight line over usefulLifeYears down to residualPct) or "WDV" (ratePct of the book value each year).
+  method          String   @default("SLM")
+  usefulLifeYears Int      @default(8)
+  residualPct     Decimal  @default(5) @db.Decimal(5, 2)
+  ratePct         Decimal  @default(15) @db.Decimal(5, 2)
+  bankLineIds     String[] @default([])
+  notes           String?
+  active          Boolean  @default(true)
+  createdById     String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
