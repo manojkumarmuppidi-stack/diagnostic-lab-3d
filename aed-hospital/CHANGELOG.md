@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.26.0: Bank statement check
+- Restore: re-enters lab payments from the bank that the duplicate check removed as "probable", from a chosen month on (picked by the reason saved on each removed entry, re-checked so none is entered twice); exact duplicates stay removed.
 - "Lab entries from the bank — duplicate check": each lab payment entered from the bank is compared with the lab bills already in the core accounts (same supplier by the Laboratory rules, or any lab bill, up to 60 days before); when some bills add up exactly to the payment it is a duplicate, and "Remove" voids those entries (audited; optionally the probable ones too). Genuinely missing payments are kept.
 - "Upload reviewed list": the bank payments sheet after review ("Enter as expense?" Yes, Expense head, optional Sub-head, Department, Description) — each Yes row is found by date, amount and narration and entered through the same re-check, so payments already in the core accounts are skipped; uploading it again enters nothing.
 - "Enter as expenses" on a payee with payments not found in the core accounts: choose the expense head (and sub-head, department) and each payment becomes one expense on the bank's date, paid by UPI or bank, with the payee as vendor. Each is checked again first, so a payment that already matches an expense is skipped and nothing is entered twice; closed days need the Admin's "allow closed days" (their totals are refreshed).

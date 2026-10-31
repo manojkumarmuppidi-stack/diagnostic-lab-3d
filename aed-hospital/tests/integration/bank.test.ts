@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { createTransaction } from "@/server/services/transactions";
-import { bankReport, bankReportWorkbook, bookBankPayments, importBankStatements, labBankDuplicates } from "@/server/services/bank";
+import { bankReport, bankReportWorkbook, bookBankPayments, importBankStatements, labBankDuplicates, restoreProbableLab } from "@/server/services/bank";
 import { DEFAULT_DEPARTMENTS } from "@/lib/departments";
 import { saveDepartmentCost } from "@/server/services/departments";
 import { seedFixture, type Fixture } from "../helpers/db";
@@ -139,5 +139,11 @@ describe("bank statement check", () => {
     const left = await prisma.expense.findMany({ where: { billNumber: { startsWith: "BANK-" }, status: "ACTIVE" } });
     expect(left.map((e) => Number(e.amount))).toEqual([45000]);
     expect(await prisma.auditLog.count({ where: { action: "VOID", entityType: "Expense" } })).toBe(3);
+    // Probable ones removed too, then restored from June: only the June probable entry comes back.
+    expect((await labBankDuplicates(f.admin, { apply: true, includeProbable: true })).summary.removed).toBe(1);
+    expect(await prisma.expense.count({ where: { billNumber: { startsWith: "BANK-" }, status: "ACTIVE" } })).toBe(0);
+    expect(await restoreProbableLab(f.admin, { from: "2026-06-01" })).toMatchObject({ removedFound: 1, booked: 1, amount: 45000, skipped: 0 });
+    expect((await prisma.expense.findMany({ where: { billNumber: { startsWith: "BANK-" }, status: "ACTIVE" } })).map((e) => Number(e.amount))).toEqual([45000]);
+    expect(await restoreProbableLab(f.admin, { from: "2026-06-01" })).toMatchObject({ booked: 0, skipped: 1 });
   });
 });

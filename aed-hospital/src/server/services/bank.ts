@@ -524,3 +524,41 @@ export async function labBankDuplicates(actor: Actor, opts: { apply?: boolean; i
   }
   return { summary, results };
 }
+
+/**
+ * Re-enters lab payments from the bank that the duplicate check removed as "probable", dated from
+ * `from` on — exactly those (picked by their saved reason), through bookBankPayments, so each is checked
+ * again and none is entered twice. Exact duplicates stay removed.
+ */
+export async function restoreProbableLab(actor: Actor, raw: { from?: string | null; intoClosedDays?: boolean }) {
+  requirePermission(actor, writePerm("expense"));
+  if (!isISODate(raw.from ?? "")) throw badRequest("Choose the first month to restore");
+  const removed = await prisma.expense.findMany({
+    where: { status: "VOIDED", billNumber: { startsWith: "BANK-" }, voidReason: { contains: "(probable)" }, date: { gte: toDbDate(raw.from as ISODate) } },
+    select: { billNumber: true, date: true, categoryId: true, subcategoryId: true, departmentId: true },
+  });
+  const groups = new Map<string, { categoryId: string; subcategoryId: string | null; departmentId: string | null; lineIds: string[] }>();
+  let missing = 0;
+  for (const e of removed) {
+    const suffix = e.billNumber!.split("-").pop()!;
+    const line = await prisma.bankLine.findFirst({ where: { date: e.date, id: { endsWith: suffix } } });
+    if (!line) {
+      missing++;
+      continue;
+    }
+    const k = [e.categoryId, e.subcategoryId, e.departmentId].join("|");
+    const g = groups.get(k) ?? { categoryId: e.categoryId, subcategoryId: e.subcategoryId, departmentId: e.departmentId, lineIds: [] };
+    if (!g.lineIds.includes(line.id)) g.lineIds.push(line.id);
+    groups.set(k, g);
+  }
+  let booked = 0;
+  let amount = 0;
+  let skipped = 0;
+  for (const g of groups.values()) {
+    const r = await bookBankPayments(actor, { ...g, intoClosedDays: raw.intoClosedDays });
+    booked += r.booked;
+    amount = round2(amount + r.amount);
+    skipped += r.skipped;
+  }
+  return { removedFound: removed.length, booked, amount, skipped, missing };
+}

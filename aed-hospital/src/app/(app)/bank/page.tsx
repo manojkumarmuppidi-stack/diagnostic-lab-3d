@@ -102,6 +102,21 @@ function LabDuplicates({ onDone }: { onDone: () => void }) {
       setBusy(false);
     }
   };
+  const [restoreFrom, setRestoreFrom] = useState("2026-05");
+  const restore = async () => {
+    if (!confirm(`Re-enter the lab payments from ${restoreFrom} onwards that were removed as "probable"?`)) return;
+    setBusy(true);
+    try {
+      const r: any = await apiFetch("/api/bank/restore", { method: "POST", json: { from: `${restoreFrom}-01`, intoClosedDays: closed } });
+      toast("success", `${r.booked} entr${r.booked === 1 ? "y" : "ies"} restored, ${formatINR(r.amount)}${r.skipped ? ` · ${r.skipped} skipped (already in the accounts)` : ""}`);
+      if (data) await check();
+      onDone();
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
   const rows = (data?.results ?? []).filter((r: any) => r.status !== "keep");
   return (
     <Card title="Lab entries from the bank — duplicate check">
@@ -120,6 +135,21 @@ function LabDuplicates({ onDone }: { onDone: () => void }) {
           </span>
         )}
       </div>
+      {can("expense.write") && (
+        <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3" style={{ borderColor: "var(--border)" }}>
+          <Field label='Restore entries removed as "probable", from'>
+            <input type="month" className="input" value={restoreFrom} onChange={(e) => setRestoreFrom(e.target.value)} />
+          </Field>
+          {can("accounts.reopen") && (
+            <label className="flex items-center gap-1 pb-2 text-sm">
+              <input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} /> allow closed days
+            </label>
+          )}
+          <Button variant="secondary" onClick={restore} loading={busy} disabled={!restoreFrom}>
+            Restore
+          </Button>
+        </div>
+      )}
       {data && rows.length > 0 && (
         <>
           <div className="mt-3 max-h-96 overflow-auto">
