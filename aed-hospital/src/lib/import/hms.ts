@@ -40,7 +40,19 @@ export interface ConvertedSheet extends RawSheet {
   note: string;
   source: HmsReport;
 }
-export type HmsReport = "oneglance-opd" | "oneglance-opd-collection" | "oneglance-pharmacy-bills" | "oneglance-lab-items" | "oneglance-pharmacy-daily" | "oneglance-lab-bills" | "oneglance-pharmacy-item-sales" | "oneglance-pharmacy-item-summary" | "oneglance-pharmacy-item-purchases" | "oneglance-supplier-payments" | "cash-book" | "jj-wellness-packages";
+export type HmsReport =
+  | "oneglance-opd"
+  | "oneglance-opd-collection"
+  | "oneglance-pharmacy-bills"
+  | "oneglance-lab-items"
+  | "oneglance-pharmacy-daily"
+  | "oneglance-lab-bills"
+  | "oneglance-pharmacy-item-sales"
+  | "oneglance-pharmacy-item-summary"
+  | "oneglance-pharmacy-item-purchases"
+  | "oneglance-supplier-payments"
+  | "cash-book"
+  | "jj-wellness-packages";
 
 export const HMS_LABELS: Record<HmsReport, string> = {
   "oneglance-opd": "OneGlance · Outpatient Collection Report",
@@ -109,7 +121,11 @@ export function cleanDoctor(raw: string): string {
 
 /** "Mrs.LAXMI B(49)", "Mr.Srinivas K+(41)" → "Mrs.LAXMI B", "Mr.Srinivas K". */
 export function cleanPatient(raw: string): string {
-  return raw.replace(/\(\s*\d{1,3}\s*\)\s*$/, "").replace(/\+\s*$/, "").replace(/\s+/g, " ").trim();
+  return raw
+    .replace(/\(\s*\d{1,3}\s*\)\s*$/, "")
+    .replace(/\+\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const cleanText = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -151,15 +167,7 @@ export function visitTypeFor(particulars: string): "New" | "Old" | null {
 
 type Out = { rowNumber: number; values: Record<string, Cell> };
 
-function byMonth(
-  source: HmsReport,
-  sheetName: string,
-  type: ImportType,
-  label: string,
-  headers: string[],
-  rows: Out[],
-  note: string,
-): ConvertedSheet[] {
+function byMonth(source: HmsReport, sheetName: string, type: ImportType, label: string, headers: string[], rows: Out[], note: string): ConvertedSheet[] {
   const groups = new Map<string, Out[]>();
   for (const r of rows) {
     const k = monthKey(String(r.values.Date ?? ""));
@@ -183,13 +191,30 @@ const NO_MODE = "Payment mode not in OneGlance export";
 
 // ─────────────────────────── converters ───────────────────────────
 
-const OPD_HEADERS = ["Date", "Patient ID", "Patient Name", "Doctor", "Specialty", "Consultation Type", "New/Old", "Amount", "Discount", "Net Amount", "Payment Mode", "Reference", "Remarks"];
+const OPD_HEADERS = [
+  "Date",
+  "Patient ID",
+  "Patient Name",
+  "Doctor",
+  "Specialty",
+  "Consultation Type",
+  "New/Old",
+  "Amount",
+  "Discount",
+  "Net Amount",
+  "Payment Mode",
+  "Reference",
+  "Remarks",
+];
 const DIET_HEADERS = ["Date", "Patient ID", "Patient Name", "Service", "Amount", "Discount", "Net Amount", "Payment Mode", "Reference", "Remarks"];
 
 function convertOpd(sheet: RawSheet): ConvertedSheet[] {
   const src = sheet.rows.map((r) => ({ rowNumber: r.rowNumber, g: getter(r.values) }));
   // Patient IDs are sequential, so the lowest ID billed as "new" marks where this period's registrations start.
-  const newIds = src.filter((r) => visitTypeFor(r.g("Particulars")) === "New").map((r) => num(r.g("Patientid"))).filter((n) => n > 0);
+  const newIds = src
+    .filter((r) => visitTypeFor(r.g("Particulars")) === "New")
+    .map((r) => num(r.g("Patientid")))
+    .filter((n) => n > 0);
   const firstNewId = newIds.length ? Math.min(...newIds) : Infinity;
   const seen = new Set<string>();
   const opd: Out[] = [];
@@ -239,10 +264,7 @@ function convertOpd(sheet: RawSheet): ConvertedSheet[] {
     `. Specialty and New/Old are read from the consultation name` +
     (inferred ? `; ${inferred} bills whose name does not say New/Old were set from the patient's registration number` : "") +
     `. The export has no payment mode, so bills are recorded under "Other".`;
-  return [
-    ...byMonth("oneglance-opd", sheet.name, "opd", "OPD", OPD_HEADERS, opd, note),
-    ...byMonth("oneglance-opd", sheet.name, "diet", "Diet", DIET_HEADERS, diet, note),
-  ];
+  return [...byMonth("oneglance-opd", sheet.name, "opd", "OPD", OPD_HEADERS, opd, note), ...byMonth("oneglance-opd", sheet.name, "diet", "Diet", DIET_HEADERS, diet, note)];
 }
 
 /**
@@ -251,7 +273,12 @@ function convertOpd(sheet: RawSheet): ConvertedSheet[] {
  * than every ID billed before it (in bill-number order) is a new registration; "new"/"follow up" in
  * Visit Purpose wins when present. Specialty comes from Visit Purpose when it names one, else General.
  */
-const MODE_COLUMNS: [string, string][] = [["Cash", "Cash"], ["Online", "UPI"], ["Cheque", "Cheque"], ["OneGlance Wallet", "Other"]];
+const MODE_COLUMNS: [string, string][] = [
+  ["Cash", "Cash"],
+  ["Online", "UPI"],
+  ["Cheque", "Cheque"],
+  ["OneGlance Wallet", "Other"],
+];
 function convertOpdCollection(sheet: RawSheet): ConvertedSheet[] {
   const src = sheet.rows.map((r) => ({ rowNumber: r.rowNumber, g: getter(r.values) })).filter((r) => r.g("BillNo") && r.g("Bill Date"));
   const ordered = [...src].sort((a, b) => num(a.g("BillNo")) - num(b.g("BillNo")));
@@ -296,6 +323,9 @@ function convertOpdCollection(sheet: RawSheet): ConvertedSheet[] {
     const area = cleanText(g("Area"));
     if (refBy) notes.push(`Ref: ${refBy}`);
     if (area) notes.push(`Area: ${area}`);
+    // With Particulars as the name, Visit Purpose is kept in Remarks: it says who looked after the patient
+    // ("F/u by spandana"), which department accounts use for that person's incentive.
+    if (item && purpose && purpose.toLowerCase() !== item.toLowerCase() && !/^consultation$/i.test(purpose)) notes.push(`Visit: ${purpose}`);
     const base = {
       Date: g("Bill Date"),
       "Patient ID": pid,
@@ -321,7 +351,8 @@ function convertOpdCollection(sheet: RawSheet): ConvertedSheet[] {
     (split ? `; ${split} bills paid in two modes are recorded under the larger one (split in Remarks)` : "") +
     (unpaid ? `; ${unpaid} bills with no payment are recorded under Other` : "") +
     (withItems
-      ? `. Consultation, specialty and New/Old are read from Particulars (the billed item)` + (withItems < opd.length + diet.length ? `; bills without Particulars use Visit Purpose. ` : ". ")
+      ? `. Consultation, specialty and New/Old are read from Particulars (the billed item)` +
+        (withItems < opd.length + diet.length ? `; bills without Particulars use Visit Purpose. ` : ". ")
       : `. This export has no consultation name, so specialty is General unless Visit Purpose names one, and New/Old comes from the patient registration number. `) +
     `Bills already in the app (same OP bill number and date) are flagged as duplicates.`;
   return [
@@ -330,7 +361,21 @@ function convertOpdCollection(sheet: RawSheet): ConvertedSheet[] {
   ];
 }
 
-const LAB_HEADERS = ["Date", "Patient ID", "Patient Name", "Investigation", "Quantity", "Rate", "Discount", "Net Amount", "Payment Mode", "Doctor", "Department", "Reference", "Remarks"];
+const LAB_HEADERS = [
+  "Date",
+  "Patient ID",
+  "Patient Name",
+  "Investigation",
+  "Quantity",
+  "Rate",
+  "Discount",
+  "Net Amount",
+  "Payment Mode",
+  "Doctor",
+  "Department",
+  "Reference",
+  "Remarks",
+];
 
 function convertLabItems(sheet: RawSheet): ConvertedSheet[] {
   const out: Out[] = [];
@@ -411,14 +456,32 @@ function convertPharmacyDaily(sheet: RawSheet): ConvertedSheet[] {
     for (const [mode, amount] of byMode) {
       out.push({
         rowNumber: r.rowNumber,
-        values: { Date: date, Invoice: `PH-DAY-${stamp}-${mode.toUpperCase()}`, Sales: amount, Discount: 0, Return: 0, "Net Sales": amount, "Payment Mode": mode, Remarks: summary },
+        values: {
+          Date: date,
+          Invoice: `PH-DAY-${stamp}-${mode.toUpperCase()}`,
+          Sales: amount,
+          Discount: 0,
+          Return: 0,
+          "Net Sales": amount,
+          "Payment Mode": mode,
+          Remarks: summary,
+        },
       });
     }
     // Refunds are their own entry: the export does not say which mode they were paid back in.
     if (refund > 0) {
       out.push({
         rowNumber: r.rowNumber,
-        values: { Date: date, Invoice: `PH-DAY-${stamp}-REFUND`, Sales: null, Discount: null, Return: refund, "Net Sales": null, "Payment Mode": "Other", Remarks: `Refunds for the day (mode not in export) · ${summary}` },
+        values: {
+          Date: date,
+          Invoice: `PH-DAY-${stamp}-REFUND`,
+          Sales: null,
+          Discount: null,
+          Return: refund,
+          "Net Sales": null,
+          "Payment Mode": "Other",
+          Remarks: `Refunds for the day (mode not in export) · ${summary}`,
+        },
       });
     }
   }
@@ -509,7 +572,10 @@ function convertPharmacyBills(sheet: RawSheet): ConvertedSheet[] {
     `${out.length.toLocaleString("en-IN")} Hormonal Pharmacy bills (₹${Math.round(sum).toLocaleString("en-IN")} after discount), each with its payment mode — Cash, Card, Cheque, Online (UPI), PhonePe, GPay` +
     (split ? `; ${split} bills paid in two modes are recorded under the larger one (split in Remarks)` : "") +
     (unpaid ? `; ${unpaid} bills with no payment recorded are under Other` : "") +
-    (deposit > 0 ? `; ₹${Math.round(deposit).toLocaleString("en-IN")} paid from IPD deposits left out (already IPD income)` + (depositOnly ? `, ${depositOnly} bills paid fully from deposit skipped` : "") : "") +
+    (deposit > 0
+      ? `; ₹${Math.round(deposit).toLocaleString("en-IN")} paid from IPD deposits left out (already IPD income)` +
+        (depositOnly ? `, ${depositOnly} bills paid fully from deposit skipped` : "")
+      : "") +
     `. Days that already have pharmacy daily totals in the app are flagged as duplicates, so nothing is counted twice.`;
   return byMonth("oneglance-pharmacy-bills", sheet.name, "pharmacy-sale", "Pharmacy bills", PHARMACY_BILL_HEADERS, out, note);
 }
@@ -658,7 +724,14 @@ function convertPharmacyItemPurchases(sheet: RawSheet): ConvertedSheet[] {
   }
   const purchases: Out[] = [...invoices.values()].map((i) => ({
     rowNumber: i.rowNumber,
-    values: { Date: i.date, Supplier: i.supplier, Invoice: i.invoice, "Purchase Amount": i.amount, "Payment Mode": "", Remarks: `OneGlance purchase invoice · ${i.lines} line${i.lines > 1 ? "s" : ""}` },
+    values: {
+      Date: i.date,
+      Supplier: i.supplier,
+      Invoice: i.invoice,
+      "Purchase Amount": i.amount,
+      "Payment Mode": "",
+      Remarks: `OneGlance purchase invoice · ${i.lines} line${i.lines > 1 ? "s" : ""}`,
+    },
   }));
   const total = purchases.reduce((a, p) => a + Number(p.values["Purchase Amount"]), 0);
   const note =
@@ -677,7 +750,10 @@ const PAYMENT_HEADERS = ["Date", "Supplier", "Details", "Amount paid"];
 function convertSupplierPayments(sheet: RawSheet): ConvertedSheet[] {
   const out: Out[] = sheet.rows.map((r) => {
     const g = getter(r.values);
-    return { rowNumber: r.rowNumber, values: { Date: g("Paid date"), Supplier: cleanText(g("Stockiest Name")), Details: cleanText(g("Details")), "Amount paid": num(g("Paid Amount")) } };
+    return {
+      rowNumber: r.rowNumber,
+      values: { Date: g("Paid date"), Supplier: cleanText(g("Stockiest Name")), Details: cleanText(g("Details")), "Amount paid": num(g("Paid Amount")) },
+    };
   });
   const total = out.reduce((a, r) => a + Number(r.values["Amount paid"]), 0);
   const note =
@@ -710,8 +786,10 @@ export function fixLedgerDates(raw: string[]): { dates: string[]; swapped: numbe
     const s = String(v ?? "").trim();
     let y: number, a: number, b: number;
     let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
-    if (m) [y, a, b] = [+m[1], +m[2], +m[3]]; // Excel date: month a, day b
-    else if ((m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(s))) [y, a, b] = [+m[3] < 100 ? 2000 + +m[3] : +m[3], +m[2], +m[1]]; // typed text, day-first
+    if (m)
+      [y, a, b] = [+m[1], +m[2], +m[3]]; // Excel date: month a, day b
+    else if ((m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/.exec(s)))
+      [y, a, b] = [+m[3] < 100 ? 2000 + +m[3] : +m[3], +m[2], +m[1]]; // typed text, day-first
     else return [] as string[];
     const first = isoOf(y, a, b);
     const other = a !== b ? isoOf(y, b, a) : null;
@@ -770,7 +848,10 @@ function convertCashBook(sheet: RawSheet): ConvertedSheet[] {
     const mode = suggestModeCode(debit);
     const [y, m, d] = (dates[i] || "").split("-");
     if (supplierPayment) {
-      supplier.push({ rowNumber: r.rowNumber, values: { Date: dates[i] ? `${d}-${m}-${y}` : "", Supplier: vendorFrom(desc) ?? desc, Details: `Cash book: ${desc}`, "Amount paid": r2(debit) } });
+      supplier.push({
+        rowNumber: r.rowNumber,
+        values: { Date: dates[i] ? `${d}-${m}-${y}` : "", Supplier: vendorFrom(desc) ?? desc, Details: `Cash book: ${desc}`, "Amount paid": r2(debit) },
+      });
       return;
     }
     out.push({
@@ -878,7 +959,8 @@ function convertJjPackages(sheet: RawSheet): ConvertedSheet[] {
   return byMonth("jj-wellness-packages", sheet.name, "other-income", "JJ Wellness packages", OTHER_INCOME_HEADERS, out, note);
 }
 
-const JJ_SKIPPED = "Not imported from the JJ Wellness workbook: consultations (₹200) and BMI (₹450) are billed in OneGlance, injections are Hormonal Pharmacy bills, and the other tabs are registers.";
+const JJ_SKIPPED =
+  "Not imported from the JJ Wellness workbook: consultations (₹200) and BMI (₹450) are billed in OneGlance, injections are Hormonal Pharmacy bills, and the other tabs are registers.";
 
 /** A JJ Wellness workbook: its package tab is converted and its other tabs are left out (see JJ_SKIPPED). */
 export function convertJjWorkbook(sheets: RawSheet[]): ConvertedSheet[] | null {

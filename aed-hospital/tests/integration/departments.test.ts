@@ -630,4 +630,44 @@ describe("department accounts", () => {
     wb.getWorksheet("Payments")!.addRow(["2026-10-05", "GEETHA P", 100, "x", "Yes", "Doctor & consultant fees"]);
     await expect(importDepartmentWorkbook(f.admin, null, "g.xlsx", Buffer.from(await wb.xlsx.writeBuffer()))).rejects.toThrow(/Upload reviewed list/);
   });
+
+  it("pays each person their % of their own cases, found on the bills by name (a month entered by hand wins)", async () => {
+    const scp = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "SCP — Sugar Control Plans" } })).id;
+    const named = (await createMaster(f.admin, "consultationTypes", { name: "F/u by spandana", defaultRate: 3000, scp: true })) as { id: string };
+    const plain = (await createMaster(f.admin, "consultationTypes", { name: "Sugar Control Plan", defaultRate: 3000, scp: true })) as { id: string };
+    const bill = (date: string, typeId: string, amount: number, remarks?: string) =>
+      createTransaction(f.admin, "opd", {
+        date,
+        patientCode: `P${amount}${date}`,
+        patientName: "DEMO",
+        specialtyId: f.ids.diabetes,
+        visitType: "OLD",
+        consultationTypeId: typeId,
+        grossAmount: amount,
+        discount: 0,
+        paymentModeId: f.ids.CASH,
+        remarks,
+      });
+    await bill("2026-09-03", named.id, 10000);
+    await bill("2026-09-04", plain.id, 20000, "Visit: F/u by Spadana");
+    await bill("2026-09-05", plain.id, 30000, "Visit: F/u by bhagya");
+    await bill("2026-09-06", plain.id, 5000, "Visit: virtual admission by teju");
+    await bill("2026-10-07", plain.id, 40000, "Visit: F/U BY Bhgaya");
+    const sp = await saveContributor(f.admin, null, { departmentId: scp, name: "Spandana", incentivePct: 18, matchText: "Spandana, Spadana, Spandna" });
+    const bh = await saveContributor(f.admin, null, { departmentId: scp, name: "Bhagya Lakshmi", incentivePct: 18, matchText: "Bhagya, Bhgaya" });
+    // The % box saves the % alone: the names stay.
+    await saveContributor(f.admin, bh.id, { departmentId: scp, name: "Bhagya Lakshmi", incentivePct: 18 });
+    await setContributorIncome(f.admin, bh.id, { month: "2026-10", amount: 1000 }); // entered by hand: wins over the bills
+    const st = (await departmentAccounts(f.admin, { from: "2026-09-01", to: "2026-10-31" })).statements.find((s) => s.id === scp)!;
+    const who = Object.fromEntries(st.contributors.map((c) => [c.name, [c.generated, c.totalIncentive]]));
+    expect(who).toEqual({
+      "Bhagya Lakshmi": [{ "2026-09": 30000, "2026-10": 1000 }, 5580],
+      Spandana: [{ "2026-09": 30000 }, 5400],
+    });
+    expect(st.costLines.filter((l) => l.label.startsWith("Incentive")).map((l) => [l.label, l.total])).toEqual([
+      ["Incentive — Bhagya Lakshmi", 5580],
+      ["Incentive — Spandana", 5400],
+    ]);
+    expect(sp.matchText).toBe("Spandana, Spadana, Spandna");
+  });
 });

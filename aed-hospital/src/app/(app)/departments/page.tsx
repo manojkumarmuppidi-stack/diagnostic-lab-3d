@@ -780,7 +780,34 @@ function Contributors({ st, months, onChanged }: { st: any; months: string[]; on
             <tbody>
               {st.contributors.map((c: any) => (
                 <tr key={c.id}>
-                  <td className="whitespace-nowrap font-medium">{c.name}</td>
+                  <td className="whitespace-nowrap">
+                    <div className="font-medium">{c.name}</div>
+                    <div className="text-xs muted">
+                      {c.matchText ? `Found on bills as: ${c.matchText}` : "Income entered by hand"}
+                      {admin && (
+                        <button
+                          className="ml-2 underline"
+                          onClick={() => {
+                            const v = prompt(
+                              `Names ${c.name}'s bills carry, separated by commas (e.g. Spandana, Spadana, Spandna). Their income is then added up from the bills each month; a month entered by hand takes precedence. Leave empty to enter it by hand only.`,
+                              c.matchText ?? "",
+                            );
+                            if (v === null) return;
+                            run(
+                              () =>
+                                apiFetch(`/api/departments/contributors/${c.id}`, {
+                                  method: "PATCH",
+                                  json: { departmentId: st.id, name: c.name, incentivePct: c.incentivePct, matchText: v },
+                                }),
+                              "Saved",
+                            );
+                          }}
+                        >
+                          {c.matchText ? "change" : "find on bills"}
+                        </button>
+                      )}
+                    </div>
+                  </td>
                   <td className="num">
                     {admin ? (
                       <input

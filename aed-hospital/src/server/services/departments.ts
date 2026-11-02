@@ -272,7 +272,7 @@ async function departmentProfit(
     toMonth: string | null;
   }[],
   medicineRows: { m: string; name: string; amount: Prisma.Decimal; taxable: Prisma.Decimal | null; cost: Prisma.Decimal | null; nocost: bigint }[],
-  contributors: { id: string; departmentId: string; name: string; incentivePct: Prisma.Decimal; incomes: { month: string; amount: Prisma.Decimal }[] }[],
+  contributors: { id: string; departmentId: string; name: string; incentivePct: Prisma.Decimal; matchText: string | null; incomes: { month: string; amount: Prisma.Decimal }[] }[],
   range: { from: ISODate; to: ISODate; fmt: string },
 ) {
   // MATCH costs: the hospital's own expenses for this person/thing, picked up by description or vendor.
@@ -321,6 +321,24 @@ async function departmentProfit(
       const owner = pharmacyDepartmentFor(depts, r.name);
       if (owner && owner.id !== pharmacyDept.id && r.cost !== null) addTo(pharmacy.credited, r.m, round2(toNum(r.taxable) - toNum(r.cost)));
     }
+  }
+  // Income each person generated, found on their bills: the department's consultations whose name or
+  // remarks (OneGlance's Visit purpose) carry one of their names, by calendar month.
+  const autoIncome = new Map<string, Money>();
+  for (const c of contributors.filter((x) => x.matchText)) {
+    const patterns = matchPatterns(c.matchText!);
+    const names = departments.find((x) => x.id === c.departmentId)?.items.map((i) => i.name) ?? [];
+    if (!patterns.length || !names.length || !calendarMonths.length) continue;
+    const rows = await prisma.$queryRaw<{ m: string; amount: Prisma.Decimal }[]>`
+      SELECT to_char(v.date, 'YYYY-MM') AS m, SUM(v.amount) AS amount
+        FROM v_income_line v
+        JOIN "Consultation" cn ON v.source_table = 'Consultation' AND cn.id = v.source_id
+        JOIN "ConsultationType" ct ON ct.id = cn."consultationTypeId"
+       WHERE v.date BETWEEN ${toDbDate(`${calendarMonths[0]}-01` as ISODate)} AND ${toDbDate(endOfMonth(`${calendarMonths[calendarMonths.length - 1]}-01` as ISODate))}
+         AND ct.name = ANY(${names})
+         AND regexp_replace(lower(ct.name || ' ' || COALESCE(cn.remarks, '')), '[^a-z0-9]+', '', 'g') LIKE ANY(${patterns})
+       GROUP BY 1`;
+    autoIncome.set(c.id, Object.fromEntries(rows.map((r) => [r.m, toNum(r.amount)])));
   }
   const statements = depts.map((d) => {
     const g = departments.find((x) => x.id === d.id)!;
@@ -393,7 +411,9 @@ async function departmentProfit(
       .filter((c) => c.departmentId === d.id)
       .map((c) => {
         const pct = toNum(c.incentivePct);
+        // Found on their bills, unless the month was entered by hand.
         const generated: Money = {};
+        for (const [m, v] of Object.entries(autoIncome.get(c.id) ?? {})) if (calendarMonths.includes(m) && v) generated[m] = v;
         for (const i of c.incomes) if (calendarMonths.includes(i.month)) generated[i.month] = toNum(i.amount);
         const pay: Money = {};
         for (const m of months) {
@@ -402,7 +422,7 @@ async function departmentProfit(
           const v = round2(byDay ? monthly / daysIn(month) : monthly);
           if (v) pay[m] = v;
         }
-        return { id: c.id, name: c.name, incentivePct: pct, generated, totalGenerated: sum(generated), incentive: pay, totalIncentive: sum(pay) };
+        return { id: c.id, name: c.name, incentivePct: pct, matchText: c.matchText, generated, totalGenerated: sum(generated), incentive: pay, totalIncentive: sum(pay) };
       });
     for (const p of people)
       if (p.totalIncentive)
@@ -630,6 +650,7 @@ const contributorInput = z.object({
   departmentId: z.string().min(1),
   name: z.string().trim().min(1).max(80),
   incentivePct: z.coerce.number().min(0).max(100).default(0),
+  matchText: z.string().trim().max(200).nullable().optional(),
   active: z.boolean().default(true),
 });
 
@@ -642,7 +663,9 @@ export async function saveContributor(actor: Actor, id: string | null, raw: unkn
   return prisma.$transaction(async (tx) => {
     const before = id ? await tx.departmentContributor.findUnique({ where: { id } }) : null;
     if (id && !before) throw notFound("Person not found");
-    const saved = id ? await tx.departmentContributor.update({ where: { id }, data: c }) : await tx.departmentContributor.create({ data: { ...c, createdById: actor.id } });
+    // Names on bills change only when sent (the % box saves the % alone).
+    const data = { ...c, matchText: c.matchText === undefined ? undefined : c.matchText || null };
+    const saved = id ? await tx.departmentContributor.update({ where: { id }, data }) : await tx.departmentContributor.create({ data: { ...data, createdById: actor.id } });
     await audit(tx, actor, {
       action: id ? "DEPT_CONTRIBUTOR_UPDATE" : "DEPT_CONTRIBUTOR_CREATE",
       entityType: "DepartmentContributor",
@@ -819,7 +842,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     );
   const key = (h: string) => norm(h);
   const costs: { departmentId: string; label: string; amount: number; percent: number; matchText: string | null; fromMonth: string; toMonth: string | null; row: number }[] = [];
-  const people: { name: string; pct: number; incomes: [string, number | null][]; row: number }[] = [];
+  const people: { name: string; pct: number; matchText: string | null; incomes: [string, number | null][]; row: number }[] = [];
   const errors: string[] = [];
   const staff: { label: string; names: string; parts: { departmentId: string; percent: number }[] }[] = [];
   const payroll: { name: string; amount: number; month: string }[] = [];
@@ -992,6 +1015,7 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
       }
     } else if (personCol) {
       const pctCol = col("incentive %", "incentive", "incentive percent");
+      const billsCol = col("bills mentioning", "bills with", "found on bills as");
       const monthCols = sh.headers.map((h) => [h, monthOf(h)] as const).filter(([, m]) => m) as [string, string][];
       for (const r of sh.rows) {
         const name = String(r.values[personCol] ?? "").trim();
@@ -1007,7 +1031,12 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
           if (Number.isNaN(a) || (a !== null && a < 0)) errors.push(`${sh.name} row ${r.rowNumber}, ${h}: not an amount`);
           else incomes.push([m, a]);
         }
-        people.push({ name: name.slice(0, 80), pct: round2(pct), incomes, row: r.rowNumber });
+        const matchText = billsCol
+          ? String(r.values[billsCol] ?? "")
+              .trim()
+              .slice(0, 200) || null
+          : null;
+        people.push({ name: name.slice(0, 80), pct: round2(pct), matchText, incomes, row: r.rowNumber });
       }
     }
   }
@@ -1130,8 +1159,8 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     for (const p of people) {
       const existing = await tx.departmentContributor.findFirst({ where: { departmentId: dept!.id, name: p.name } });
       const person = existing
-        ? await tx.departmentContributor.update({ where: { id: existing.id }, data: { incentivePct: p.pct, active: true } })
-        : await tx.departmentContributor.create({ data: { departmentId: dept!.id, name: p.name, incentivePct: p.pct, createdById: actor.id } });
+        ? await tx.departmentContributor.update({ where: { id: existing.id }, data: { incentivePct: p.pct, active: true, ...(p.matchText ? { matchText: p.matchText } : {}) } })
+        : await tx.departmentContributor.create({ data: { departmentId: dept!.id, name: p.name, incentivePct: p.pct, matchText: p.matchText, createdById: actor.id } });
       for (const [month, amount] of p.incomes) {
         if (amount) {
           await tx.contributorIncome.upsert({

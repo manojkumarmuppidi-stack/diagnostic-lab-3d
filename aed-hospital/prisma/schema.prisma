@@ -1001,6 +1001,9 @@ model DepartmentContributor {
   department   ServiceDepartment   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   name         String
   incentivePct Decimal             @default(0) @db.Decimal(5, 2)
+  /// Names their bills carry ("F/u by spandana", "Spadana"): from these the income they generated is added
+  /// up each month automatically; a month entered by hand takes precedence.
+  matchText    String?
   active       Boolean             @default(true)
   createdById  String
   createdAt    DateTime            @default(now())
