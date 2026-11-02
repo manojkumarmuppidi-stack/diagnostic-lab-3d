@@ -82,7 +82,14 @@ describe("expense approval", () => {
 
 describe("monthly heads", () => {
   it("checklist shows entered, waiting and missing heads; month-wise pivot counts approved only", async () => {
-    const milk = await createMaster(f.admin, "expenseHeads", { name: "Milk", keywords: "milk,curd", categoryId: f.ids.groceries, subcategoryId: f.ids.veg, defaultMode: "cash", monthly: true });
+    const milk = await createMaster(f.admin, "expenseHeads", {
+      name: "Milk",
+      keywords: "milk,curd",
+      categoryId: f.ids.groceries,
+      subcategoryId: f.ids.veg,
+      defaultMode: "cash",
+      monthly: true,
+    });
     const rent = await createMaster(f.admin, "expenseHeads", { name: "Rent", keywords: "rent", categoryId: f.ids.otherExp, monthly: true });
     await createMaster(f.admin, "expenseHeads", { name: "Audit", categoryId: f.ids.otherExp, monthly: false });
     expect(await status(createMaster(f.admin, "expenseHeads", { name: "Bad", categoryId: f.ids.veg }))).toBe(400); // subcategory as category
@@ -117,3 +124,26 @@ describe("month-wise by payment mode", () => {
   });
 });
 
+describe("biggest expenses — red flags", () => {
+  it("says why each big expense stands out", async () => {
+    const { expenseRedFlags } = await import("@/server/services/analytics");
+    const cap = await prisma.expenseCategory.create({ data: { name: "Equipment (capital)", group: "OTHER" } });
+    const e = (date: string, categoryId: string, description: string, amount: number) =>
+      prisma.expense.create({ data: { date: new Date(date), categoryId, description, amount, fingerprint: `rf-${date}-${amount}`, createdById: f.admin.id } });
+    for (const [d, a] of [
+      ["2026-09-02", 2000],
+      ["2026-09-09", 2200],
+      ["2026-09-16", 1800],
+      ["2026-09-23", 2100],
+    ] as [string, number][])
+      await e(d, f.ids.groceries, "Vegetables", a);
+    await e("2026-09-25", f.ids.groceries, "Bulk provisions", 15000);
+    await e("2026-09-28", cap.id, "Vehicle", 2500000);
+    const r = await expenseRedFlags({ from: "2026-09-01", to: "2026-09-30" }, 3);
+    expect(r.map((x) => [x.description, x.flags])).toEqual([
+      ["Vehicle", "99% of that month's spending; over ₹1 lakh; one-off / not a running cost"],
+      ["Bulk provisions", "7× the usual Groceries entry (₹2,100)"],
+      ["Vegetables", ""],
+    ]);
+  });
+});

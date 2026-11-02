@@ -83,9 +83,7 @@ export async function expenseByKind(r: Range): Promise<ExpenseByKind> {
 }
 
 export async function operationalCounts(r: Range): Promise<Counts> {
-  const [row] = await prisma.$queryRaw<
-    { new_c: bigint; old_c: bigint; adm: bigint; tests: bigint | null; pharm: bigint; patients: bigint }[]
-  >`
+  const [row] = await prisma.$queryRaw<{ new_c: bigint; old_c: bigint; adm: bigint; tests: bigint | null; pharm: bigint; patients: bigint }[]>`
     SELECT
       -- SCP bills are not consultations.
       (SELECT COUNT(*) FROM "Consultation" c LEFT JOIN "ConsultationType" ct ON ct.id = c."consultationTypeId" WHERE c.status = 'ACTIVE' AND NOT COALESCE(ct.scp, false) AND c."visitType" = 'NEW' AND c.date BETWEEN ${D(r.from)} AND ${D(r.to)}) AS new_c,
@@ -257,10 +255,7 @@ export async function revenueAnalytics(r: Range, g: Granularity, f: IncomeFilter
 }
 
 export async function opdAnalytics(r: Range, g: Granularity, f: IncomeFilters = {}) {
-  const extra = [
-    f.doctorId ? Prisma.sql`AND c."doctorId" = ${f.doctorId}` : Prisma.empty,
-    f.specialtyId ? Prisma.sql`AND c."specialtyId" = ${f.specialtyId}` : Prisma.empty,
-  ];
+  const extra = [f.doctorId ? Prisma.sql`AND c."doctorId" = ${f.doctorId}` : Prisma.empty, f.specialtyId ? Prisma.sql`AND c."specialtyId" = ${f.specialtyId}` : Prisma.empty];
   // SCP bills (Sugar Control Plans, short admissions) are billed in the OPD report but are not consultations.
   const notScp = Prisma.sql`AND NOT EXISTS (SELECT 1 FROM "ConsultationType" x WHERE x.id = c."consultationTypeId" AND x.scp)`;
   const base = Prisma.sql`c.status = 'ACTIVE' AND c.date BETWEEN ${D(r.from)} AND ${D(r.to)} ${extra[0]} ${extra[1]} ${notScp}`;
@@ -295,7 +290,14 @@ export async function opdAnalytics(r: Range, g: Granularity, f: IncomeFilters = 
     const m = trendMap.get(iso(t.bucket));
     if (m) Object.assign(m, { new: Number(t.new_c), old: Number(t.old_c), total: Number(t.new_c) + Number(t.old_c), revenue: toNum(t.revenue) });
   }
-  const specialties = bySpecialty.map((s) => ({ id: s.id, name: s.name, new: Number(s.new_c), old: Number(s.old_c), total: Number(s.new_c) + Number(s.old_c), revenue: toNum(s.revenue) }));
+  const specialties = bySpecialty.map((s) => ({
+    id: s.id,
+    name: s.name,
+    new: Number(s.new_c),
+    old: Number(s.old_c),
+    total: Number(s.new_c) + Number(s.old_c),
+    revenue: toNum(s.revenue),
+  }));
   const totalNew = specialties.reduce((a, s) => a + s.new, 0);
   const totalOld = specialties.reduce((a, s) => a + s.old, 0);
   const revenue = round2(specialties.reduce((a, s) => a + s.revenue, 0));
@@ -309,7 +311,14 @@ export async function opdAnalytics(r: Range, g: Granularity, f: IncomeFilters = 
       newPct: safeDiv(totalNew * 100, totalNew + totalOld),
     },
     bySpecialty: specialties,
-    byDoctor: byDoctor.map((s) => ({ id: s.id, name: s.name ?? "Unassigned", new: Number(s.new_c), old: Number(s.old_c), total: Number(s.new_c) + Number(s.old_c), revenue: toNum(s.revenue) })),
+    byDoctor: byDoctor.map((s) => ({
+      id: s.id,
+      name: s.name ?? "Unassigned",
+      new: Number(s.new_c),
+      old: Number(s.old_c),
+      total: Number(s.new_c) + Number(s.old_c),
+      revenue: toNum(s.revenue),
+    })),
     byType: byType.map((t) => ({ id: t.id, name: t.name ?? "Unspecified", count: Number(t.cnt), revenue: toNum(t.revenue) })),
     trend: [...trendMap.values()],
   };
@@ -428,13 +437,24 @@ export async function outstandingIpd(asOf: ISODate, doctorId?: string) {
      GROUP BY a.id
     HAVING a."netAmount" - COALESCE(SUM(CASE WHEN t.type = 'REFUND' THEN -t.amount ELSE t.amount END) FILTER (WHERE t.status = 'ACTIVE' AND t.date <= ${D(asOf)}), 0) > 0
      ORDER BY a."admissionDate"`;
-  const list = rows.map((x) => ({ id: x.id, patientName: x.patient_name, admissionDate: iso(x.admission_date), billed: toNum(x.billed), collected: toNum(x.collected), balance: round2(toNum(x.billed) - toNum(x.collected)) }));
+  const list = rows.map((x) => ({
+    id: x.id,
+    patientName: x.patient_name,
+    admissionDate: iso(x.admission_date),
+    billed: toNum(x.billed),
+    collected: toNum(x.collected),
+    balance: round2(toNum(x.billed) - toNum(x.collected)),
+  }));
   return { total: round2(list.reduce((a, x) => a + x.balance, 0)), count: list.length, list: list.slice(0, 50) };
 }
 
 export async function pharmacyAnalytics(r: Range, g: Granularity) {
   const [salesAgg, returnsAgg, purchasesAgg, trend] = await Promise.all([
-    prisma.pharmacySale.aggregate({ where: { status: "ACTIVE", date: { gte: D(r.from), lte: D(r.to) } }, _sum: { grossAmount: true, discount: true, netAmount: true }, _count: true }),
+    prisma.pharmacySale.aggregate({
+      where: { status: "ACTIVE", date: { gte: D(r.from), lte: D(r.to) } },
+      _sum: { grossAmount: true, discount: true, netAmount: true },
+      _count: true,
+    }),
     prisma.pharmacyReturn.aggregate({ where: { status: "ACTIVE", date: { gte: D(r.from), lte: D(r.to) } }, _sum: { amount: true }, _count: true }),
     prisma.pharmacyPurchase.aggregate({ where: { status: "ACTIVE", date: { gte: D(r.from), lte: D(r.to) } }, _sum: { amount: true }, _count: true }),
     prisma.$queryRaw<{ bucket: Date; sales: Prisma.Decimal; returns: Prisma.Decimal; purchases: Prisma.Decimal }[]>`
@@ -502,7 +522,16 @@ export async function pharmacyItemAnalytics(r: Range) {
   const medicines = byItem.map((x) => {
     const tx = toNum(x.taxable);
     const c = toNum(x.cost);
-    return { id: x.id, name: x.name, form: x.form, units: Number(x.units), bills: Number(x.bills), revenue: toNum(x.amount), margin: round2(tx - c), marginPct: safeDiv((tx - c) * 100, tx) };
+    return {
+      id: x.id,
+      name: x.name,
+      form: x.form,
+      units: Number(x.units),
+      bills: Number(x.bills),
+      revenue: toNum(x.amount),
+      margin: round2(tx - c),
+      marginPct: safeDiv((tx - c) * 100, tx),
+    };
   });
   return {
     hasData: Number(t?.lines ?? 0) > 0,
@@ -546,7 +575,10 @@ export async function pharmacyMedicineTrend(r: Range, g: Granularity, q: string)
     q,
     units: series.reduce((a, x) => a + x.units, 0),
     revenue: round2(series.reduce((a, x) => a + x.revenue, 0)),
-    avgPerBucket: safeDiv(series.reduce((a, x) => a + x.units, 0), series.length),
+    avgPerBucket: safeDiv(
+      series.reduce((a, x) => a + x.units, 0),
+      series.length,
+    ),
     variants: variants.map((v) => ({ name: v.name, units: Number(v.units), revenue: toNum(v.amount), bills: Number(v.bills) })),
     trend: series,
   };
@@ -589,15 +621,40 @@ export async function supplierPayables(r: Range) {
         FROM pay JOIN pur ON pur.sup = pay.sup AND pur.inv = pay.inv
        GROUP BY ROLLUP (pay.sup)`,
   ]);
-  const rows = new Map<string, { supplier: string; invoices: number; purchased: number; paid: number; payments: number; openInvoices: number; openAmount: number; oldestOpen: string | null; lastPaid: string | null; avgDaysToPay: number | null }>();
+  const rows = new Map<
+    string,
+    {
+      supplier: string;
+      invoices: number;
+      purchased: number;
+      paid: number;
+      payments: number;
+      openInvoices: number;
+      openAmount: number;
+      oldestOpen: string | null;
+      lastPaid: string | null;
+      avgDaysToPay: number | null;
+    }
+  >();
   const get = (sup: string, name: string) => {
     let x = rows.get(sup);
-    if (!x) rows.set(sup, (x = { supplier: name, invoices: 0, purchased: 0, paid: 0, payments: 0, openInvoices: 0, openAmount: 0, oldestOpen: null, lastPaid: null, avgDaysToPay: null }));
+    if (!x)
+      rows.set(
+        sup,
+        (x = { supplier: name, invoices: 0, purchased: 0, paid: 0, payments: 0, openInvoices: 0, openAmount: 0, oldestOpen: null, lastPaid: null, avgDaysToPay: null }),
+      );
     return x;
   };
   const creditBySup = new Map(credit.filter((c) => c.sup !== "*").map((c) => [c.sup, c.days === null ? null : Math.round(c.days)]));
   const overall = credit.find((c) => c.sup === "*");
-  for (const b of byInvoice) Object.assign(get(b.sup, b.name), { invoices: Number(b.invoices), purchased: toNum(b.purchased), openInvoices: Number(b.open_count), openAmount: toNum(b.open_amount), oldestOpen: b.oldest_open ? iso(b.oldest_open) : null });
+  for (const b of byInvoice)
+    Object.assign(get(b.sup, b.name), {
+      invoices: Number(b.invoices),
+      purchased: toNum(b.purchased),
+      openInvoices: Number(b.open_count),
+      openAmount: toNum(b.open_amount),
+      oldestOpen: b.oldest_open ? iso(b.oldest_open) : null,
+    });
   for (const p of paid) Object.assign(get(p.sup, p.name), { paid: toNum(p.paid), payments: Number(p.payments), lastPaid: iso(p.last_paid) });
   for (const [sup, x] of rows) x.avgDaysToPay = creditBySup.get(sup) ?? null;
   const suppliers = [...rows.values()].sort((a, b) => b.openAmount - a.openAmount || b.purchased - a.purchased);
@@ -639,6 +696,7 @@ export async function expenseAnalytics(r: Range, g: Granularity, f: { department
       include: { category: true },
     }),
   ]);
+  const redFlags = await expenseRedFlags(r);
   const total = totalExpenses(byKind);
   return {
     totals: { total, ...byKind, avgDaily: safeDiv(total, daysBetweenInclusive(r.from, r.to)) },
@@ -647,8 +705,68 @@ export async function expenseAnalytics(r: Range, g: Granularity, f: { department
     byMonth: byMonth.map((m) => ({ bucket: iso(m.bucket), amount: toNum(m.amount) })),
     incomeVsExpense: series.map((s) => ({ bucket: s.bucket, income: s.income, expenses: s.expenses, net: s.net })),
     largest: largest.map((e) => ({ id: e.id, date: iso(e.date), description: e.description, category: e.category.name, amount: toNum(e.amount) })),
+    redFlags,
   };
 }
+
+/**
+ * The period's biggest expenses, each with why it stands out: several times the usual entry under its
+ * head, a large share of its month's spending, over ₹1 lakh, or a one-off / non-operating head
+ * (capital purchases, donations, partner remuneration, credit-card bills, depreciation).
+ */
+export async function expenseRedFlags(r: Range, limit = 25) {
+  const all = await prisma.expense.findMany({
+    where: { status: "ACTIVE", date: { gte: D(r.from), lte: D(r.to) } },
+    select: {
+      id: true,
+      date: true,
+      amount: true,
+      description: true,
+      vendor: true,
+      categoryId: true,
+      category: { select: { name: true, group: true } },
+      subcategory: { select: { name: true } },
+    },
+  });
+  const byHead = new Map<string, number[]>();
+  const byMonth = new Map<string, number>();
+  for (const e of all) {
+    const a = toNum(e.amount);
+    byHead.set(e.categoryId, [...(byHead.get(e.categoryId) ?? []), a]);
+    const m = iso(e.date).slice(0, 7);
+    byMonth.set(m, (byMonth.get(m) ?? 0) + a);
+  }
+  const median = (xs: number[]) => {
+    const s = [...xs].sort((a, b) => a - b);
+    return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  };
+  const ONE_OFF = /capital|donation|depreciation|partner|vehicle/i;
+  return all
+    .map((e) => {
+      const a = toNum(e.amount);
+      const head = e.subcategory ? `${e.category.name} → ${e.subcategory.name}` : e.category.name;
+      const reasons: string[] = [];
+      const peers = byHead.get(e.categoryId)!;
+      const med = median(peers);
+      if (peers.length >= 3 && med > 0 && a >= 3 * med) reasons.push(`${Math.round(a / med)}× the usual ${e.category.name} entry (${formatShort(med)})`);
+      const month = byMonth.get(iso(e.date).slice(0, 7)) ?? 0;
+      if (month > 0 && a / month >= 0.05) reasons.push(`${Math.round((a / month) * 100)}% of that month's spending`);
+      if (a >= 100000) reasons.push("over ₹1 lakh");
+      if (ONE_OFF.test(head) || e.category.group === "OTHER" || /credit card|sbi ?card/i.test(e.description)) reasons.push("one-off / not a running cost");
+      return {
+        id: e.id,
+        date: iso(e.date),
+        description: e.vendor && !e.description.includes(e.vendor) ? `${e.description} — ${e.vendor}` : e.description,
+        head,
+        amount: a,
+        flags: reasons.join("; "),
+      };
+    })
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, limit);
+}
+
+const formatShort = (v: number) => `₹${Math.round(v).toLocaleString("en-IN")}`;
 
 export async function profitabilityAnalytics(r: Range, g: Granularity) {
   const [summary, series] = await Promise.all([periodSummary(r), incomeSeries(r, g)]);

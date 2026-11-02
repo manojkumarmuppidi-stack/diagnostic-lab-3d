@@ -9,21 +9,10 @@ import { round2 } from "@/lib/money";
 import { defaultGranularity, precedingRange, type Granularity } from "@/lib/periods";
 import { requirePermission, type Actor } from "../authz";
 import { getSettings } from "../settings";
-import {
-  expenseAnalytics,
-  incomeByReconGroup,
-  incomeSeries,
-  ipdAnalytics,
-  labAnalytics,
-  opdAnalytics,
-  periodSummary,
-  pharmacyAnalytics,
-  type PeriodSummary,
-} from "./analytics";
+import { expenseAnalytics, incomeByReconGroup, incomeSeries, ipdAnalytics, labAnalytics, opdAnalytics, periodSummary, pharmacyAnalytics, type PeriodSummary } from "./analytics";
 import { prisma } from "../db";
 import { toDbDate } from "@/lib/dates";
 import { toNum } from "@/lib/money";
-
 
 export type ColType = "text" | "money" | "int" | "pct" | "date";
 export interface ReportColumn {
@@ -80,7 +69,8 @@ const q = z.object({
 
 const INCOME_DEF = "Total Income (AED Hospital) = OPD + IPD collections + Lab + Diet + Other income. Hormonal Pharmacy is a separate entity with its own report.";
 const EXPENSE_DEF = "Total Expenses (AED Hospital) = Hospital operating expenses + Other expenses. Pharmacy stock purchases and pharmacy staff are the Hormonal Pharmacy's.";
-const NET_DEF = "Net Operating Result = Total Income - Total Expenses (collections basis, transaction date). Monthly items such as salaries and rent are spread over the days of their month.";
+const NET_DEF =
+  "Net Operating Result = Total Income - Total Expenses (collections basis, transaction date). Monthly items such as salaries and rent are spread over the days of their month.";
 
 function incomeTable(cur: PeriodSummary, prev?: PeriodSummary): ReportTable {
   const rows = AED_INCOME_STREAMS.map((s) => {
@@ -94,7 +84,13 @@ function incomeTable(cur: PeriodSummary, prev?: PeriodSummary): ReportTable {
     columns: [
       { key: "head", label: "Income Head" },
       { key: "amount", label: "Current", type: "money" },
-      ...(prev ? ([{ key: "previous", label: "Previous", type: "money" }, { key: "diff", label: "Change", type: "money" }, { key: "pct", label: "Change %", type: "pct" }] as ReportColumn[]) : []),
+      ...(prev
+        ? ([
+            { key: "previous", label: "Previous", type: "money" },
+            { key: "diff", label: "Change", type: "money" },
+            { key: "pct", label: "Change %", type: "pct" },
+          ] as ReportColumn[])
+        : []),
     ],
     rows,
     totals: { head: "Total Income", amount: ti, ...(prev ? { previous: c.previous, diff: c.diff, pct: c.pct } : {}) },
@@ -116,7 +112,13 @@ function expenseTable(cur: PeriodSummary, prev?: PeriodSummary): ReportTable {
     columns: [
       { key: "head", label: "Head" },
       { key: "amount", label: "Current", type: "money" },
-      ...(prev ? ([{ key: "previous", label: "Previous", type: "money" }, { key: "diff", label: "Change", type: "money" }, { key: "pct", label: "Change %", type: "pct" }] as ReportColumn[]) : []),
+      ...(prev
+        ? ([
+            { key: "previous", label: "Previous", type: "money" },
+            { key: "diff", label: "Change", type: "money" },
+            { key: "pct", label: "Change %", type: "pct" },
+          ] as ReportColumn[])
+        : []),
     ],
     rows: [...rows, { head: "Total Expenses", amount: te, ...(prev ? { previous: c.previous, diff: c.diff, pct: c.pct } : {}) }],
     totals: { head: "Net Operating Result", amount: cur.kpis.netOperatingResult, ...(prev ? { previous: net.previous, diff: net.diff, pct: net.pct } : {}) },
@@ -135,7 +137,16 @@ function countsTable(cur: PeriodSummary, prev?: PeriodSummary): ReportTable {
   ];
   return {
     title: "Operational Volumes",
-    columns: [{ key: "head", label: "Metric" }, { key: "value", label: "Current", type: "int" }, ...(prev ? ([{ key: "previous", label: "Previous", type: "int" }, { key: "pct", label: "Change %", type: "pct" }] as ReportColumn[]) : [])],
+    columns: [
+      { key: "head", label: "Metric" },
+      { key: "value", label: "Current", type: "int" },
+      ...(prev
+        ? ([
+            { key: "previous", label: "Previous", type: "int" },
+            { key: "pct", label: "Change %", type: "pct" },
+          ] as ReportColumn[])
+        : []),
+    ],
     rows: items.map(([head, v, p]) => ({ head, value: v, ...(prev ? { previous: p, pct: compare(v, p ?? 0).pct } : {}) })),
   };
 }
@@ -154,7 +165,19 @@ function kpisOf(s: PeriodSummary): Report["kpis"] {
 async function seriesTable(from: ISODate, to: ISODate, g: Granularity, title = "Trend"): Promise<ReportTable> {
   const series = await incomeSeries({ from, to }, g);
   const label = (b: string) => (g === "month" ? formatMonth(b) : g === "week" ? `Wk of ${formatDate(b)}` : formatDate(b));
-  const rows = series.map((s) => ({ period: label(s.bucket), OPD: s.OPD, SCP: s.SCP, IPD: s.IPD, LAB: s.LAB, PHARMACY: s.PHARMACY, DIET: s.DIET, OTHER: s.OTHER, income: s.income, expenses: s.expenses, net: s.net }));
+  const rows = series.map((s) => ({
+    period: label(s.bucket),
+    OPD: s.OPD,
+    SCP: s.SCP,
+    IPD: s.IPD,
+    LAB: s.LAB,
+    PHARMACY: s.PHARMACY,
+    DIET: s.DIET,
+    OTHER: s.OTHER,
+    income: s.income,
+    expenses: s.expenses,
+    net: s.net,
+  }));
   const sumKey = (k: keyof (typeof rows)[number]) => round2(rows.reduce((a, r) => a + (r[k] as number), 0));
   return {
     title,
@@ -220,7 +243,18 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
         tables: [
           incomeTable(cur),
           expenseTable(cur),
-          { title: `Collections by Payment Mode (day status: ${day?.status ?? "OPEN"})`, columns: [{ key: "mode", label: "Mode" }, { key: "expected", label: "Expected", type: "money" }, { key: "actual", label: "Actual", type: "money" }, { key: "variance", label: "Variance", type: "money" }, { key: "explanation", label: "Explanation" }], rows: modeRows, totals: { mode: "Total", expected: round2(Object.values(modes).reduce((a, b) => a + b, 0)) } },
+          {
+            title: `Collections by Payment Mode (day status: ${day?.status ?? "OPEN"})`,
+            columns: [
+              { key: "mode", label: "Mode" },
+              { key: "expected", label: "Expected", type: "money" },
+              { key: "actual", label: "Actual", type: "money" },
+              { key: "variance", label: "Variance", type: "money" },
+              { key: "explanation", label: "Explanation" },
+            ],
+            rows: modeRows,
+            totals: { mode: "Total", expected: round2(Object.values(modes).reduce((a, b) => a + b, 0)) },
+          },
           countsTable(cur),
         ],
         notes,
@@ -236,13 +270,33 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
       if (type === "department") {
         const [lab, exp] = await Promise.all([labAnalytics(r, g), expenseAnalytics(r, g)]);
         tables.push(
-          { title: "Laboratory by Category", columns: [{ key: "category", label: "Category" }, { key: "tests", label: "Tests", type: "int" }, { key: "revenue", label: "Revenue", type: "money" }], rows: lab.byCategory },
-          { title: "Expenses by Department", columns: [{ key: "name", label: "Department" }, { key: "amount", label: "Amount", type: "money" }], rows: exp.byDepartment, totals: { name: "Total", amount: round2(exp.byDepartment.reduce((a, d) => a + d.amount, 0)) } },
+          {
+            title: "Laboratory by Category",
+            columns: [
+              { key: "category", label: "Category" },
+              { key: "tests", label: "Tests", type: "int" },
+              { key: "revenue", label: "Revenue", type: "money" },
+            ],
+            rows: lab.byCategory,
+          },
+          {
+            title: "Expenses by Department",
+            columns: [
+              { key: "name", label: "Department" },
+              { key: "amount", label: "Amount", type: "money" },
+            ],
+            rows: exp.byDepartment,
+            totals: { name: "Total", amount: round2(exp.byDepartment.reduce((a, d) => a + d.amount, 0)) },
+          },
         );
       } else if (type === "profitability") {
         tables.push({
           title: "Profitability Ratios",
-          columns: [{ key: "metric", label: "Metric" }, { key: "value", label: "Value", type: "money" }, { key: "formula", label: "Definition" }],
+          columns: [
+            { key: "metric", label: "Metric" },
+            { key: "value", label: "Value", type: "money" },
+            { key: "formula", label: "Definition" },
+          ],
           rows: [
             { metric: "Net margin %", value: cur.kpis.netMarginPct, formula: "Net Operating Result ÷ Total Income × 100" },
             { metric: "Revenue per patient", value: cur.kpis.revenuePerPatient, formula: "Total Income ÷ distinct patients" },
@@ -272,10 +326,53 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
           { label: "Avg Consultation Revenue", value: a.totals.avgRevenue, type: "money" },
         ],
         tables: [
-          { title: "By Specialty", columns: [{ key: "name", label: "Specialty" }, { key: "new", label: "New", type: "int" }, { key: "old", label: "Old", type: "int" }, { key: "total", label: "Total", type: "int" }, { key: "revenue", label: "Revenue", type: "money" }], rows: a.bySpecialty, totals: { name: "Total", new: a.totals.new, old: a.totals.old, total: a.totals.total, revenue: a.totals.revenue } },
-          { title: "By Doctor", columns: [{ key: "name", label: "Doctor" }, { key: "new", label: "New", type: "int" }, { key: "old", label: "Old", type: "int" }, { key: "total", label: "Total", type: "int" }, { key: "revenue", label: "Revenue", type: "money" }], rows: a.byDoctor },
-          ...(type === "opd" ? [{ title: "By Consultation Type", columns: [{ key: "name", label: "Type" }, { key: "count", label: "Count", type: "int" as const }, { key: "revenue", label: "Revenue", type: "money" as const }], rows: a.byType }] : []),
-          { title: "Trend", columns: [{ key: "bucket", label: "Period", type: "date" }, { key: "new", label: "New", type: "int" }, { key: "old", label: "Old", type: "int" }, { key: "total", label: "Total", type: "int" }, { key: "revenue", label: "Revenue", type: "money" }], rows: a.trend },
+          {
+            title: "By Specialty",
+            columns: [
+              { key: "name", label: "Specialty" },
+              { key: "new", label: "New", type: "int" },
+              { key: "old", label: "Old", type: "int" },
+              { key: "total", label: "Total", type: "int" },
+              { key: "revenue", label: "Revenue", type: "money" },
+            ],
+            rows: a.bySpecialty,
+            totals: { name: "Total", new: a.totals.new, old: a.totals.old, total: a.totals.total, revenue: a.totals.revenue },
+          },
+          {
+            title: "By Doctor",
+            columns: [
+              { key: "name", label: "Doctor" },
+              { key: "new", label: "New", type: "int" },
+              { key: "old", label: "Old", type: "int" },
+              { key: "total", label: "Total", type: "int" },
+              { key: "revenue", label: "Revenue", type: "money" },
+            ],
+            rows: a.byDoctor,
+          },
+          ...(type === "opd"
+            ? [
+                {
+                  title: "By Consultation Type",
+                  columns: [
+                    { key: "name", label: "Type" },
+                    { key: "count", label: "Count", type: "int" as const },
+                    { key: "revenue", label: "Revenue", type: "money" as const },
+                  ],
+                  rows: a.byType,
+                },
+              ]
+            : []),
+          {
+            title: "Trend",
+            columns: [
+              { key: "bucket", label: "Period", type: "date" },
+              { key: "new", label: "New", type: "int" },
+              { key: "old", label: "Old", type: "int" },
+              { key: "total", label: "Total", type: "int" },
+              { key: "revenue", label: "Revenue", type: "money" },
+            ],
+            rows: a.trend,
+          },
         ],
         notes: ["Consultation counts include only ACTIVE (not voided/superseded/reversed) records.", "New % = New ÷ Total consultations × 100."],
       };
@@ -292,11 +389,45 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
           { label: "Outstanding (all open)", value: a.totals.outstanding, type: "money" },
         ],
         tables: [
-          { title: "By Admission Type", columns: [{ key: "name", label: "Type" }, { key: "admissions", label: "Admissions", type: "int" }, { key: "billed", label: "Billed", type: "money" }, { key: "collected", label: "Collected in Period", type: "money" }], rows: a.byType },
-          { title: "Collections", columns: [{ key: "k", label: "Kind" }, { key: "v", label: "Amount", type: "money" }], rows: [{ k: "Advances", v: a.collectionsByKind.advances }, { k: "Payments & settlements", v: a.collectionsByKind.payments }, { k: "Refunds", v: -a.collectionsByKind.refunds }], totals: { k: "IPD income", v: a.totals.collected } },
-          { title: "Outstanding Balances", columns: [{ key: "admissionDate", label: "Admitted", type: "date" }, { key: "patientName", label: "Patient" }, { key: "billed", label: "Billed", type: "money" }, { key: "collected", label: "Collected", type: "money" }, { key: "balance", label: "Balance", type: "money" }], rows: a.outstandingList },
+          {
+            title: "By Admission Type",
+            columns: [
+              { key: "name", label: "Type" },
+              { key: "admissions", label: "Admissions", type: "int" },
+              { key: "billed", label: "Billed", type: "money" },
+              { key: "collected", label: "Collected in Period", type: "money" },
+            ],
+            rows: a.byType,
+          },
+          {
+            title: "Collections",
+            columns: [
+              { key: "k", label: "Kind" },
+              { key: "v", label: "Amount", type: "money" },
+            ],
+            rows: [
+              { k: "Advances", v: a.collectionsByKind.advances },
+              { k: "Payments & settlements", v: a.collectionsByKind.payments },
+              { k: "Refunds", v: -a.collectionsByKind.refunds },
+            ],
+            totals: { k: "IPD income", v: a.totals.collected },
+          },
+          {
+            title: "Outstanding Balances",
+            columns: [
+              { key: "admissionDate", label: "Admitted", type: "date" },
+              { key: "patientName", label: "Patient" },
+              { key: "billed", label: "Billed", type: "money" },
+              { key: "collected", label: "Collected", type: "money" },
+              { key: "balance", label: "Balance", type: "money" },
+            ],
+            rows: a.outstandingList,
+          },
         ],
-        notes: ["IPD income is recognised when money is collected (advance, payment, final settlement) less refunds.", "Billed value is shown for information and drives outstanding balances."],
+        notes: [
+          "IPD income is recognised when money is collected (advance, payment, final settlement) less refunds.",
+          "Billed value is shown for information and drives outstanding balances.",
+        ],
       };
     }
     case "lab": {
@@ -310,9 +441,36 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
           { label: "Avg Tests / Day", value: a.totals.avgTestsPerDay, type: "int" },
         ],
         tables: [
-          { title: "By Investigation (highest revenue first)", columns: [{ key: "name", label: "Investigation" }, { key: "category", label: "Category" }, { key: "tests", label: "Tests", type: "int" }, { key: "revenue", label: "Revenue", type: "money" }, { key: "avg", label: "Avg / Test", type: "money" }], rows: [...a.investigations].sort((x, y) => y.revenue - x.revenue), totals: { name: "Total", tests: a.totals.tests, revenue: a.totals.revenue, avg: a.totals.avgPerTest } },
-          { title: "By Category", columns: [{ key: "category", label: "Category" }, { key: "tests", label: "Tests", type: "int" }, { key: "revenue", label: "Revenue", type: "money" }], rows: a.byCategory },
-          { title: "Trend", columns: [{ key: "bucket", label: "Period", type: "date" }, { key: "tests", label: "Tests", type: "int" }, { key: "revenue", label: "Revenue", type: "money" }], rows: a.trend },
+          {
+            title: "By Investigation (highest revenue first)",
+            columns: [
+              { key: "name", label: "Investigation" },
+              { key: "category", label: "Category" },
+              { key: "tests", label: "Tests", type: "int" },
+              { key: "revenue", label: "Revenue", type: "money" },
+              { key: "avg", label: "Avg / Test", type: "money" },
+            ],
+            rows: [...a.investigations].sort((x, y) => y.revenue - x.revenue),
+            totals: { name: "Total", tests: a.totals.tests, revenue: a.totals.revenue, avg: a.totals.avgPerTest },
+          },
+          {
+            title: "By Category",
+            columns: [
+              { key: "category", label: "Category" },
+              { key: "tests", label: "Tests", type: "int" },
+              { key: "revenue", label: "Revenue", type: "money" },
+            ],
+            rows: a.byCategory,
+          },
+          {
+            title: "Trend",
+            columns: [
+              { key: "bucket", label: "Period", type: "date" },
+              { key: "tests", label: "Tests", type: "int" },
+              { key: "revenue", label: "Revenue", type: "money" },
+            ],
+            rows: a.trend,
+          },
         ],
         notes: ["Tests = sum of quantity. Avg revenue per test = Lab net revenue ÷ tests."],
       };
@@ -329,8 +487,32 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
           { label: "Sales Transactions", value: a.totals.transactions, type: "int" },
         ],
         tables: [
-          { title: "Pharmacy Summary", columns: [{ key: "k", label: "Line" }, { key: "v", label: "Amount", type: "money" }], rows: [{ k: "Gross sales", v: a.totals.grossSales }, { k: "Less: discount", v: -a.totals.discount }, { k: "Less: returns", v: -a.totals.returns }, { k: "Net sales", v: a.totals.netSales }, { k: "Less: purchases", v: -a.totals.purchases }], totals: { k: "Gross margin", v: a.totals.grossMargin } },
-          { title: "Trend", columns: [{ key: "bucket", label: "Period", type: "date" }, { key: "sales", label: "Sales (net of discount)", type: "money" }, { key: "returns", label: "Returns", type: "money" }, { key: "netSales", label: "Net Sales", type: "money" }, { key: "purchases", label: "Purchases", type: "money" }], rows: a.trend },
+          {
+            title: "Pharmacy Summary",
+            columns: [
+              { key: "k", label: "Line" },
+              { key: "v", label: "Amount", type: "money" },
+            ],
+            rows: [
+              { k: "Gross sales", v: a.totals.grossSales },
+              { k: "Less: discount", v: -a.totals.discount },
+              { k: "Less: returns", v: -a.totals.returns },
+              { k: "Net sales", v: a.totals.netSales },
+              { k: "Less: purchases", v: -a.totals.purchases },
+            ],
+            totals: { k: "Gross margin", v: a.totals.grossMargin },
+          },
+          {
+            title: "Trend",
+            columns: [
+              { key: "bucket", label: "Period", type: "date" },
+              { key: "sales", label: "Sales (net of discount)", type: "money" },
+              { key: "returns", label: "Returns", type: "money" },
+              { key: "netSales", label: "Net Sales", type: "money" },
+              { key: "purchases", label: "Purchases", type: "money" },
+            ],
+            rows: a.trend,
+          },
         ],
         notes: ["Gross margin uses purchases as a proxy for cost of goods sold (no stock valuation). It is only accurate when stock levels are stable over the period."],
       };
@@ -347,10 +529,44 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
           { label: "Avg Daily Expense", value: a.totals.avgDaily, type: "money" },
         ],
         tables: [
-          { title: "By Category", columns: [{ key: "name", label: "Category" }, { key: "group", label: "Group" }, { key: "count", label: "Entries", type: "int" }, { key: "amount", label: "Amount", type: "money" }], rows: a.byCategory, totals: { name: "Total (excl. pharmacy purchases)", amount: round2(a.totals.HOSPITAL + a.totals.OTHER) } },
-          { title: "By Department", columns: [{ key: "name", label: "Department" }, { key: "amount", label: "Amount", type: "money" }], rows: a.byDepartment },
-          { title: "By Month (all expenditure)", columns: [{ key: "bucket", label: "Month", type: "date" }, { key: "amount", label: "Amount", type: "money" }], rows: a.byMonth },
-          { title: "Largest Expenses", columns: [{ key: "date", label: "Date", type: "date" }, { key: "description", label: "Description" }, { key: "category", label: "Category" }, { key: "amount", label: "Amount", type: "money" }], rows: a.largest },
+          {
+            title: "By Category",
+            columns: [
+              { key: "name", label: "Category" },
+              { key: "group", label: "Group" },
+              { key: "count", label: "Entries", type: "int" },
+              { key: "amount", label: "Amount", type: "money" },
+            ],
+            rows: a.byCategory,
+            totals: { name: "Total (excl. pharmacy purchases)", amount: round2(a.totals.HOSPITAL + a.totals.OTHER) },
+          },
+          {
+            title: "By Department",
+            columns: [
+              { key: "name", label: "Department" },
+              { key: "amount", label: "Amount", type: "money" },
+            ],
+            rows: a.byDepartment,
+          },
+          {
+            title: "By Month (all expenditure)",
+            columns: [
+              { key: "bucket", label: "Month", type: "date" },
+              { key: "amount", label: "Amount", type: "money" },
+            ],
+            rows: a.byMonth,
+          },
+          {
+            title: "Biggest expenses — red flags",
+            columns: [
+              { key: "date", label: "Date", type: "date" },
+              { key: "description", label: "Description" },
+              { key: "head", label: "Head" },
+              { key: "amount", label: "Amount", type: "money" },
+              { key: "flags", label: "Why it stands out" },
+            ],
+            rows: a.redFlags,
+          },
         ],
         notes: [EXPENSE_DEF, "Average daily expense = Total Expenses ÷ calendar days in the period."],
       };
@@ -384,7 +600,14 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
           { label: "Months", value: months.length, type: "int" },
           { label: "Total Income", value: round2(rows.reduce((a, x) => a + x.income, 0)), type: "money" },
           { label: "Total Expenses", value: round2(rows.reduce((a, x) => a + x.expenses, 0)), type: "money" },
-          { label: "Avg Monthly Income", value: safeDiv(rows.reduce((a, x) => a + x.income, 0), months.length), type: "money" },
+          {
+            label: "Avg Monthly Income",
+            value: safeDiv(
+              rows.reduce((a, x) => a + x.income, 0),
+              months.length,
+            ),
+            type: "money",
+          },
         ],
         tables: [
           {
@@ -403,7 +626,11 @@ export async function buildReport(actor: Actor, type: ReportType, raw: Record<st
             rows,
           },
         ],
-        notes: [...notes, "Historical figures use the transaction date, never the upload date. Imported and manually entered records are treated identically.", "A month with a zero previous value shows no MoM % (undefined)."],
+        notes: [
+          ...notes,
+          "Historical figures use the transaction date, never the upload date. Imported and manually entered records are treated identically.",
+          "A month with a zero previous value shows no MoM % (undefined).",
+        ],
       };
     }
   }

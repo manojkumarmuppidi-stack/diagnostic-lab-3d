@@ -3,6 +3,7 @@
 All notable changes to the AED Hospital Financial, Accounting & Operational Analytics System.
 
 ## 0.27.0: Fixed assets
+- Expense Report: "Biggest expenses — red flags" (top 25 of the period) replaces the top-10 list, each with why it stands out: several times the usual entry under its head, a large share of its month's spending, over ₹1 lakh, or a one-off / non-operating head.
 - New page "Fixed assets": vehicles and equipment recorded at cost (not as expenses), linked to the bank payments that bought them (the bank check counts those as accounted for). Depreciation per financial year (April–March): straight line over the useful life to a residual value (default motor cars 8 years, 5%) or a % of the remaining value (e.g. 15%), the first year from the purchase date. When a year has ended, "Post as expense" enters its depreciation once per asset under the new head "Depreciation" on 31 March, with the non-cash payment mode "Book entry".
 - "Capital purchases entered as expenses": tick the Equipment (capital) expenses that make up one asset (e.g. a vehicle and its advance) and record the asset — the expenses are voided (audited), so the purchase leaves the expenses. Migration `20261109000000_fixed_assets`.
 
