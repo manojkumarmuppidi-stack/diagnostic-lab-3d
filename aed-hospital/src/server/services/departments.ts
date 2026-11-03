@@ -840,6 +840,11 @@ export async function importDepartmentWorkbook(actor: Actor, departmentId: strin
     throw badRequest(
       'This is the bank payments list. Upload it on Bank statement check → "Upload reviewed list": it enters the expenses in the core accounts, and the departments pick them up from there.',
     );
+  // Patient bills and admissions (e.g. an IPD admissions list) are income: they go through Excel Import.
+  if (sheets.some((sh) => sh.headers.some((h) => ["admission date", "admission type", "date of admission"].includes(norm(h)))))
+    throw badRequest(
+      "This is a list of admissions (patient income). Upload it on Excel Import in the left menu: the admissions go into the core accounts, and the departments pick them up from there.",
+    );
   const key = (h: string) => norm(h);
   const costs: { departmentId: string; label: string; amount: number; percent: number; matchText: string | null; fromMonth: string; toMonth: string | null; row: number }[] = [];
   const people: { name: string; pct: number; matchText: string | null; incomes: [string, number | null][]; row: number }[] = [];

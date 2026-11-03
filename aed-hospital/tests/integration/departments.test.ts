@@ -631,6 +631,13 @@ describe("department accounts", () => {
     await expect(importDepartmentWorkbook(f.admin, null, "g.xlsx", Buffer.from(await wb.xlsx.writeBuffer()))).rejects.toThrow(/Upload reviewed list/);
   });
 
+  it("points an admissions list to Excel Import", async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("Short admissions").addRow(["Admission Date", "Patient Name", "Patient ID", "Admission Type", "Bill Amount"]);
+    wb.getWorksheet("Short admissions")!.addRow(["2026-09-12", "Test Patient", "T-1", "Short Admission", 9000]);
+    await expect(importDepartmentWorkbook(f.admin, null, "s.xlsx", Buffer.from(await wb.xlsx.writeBuffer()))).rejects.toThrow(/Excel Import/);
+  });
+
   it("pays each person their % of their own cases, found on the bills by name (a month entered by hand wins)", async () => {
     const scp = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "SCP — Sugar Control Plans" } })).id;
     const named = (await createMaster(f.admin, "consultationTypes", { name: "F/u by spandana", defaultRate: 3000, scp: true })) as { id: string };
