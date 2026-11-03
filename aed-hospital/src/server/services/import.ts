@@ -62,6 +62,8 @@ function isDepartmentSheet(sh: { headers: string[]; preamble?: string[] }): bool
   );
   if (h.some((x) => x.startsWith("staff (as in"))) return true;
   if (h.includes("expenses containing")) return true;
+  // People who earn an incentive on their own cases ("Person | Incentive % | <months>").
+  if (h.includes("person") && h.some((x) => x.startsWith("incentive"))) return true;
   const monthCols = h.filter((x) => /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* 20\d\d$/.test(x)).length;
   return h.includes("category") && (h.includes("name / item") || (sh.preamble ?? []).some((l) => /^department\s*:/i.test(l))) && monthCols >= 2;
 }
@@ -72,7 +74,7 @@ export async function uploadFile(actor: Actor, fileName: string, buf: Buffer, ty
   const sheets = expandHmsReports(await readSpreadsheet(safeName, buf));
   if (sheets.some(isDepartmentSheet))
     throw badRequest(
-      'This is a department accounts file (department salaries, costs or the staff list), not bills or expenses. Upload it on Department accounts → All departments → "Import costs for all departments".',
+      'This is a department accounts file (department salaries, costs, staff or incentive people), not bills or expenses. Upload it on Department accounts → that department → "Import from Excel" (or All departments → "Import costs for all departments").',
     );
   const fileHash = createHash("sha256").update(buf).digest("hex");
   const groupId = randomUUID();

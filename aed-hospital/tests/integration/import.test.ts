@@ -52,6 +52,11 @@ describe("Excel import", () => {
     st.addWorksheet("Staff").addRow(["Staff (as in the bank list)", "Also written as", "Department"]);
     st.getWorksheet("Staff")!.addRow(["Tech A", "", "Laboratory"]);
     await expect(uploadFile(f.admin, "staff.xlsx", Buffer.from(await st.xlsx.writeBuffer()))).rejects.toThrow(/Department accounts/);
+    const pp = new ExcelJS.Workbook();
+    pp.addWorksheet("Read me").addRow(["SCP — each person's own cases"]);
+    pp.addWorksheet("People").addRow(["Person", "Incentive %", "Bills mentioning", "Jan 2026", "Feb 2026"]);
+    pp.getWorksheet("People")!.addRow(["Person A", 18, "A", 1000, 2000]);
+    await expect(uploadFile(f.admin, "people.xlsx", Buffer.from(await pp.xlsx.writeBuffer()))).rejects.toThrow(/Department accounts/);
     expect(await prisma.importBatch.count()).toBe(0);
   });
 
