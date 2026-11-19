@@ -6,6 +6,12 @@ import { addMonths, daysBetweenInclusive, startOfWeek, todayISO } from "@/lib/da
 const today = "2026-09-24"; // a Thursday
 
 describe("resolvePeriod", () => {
+  it("calendar year runs from 1 January even when the financial year starts in April", () => {
+    const p = resolvePeriod({ preset: "calendar_year", today, fyStartMonth: 4 });
+    expect(p.current).toMatchObject({ from: "2026-01-01", to: today });
+    expect(p.previous).toMatchObject({ from: "2025-01-01", to: "2025-09-24" });
+    expect(resolvePeriod({ preset: "this_year", today, fyStartMonth: 4 }).current.from).toBe("2026-04-01");
+  });
   it("today vs yesterday", () => {
     const p = resolvePeriod({ preset: "today", today });
     expect(p.current).toMatchObject({ from: today, to: today });

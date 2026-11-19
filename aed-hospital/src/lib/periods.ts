@@ -20,6 +20,7 @@ export const PERIOD_PRESETS = [
   { key: "last_quarter", label: "Last Quarter" },
   { key: "this_year", label: "This Year" },
   { key: "previous_year", label: "Previous Year" },
+  { key: "calendar_year", label: "Calendar Year (from 1 Jan)" },
   { key: "last_30", label: "Last 30 Days" },
   { key: "custom", label: "Custom Range" },
 ] as const;
@@ -166,6 +167,13 @@ export function resolvePeriod(opts: {
       const s = startOfYear(today, fy);
       const ps = addMonths(s, -12);
       running(s, ps, addDays(s, -1), "This Year", "Previous Year");
+      break;
+    }
+    // January to today, whatever month the financial year starts in.
+    case "calendar_year": {
+      const s = startOfYear(today, 1);
+      const ps = addMonths(s, -12);
+      running(s, ps, addDays(s, -1), `Calendar Year ${s.slice(0, 4)}`, `Calendar Year ${ps.slice(0, 4)}`);
       break;
     }
     case "previous_year": {
