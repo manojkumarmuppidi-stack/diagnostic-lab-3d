@@ -280,14 +280,17 @@ function BookDialog({ row, lines, kinds, onClose, onDone }: { row: any; lines: a
   const [desc, setDesc] = useState(row.party === "(no name)" ? "" : row.party);
   const [closed, setClosed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const total = lines.reduce((a, l) => a + l.amount, 0);
+  // Every payment is ticked to start with; untick the ones that are not AED expenses (they stay in the list).
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(lines.map((l) => l.id)));
+  const chosen = lines.filter((l) => picked.has(l.id));
+  const total = chosen.reduce((a, l) => a + l.amount, 0);
   const subs = masterOptions(masters, "expenseSubcategories", { parentId: cat });
   const save = async () => {
     setBusy(true);
     try {
       const r: any = await apiFetch("/api/bank/book", {
         method: "POST",
-        json: { lineIds: lines.map((l) => l.id), categoryId: cat, subcategoryId: sub || null, departmentId: dept || null, description: desc, intoClosedDays: closed },
+        json: { lineIds: chosen.map((l) => l.id), categoryId: cat, subcategoryId: sub || null, departmentId: dept || null, description: desc, intoClosedDays: closed },
       });
       toast(
         "success",
@@ -311,8 +314,8 @@ function BookDialog({ row, lines, kinds, onClose, onDone }: { row: any; lines: a
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={save} loading={busy} disabled={!cat}>
-            Enter {lines.length} expense{lines.length === 1 ? "" : "s"} · {inr(total)}
+          <Button onClick={save} loading={busy} disabled={!cat || !chosen.length}>
+            Enter {chosen.length} expense{chosen.length === 1 ? "" : "s"} · {inr(total)}
           </Button>
         </>
       }
@@ -323,11 +326,29 @@ function BookDialog({ row, lines, kinds, onClose, onDone }: { row: any; lines: a
           bank&apos;s date. Only enter them if they are AED&apos;s expenses — loans, owner payments, assets and transfers belong in the suspense list instead.
         </p>
         <div className="max-h-40 overflow-y-auto rounded border p-2 text-xs" style={{ borderColor: "var(--border)" }}>
+          {lines.length > 1 && <p className="mb-1 muted">Untick a payment to leave it out — it stays in this list for later.</p>}
           {lines.map((l) => (
-            <div key={l.id} className="flex justify-between gap-2">
-              <span>{l.date}</span>
+            <label key={l.id} className="flex cursor-pointer items-center justify-between gap-2">
+              <span className="flex items-center gap-2">
+                {lines.length > 1 && (
+                  <input
+                    type="checkbox"
+                    checked={picked.has(l.id)}
+                    aria-label={`Enter the payment of ${inr(l.amount)} on ${l.date}`}
+                    onChange={(e) =>
+                      setPicked((prev) => {
+                        const n = new Set(prev);
+                        if (e.target.checked) n.add(l.id);
+                        else n.delete(l.id);
+                        return n;
+                      })
+                    }
+                  />
+                )}
+                {l.date}
+              </span>
               <span>{inr(l.amount)}</span>
-            </div>
+            </label>
           ))}
         </div>
         <Field label="Expense head" required>
