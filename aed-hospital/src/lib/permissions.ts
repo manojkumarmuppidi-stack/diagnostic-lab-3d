@@ -83,6 +83,11 @@ export const ROLE_DEFS: Record<string, { name: string; description: string; perm
       "import.run", "audit.view", "patients.view_identity",
     ],
   },
+  READONLY: {
+    name: "Read-only reviewer",
+    description: "Sees dashboards, reports, accounts, the bank check and every transaction, but cannot change anything. Patient names stay hidden. Used by the read-only access key.",
+    permissions: ["dashboard.view", "analytics.view", "reports.view", "reports.export", "search.use", ...viewAllTx, "expense.view_all", "accounts.view"],
+  },
   RECEPTION: {
     name: "Reception",
     description: "OPD, IPD, lab, diet and pharmacy billing, and importing their OneGlance reports",

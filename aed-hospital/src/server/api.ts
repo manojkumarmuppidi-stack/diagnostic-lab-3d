@@ -62,6 +62,8 @@ export function api<P extends Params = Params>(
       if (!checkOrigin(req)) return NextResponse.json({ error: "Cross-site request blocked", code: "CSRF" }, { status: 403 });
       const actor = await getActor();
       if (!actor) return NextResponse.json({ error: "Please sign in", code: "UNAUTHORIZED" }, { status: 401 });
+      if (actor.viaKey && !["GET", "HEAD"].includes(req.method))
+        return NextResponse.json({ error: "The read-only access key cannot change anything", code: "READ_ONLY" }, { status: 403 });
       if (actor.mustChangePassword && !opts.allowPasswordChange) {
         return NextResponse.json({ error: "You must change your password first", code: "PASSWORD_CHANGE_REQUIRED" }, { status: 403 });
       }

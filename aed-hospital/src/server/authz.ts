@@ -14,6 +14,8 @@ export interface Actor {
   headOfDepartmentId?: string | null;
   ip?: string | null;
   userAgent?: string | null;
+  /** Signed in with a read-only access key (Bearer header): only reads are allowed. */
+  viaKey?: boolean;
 }
 
 export function can(actor: Actor, code: PermissionCode): boolean {

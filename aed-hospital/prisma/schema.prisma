@@ -148,6 +148,8 @@ model Session {
   lastSeenAt DateTime @default(now())
   ip         String?
   userAgent  String?
+  /// BROWSER: a sign-in cookie. KEY: a read-only access key sent as "Authorization: Bearer …" (GET requests only).
+  kind       String   @default("BROWSER")
 
   @@index([userId])
   @@index([expiresAt])

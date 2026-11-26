@@ -188,6 +188,88 @@ function Roles({ data, reload }: { data: any; reload: () => void }) {
   );
 }
 
+
+function AccessKey() {
+  const toast = useToast();
+  const { data, reload } = useApi<any>("/api/users/access-key");
+  const [key, setKey] = useState<{ key: string; expiresAt: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (method: "POST" | "DELETE") => {
+    if (method === "POST" && data?.active && !window.confirm("Make a new key? The current key stops working.")) return;
+    if (method === "DELETE" && !window.confirm("Switch off the read-only access key now?")) return;
+    setBusy(true);
+    try {
+      const r: any = await apiFetch("/api/users/access-key", { method });
+      if (method === "POST") setKey(r);
+      else toast("success", "Access key switched off");
+      reload();
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="card p-4 text-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-2xl">
+          <div className="font-semibold">Read-only access key</div>
+          <p className="muted">
+            Lets a helper tool (e.g. Claude) read the accounts, reports and bank check without anyone&apos;s password. It cannot add, change or delete anything, patient names
+            stay hidden, and it stops working after 30 days or when you switch it off.
+          </p>
+          <p className="mt-1">
+            {data?.active ? (
+              <>
+                <Badge tone="green">On</Badge> made {formatDateTime(data.createdAt)} · ends {formatDateTime(data.expiresAt)} · last used {formatDateTime(data.lastUsedAt)}
+              </>
+            ) : (
+              <Badge>Off</Badge>
+            )}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button size="sm" onClick={() => run("POST")} loading={busy}>
+            {data?.active ? "Make a new key" : "Make a key"}
+          </Button>
+          {data?.active && (
+            <Button size="sm" variant="secondary" onClick={() => run("DELETE")} loading={busy}>
+              Switch off
+            </Button>
+          )}
+        </div>
+      </div>
+      <Modal
+        open={!!key}
+        onClose={() => setKey(null)}
+        title="Your read-only access key"
+        footer={
+          <Button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(key!.key);
+                toast("success", "Copied");
+              } catch {
+                toast("error", "Copy it by selecting the text");
+              }
+            }}
+          >
+            Copy
+          </Button>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p>This is shown only once. Paste it only into the secure &quot;credential&quot; form Claude opens — never into a chat message or email.</p>
+          <code className="block break-all rounded border p-2" style={{ borderColor: "var(--border)" }}>
+            {key?.key}
+          </code>
+          <p className="muted">Ends {key ? formatDateTime(key.expiresAt) : ""}. You can switch it off here at any time.</p>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
 export default function UsersPage() {
   const [tab, setTab] = useState<"users" | "roles">("users");
   const roles = useApi<any>("/api/roles");
@@ -196,7 +278,14 @@ export default function UsersPage() {
       <PageHeader title="Logins & Permissions" subtitle="Add a login for each staff member, choose their role and set a first password — they must change it at first sign-in." />
       <div className="space-y-4">
         <Tabs value={tab} onChange={setTab} tabs={[{ key: "users", label: "Users" }, { key: "roles", label: "Roles & permissions" }]} />
-        {!roles.data ? <Spinner /> : tab === "users" ? <Users roles={roles.data.roles} /> : <Roles data={roles.data} reload={roles.reload} />}
+        {!roles.data ? <Spinner /> : tab === "users" ? (
+          <>
+            <AccessKey />
+            <Users roles={roles.data.roles} />
+          </>
+        ) : (
+          <Roles data={roles.data} reload={roles.reload} />
+        )}
       </div>
     </Guard>
   );

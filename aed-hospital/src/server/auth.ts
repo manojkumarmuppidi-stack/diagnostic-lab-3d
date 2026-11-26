@@ -93,13 +93,22 @@ export async function logout() {
 /** Resolve the current user from the session cookie, or null. Permissions come from the DB every request. */
 export async function getActor(): Promise<Actor | null> {
   const jar = await cookies();
-  const token = jar.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+  let token = jar.get(SESSION_COOKIE)?.value;
+  let viaKey = false;
+  if (!token) {
+    // A read-only access key (Logins & Permissions → Read-only access key), sent by a tool instead of a cookie.
+    const m = /^Bearer\s+(\S+)$/i.exec((await headers()).get("authorization") ?? "");
+    if (!m) return null;
+    token = m[1];
+    viaKey = true;
+  }
   const session = await prisma.session.findUnique({
     where: { id: hashToken(token) },
     include: { user: { include: { role: { include: { permissions: { include: { permission: true } } } } } } },
   });
   if (!session || session.expiresAt < new Date() || !session.user.active) return null;
+  // A key works only as a Bearer header, and a sign-in cookie only as a cookie.
+  if ((session.kind === "KEY") !== viaKey) return null;
   // Sliding "last seen" (cheap, at most once per minute).
   if (Date.now() - session.lastSeenAt.getTime() > 60_000) {
     await prisma.session.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } }).catch(() => undefined);
@@ -117,6 +126,7 @@ export async function getActor(): Promise<Actor | null> {
     headOfDepartmentId: user.headOfDepartmentId,
     ip: meta.ip,
     userAgent: meta.userAgent,
+    viaKey,
   };
 }
 
