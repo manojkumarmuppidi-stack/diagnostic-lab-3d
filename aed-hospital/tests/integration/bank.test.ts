@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/server/db";
 import { createTransaction } from "@/server/services/transactions";
-import { bankReport, bankReportWorkbook, bookBankPayments, importBankStatements, labBankDuplicates, restoreProbableLab } from "@/server/services/bank";
+import { bankReport, bankReportWorkbook, bookBankPayments, importBankStatements, labBankDuplicates, labCoreDuplicates, restoreProbableLab } from "@/server/services/bank";
 import { DEFAULT_DEPARTMENTS } from "@/lib/departments";
 import { saveDepartmentCost } from "@/server/services/departments";
 import { seedFixture, type Fixture } from "../helpers/db";
@@ -98,6 +98,47 @@ describe("bank statement check", () => {
     });
     await expect(bookBankPayments(f.admin, { lineIds: aduri, categoryId: f.ids.groceries })).rejects.toThrow();
     expect(await bookBankPayments(f.admin, { lineIds: aduri, categoryId: f.ids.groceries, intoClosedDays: true })).toMatchObject({ booked: 1 });
+  });
+
+  it("finds lab bills entered twice inside the core accounts, and leaves monthly repeats alone", async () => {
+    for (const [i, d] of DEFAULT_DEPARTMENTS.entries()) await prisma.serviceDepartment.create({ data: { ...d, sortOrder: (i + 1) * 10 } });
+    const lab = (await prisma.serviceDepartment.findUniqueOrThrow({ where: { name: "Laboratory" } })).id;
+    for (const [label, matchText] of [
+      ["Reagents — SN Diagnostics", "SN Diagnostic"],
+      ["Reagents — Fortune", "Fortune Bio"],
+      ["Reagents — Nexogen", "Nexogen"],
+    ])
+      await saveDepartmentCost(f.admin, null, { departmentId: lab, label, kind: "MATCH", matchText, fromMonth: "2026-01" });
+    const bill = (date: string, description: string, vendor: string | null, amount: number, billNumber?: string) =>
+      createTransaction(f.admin, "expense", { date, categoryId: f.ids.groceries, description, vendor, amount, billNumber, paymentModeId: f.ids.BANK });
+    // Same invoice twice: from the stock list, and by hand two days later.
+    await bill("2026-01-28", "Fortune Bio Solutions Stock", "Fortune Bio Solutions", 128493);
+    await bill("2026-01-30", "Fortune Bio – Jan 2026", null, 128493);
+    // Monthly total next to the two invoices it adds up.
+    await bill("2026-02-05", "Reagents invoice 11", "S.N.Diagnostics", 150000);
+    await bill("2026-02-18", "Reagents invoice 12", "S.N.Diagnostics", 133112);
+    await bill("2026-02-28", "SN Diagnostics – Feb 2026", null, 283112);
+    // Monthly total with other bills that month but no exact sum: probable only.
+    await bill("2026-03-10", "Reagents invoice 13", "S.N.Diagnostics", 90000);
+    await bill("2026-03-31", "SN Diagnostics – Mar 2026", null, 120000);
+    // The same amount every month is a regular purchase, not a duplicate.
+    for (const d of ["2026-02-09", "2026-03-09", "2026-04-09"]) await bill(d, "Kits", "Nexogenix Incorporated", 23625);
+    // Same bill number a few weeks apart.
+    await bill("2026-04-02", "Reagents", "S N Diagnostics", 5000, "INV-77");
+    await bill("2026-04-25", "Reagents (re-entered)", "S N Diagnostics", 5000, "INV 77");
+    const chk = await labCoreDuplicates(f.admin);
+    expect(chk.results.map((r) => [r.date, r.amount, r.status])).toEqual([
+      ["2026-01-30", 128493, "duplicate"],
+      ["2026-02-28", 283112, "duplicate"],
+      ["2026-03-31", 120000, "probable"],
+      ["2026-04-25", 5000, "duplicate"],
+    ]);
+    expect(chk.summary).toMatchObject({ duplicate: { count: 3, amount: 416605 }, probable: { count: 1, amount: 120000 } });
+    expect((await labCoreDuplicates(f.admin, { apply: true })).summary.removed).toBe(3);
+    const left = await prisma.expense.findMany({ where: { status: "ACTIVE" }, orderBy: { date: "asc" } });
+    expect(left.map((e) => Number(e.amount))).toEqual([128493, 150000, 23625, 133112, 23625, 90000, 120000, 5000, 23625]);
+    // Nothing more to find; the probable one stays until asked.
+    expect((await labCoreDuplicates(f.admin)).summary).toMatchObject({ duplicate: { count: 0 }, probable: { count: 1 } });
   });
 
   it("finds lab entries from the bank whose bills were already entered, and removes only those", async () => {

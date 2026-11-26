@@ -197,6 +197,111 @@ function LabDuplicates({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** Lab bills entered twice inside the core accounts (stock list + by hand, or a monthly total next to its invoices). */
+function LabCoreDuplicates({ onDone }: { onDone: () => void }) {
+  const can = useCan();
+  const toast = useToast();
+  const [data, setData] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [probable, setProbable] = useState(false);
+  const [closed, setClosed] = useState(false);
+  const check = async () => {
+    setBusy(true);
+    try {
+      setData(await apiFetch("/api/bank/lab-core-duplicates"));
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    const n = data.summary.duplicate.count + (probable ? data.summary.probable.count : 0);
+    if (!confirm(`Remove ${n} lab bill${n === 1 ? "" : "s"} entered twice? Each stays in the books as voided, with the reason.`)) return;
+    setBusy(true);
+    try {
+      const r: any = await apiFetch("/api/bank/lab-core-duplicates", { method: "POST", json: { includeProbable: probable, intoClosedDays: closed } });
+      toast("success", `${r.summary.removed} duplicate lab bill${r.summary.removed === 1 ? "" : "s"} removed`);
+      await check();
+      onDone();
+    } catch (e: any) {
+      toast("error", e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const rows = data?.results ?? [];
+  return (
+    <Card title="Lab bills entered twice in the core accounts">
+      <p className="text-sm muted">
+        Bills of the named lab suppliers (Laboratory&apos;s &quot;expenses containing&quot; rules, not from the bank) are compared with each other: the same supplier and amount within 7 days or with the same bill number, or a monthly total
+        entered next to the bills it adds up. The later entry (or the monthly total) is removed; the first stays. The same amount in different months is never counted as a
+        duplicate. &quot;Probable&quot;: a monthly total next to other bills of that supplier, but no exact sum.
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        <Button variant="secondary" onClick={check} loading={busy && !data}>
+          Check now
+        </Button>
+        {data && (
+          <span className="text-sm">
+            Checked {data.summary.checked} lab bills: <b>{data.summary.duplicate.count} entered twice</b> ({inr(data.summary.duplicate.amount)}) · {data.summary.probable.count}{" "}
+            probable ({inr(data.summary.probable.amount)})
+          </span>
+        )}
+      </div>
+      {data && rows.length > 0 && (
+        <>
+          <div className="mt-3 max-h-96 overflow-auto">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Supplier</th>
+                  <th className="num">Amount</th>
+                  <th>Entry to remove</th>
+                  <th>Result</th>
+                  <th>Kept (already in the accounts)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r: any) => (
+                  <tr key={r.id}>
+                    <td>{r.date}</td>
+                    <td>{r.supplier}</td>
+                    <td className="num">{inr(r.amount)}</td>
+                    <td className="text-xs">{r.text}</td>
+                    <td className="text-xs">
+                      {r.status === "duplicate" ? "Entered twice" : "Probable"}
+                      <span className="block muted">{r.reason}</span>
+                    </td>
+                    <td className="text-xs">{r.kept.map((b: any) => `${b.date} ${inr(b.amount)} ${b.text}`).join(" · ")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {can("expense.write") && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-1 text-sm">
+                <input type="checkbox" checked={probable} onChange={(e) => setProbable(e.target.checked)} /> also remove the probable ones
+              </label>
+              {can("accounts.reopen") && (
+                <label className="flex items-center gap-1 text-sm">
+                  <input type="checkbox" checked={closed} onChange={(e) => setClosed(e.target.checked)} /> allow closed days
+                </label>
+              )}
+              <Button onClick={remove} loading={busy} disabled={!data.summary.duplicate.count && !(probable && data.summary.probable.count)}>
+                Remove {data.summary.duplicate.count + (probable ? data.summary.probable.count : 0)} entries
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+      {data && !rows.length && <p className="mt-2 text-sm">No lab bill is entered twice.</p>}
+    </Card>
+  );
+}
+
 /** Upload the reviewed payments sheet: rows marked "Yes" become expenses, each re-checked first. */
 function ReviewedUpload({ onDone }: { onDone: () => void }) {
   const can = useCan();
@@ -569,6 +674,7 @@ function Report() {
             )}
           </Card>
           <LabDuplicates onDone={reload} />
+          <LabCoreDuplicates onDone={reload} />
           {booking && (
             <BookDialog
               row={booking}

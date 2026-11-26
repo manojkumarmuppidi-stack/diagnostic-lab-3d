@@ -8,7 +8,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { createHash } from "node:crypto";
 import { BANK_KIND_LABELS, parseSbiStatement, type BankKind } from "@/lib/import/bank";
-import { addDays, fromDbDate, isISODate, todayISO, toDbDate, type ISODate } from "@/lib/dates";
+import { addDays, addMonths, fromDbDate, isISODate, todayISO, toDbDate, type ISODate } from "@/lib/dates";
 import { round2, toNum } from "@/lib/money";
 import { writePerm } from "@/lib/modules";
 import { norm } from "@/lib/import/text";
@@ -548,6 +548,127 @@ export async function labBankDuplicates(actor: Actor, opts: { apply?: boolean; i
       { timeout: 120_000, maxWait: 10_000 },
     );
     if (opts.intoClosedDays && touched.size) await refreshClosedDays(actor, [...touched], "Duplicate lab entries from the bank removed");
+    summary.removed = remove.length;
+  }
+  return { summary, results };
+}
+
+/**
+ * Lab bills entered twice inside the core accounts (not from the bank), for the named lab suppliers
+ * (Laboratory's “expenses containing” rules): e.g. a supplier's invoice
+ * entered from the stock list and again by hand, or a monthly total ("SN Diagnostics – Feb 2026")
+ * entered next to the invoices it adds up. Bank entries are left to labBankDuplicates.
+ *  - duplicate: same supplier and amount within 7 days, or the same bill number; or a monthly total
+ *    that the supplier's other bills that month add up to exactly. The entry entered later (or the
+ *    monthly total) is the one removed; the first one stays.
+ *  - probable: a monthly total with other bills of that supplier in the month, but no exact sum —
+ *    shown, removed only when asked.
+ * A supplier paying the same amount every month is NOT a duplicate (different months).
+ */
+export async function labCoreDuplicates(actor: Actor, opts: { apply?: boolean; includeProbable?: boolean; intoClosedDays?: boolean } = {}) {
+  requirePermission(actor, writePerm("expense"));
+  if (opts.apply && opts.intoClosedDays) requirePermission(actor, "accounts.reopen");
+  const lab = await prisma.serviceDepartment.findFirst({ where: { name: "Laboratory" }, include: { costs: { where: { kind: "MATCH" } } } });
+  const rules = (lab?.costs ?? []).map((c) => ({ label: c.label, patterns: matchPatterns(c.matchText ?? "").map((p) => p.slice(1, -1)) })).filter((r) => r.patterns.length);
+  const compact = (v: string | null | undefined) => (v ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const rows = await prisma.expense.findMany({
+    // Bills without a bill number count too (NOT … startsWith alone would drop them: NULL in SQL).
+    where: { status: "ACTIVE", OR: [{ billNumber: null }, { NOT: { billNumber: { startsWith: "BANK-" } } }] },
+    select: {
+      id: true,
+      date: true,
+      amount: true,
+      description: true,
+      vendor: true,
+      billNumber: true,
+      createdAt: true,
+      category: { select: { name: true } },
+      subcategory: { select: { name: true } },
+    },
+    orderBy: [{ date: "asc" }, { createdAt: "asc" }],
+  });
+  const MONTHS = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s*[-'’]?\s*(20)?\d\d\b/i;
+  const bills = rows
+    .map((e) => {
+      const text = `${e.vendor ?? ""} ${e.description} ${e.category.name} ${e.subcategory?.name ?? ""}`;
+      const rule = rules.find((r) => r.patterns.some((p) => compact(text).includes(p)))?.label ?? null;
+      const date = fromDbDate(e.date);
+      const monthEnd = addDays(addMonths(`${date.slice(0, 7)}-01` as ISODate, 1), -1);
+      return {
+        id: e.id,
+        date,
+        amount: toNum(e.amount),
+        bill: compact(e.billNumber),
+        text: `${e.vendor && !e.description.includes(e.vendor) ? `${e.vendor} — ` : ""}${e.description}`.trim(),
+        // Only the named lab suppliers (Laboratory's “expenses containing” rules): a generic vendor's kitchen and lab bills must never pair up.
+        key: rule,
+        supplier: rule ?? e.vendor ?? e.description,
+        summary: MONTHS.test(e.description) || date === monthEnd,
+        created: e.createdAt.getTime(),
+        gone: false,
+      };
+    })
+    .filter((b) => b.key);
+  type B = (typeof bills)[number];
+  const results: { id: string; date: string; supplier: string; amount: number; text: string; status: "duplicate" | "probable"; reason: string; kept: { date: string; amount: number; text: string }[] }[] = [];
+  const show = (b: B) => ({ date: b.date, amount: b.amount, text: b.text.slice(0, 120) });
+  const days = (a: string, b: string) => Math.abs(+new Date(a) - +new Date(b)) / 86_400_000;
+  // 1. The same bill twice: same supplier and amount within 7 days, or the same bill number.
+  for (const b of bills) {
+    const first = bills.find(
+      (a) =>
+        a !== b &&
+        !a.gone &&
+        a.key === b.key &&
+        a.created <= b.created &&
+        Math.abs(a.amount - b.amount) < 0.5 &&
+        (days(a.date, b.date) <= 7 || (!!a.bill && a.bill === b.bill && days(a.date, b.date) <= 60)),
+    );
+    if (!first) continue;
+    b.gone = true;
+    results.push({ id: b.id, date: b.date, supplier: b.supplier, amount: b.amount, text: b.text, status: "duplicate", reason: "Same supplier and amount, entered twice", kept: [show(first)] });
+  }
+  // 2. A monthly total entered next to the invoices it adds up.
+  for (const m of bills) {
+    if (m.gone || !m.summary) continue;
+    const others = bills
+      .filter((b) => b !== m && !b.gone && b.key === m.key && b.date.slice(0, 7) === m.date.slice(0, 7) && !b.summary)
+      .sort((a, b) => days(a.date, m.date) - days(b.date, m.date));
+    if (!others.length) continue;
+    const hit = subsetSum(others, m.amount);
+    if (hit) {
+      m.gone = true;
+      const kept = others.filter((b) => hit.includes(b.id));
+      results.push({ id: m.id, date: m.date, supplier: m.supplier, amount: m.amount, text: m.text, status: "duplicate", reason: kept.length > 1 ? `Monthly total of ${kept.length} bills already entered` : "Monthly entry for a bill already entered that month", kept: kept.map(show) });
+    } else if (!hit) {
+      results.push({ id: m.id, date: m.date, supplier: m.supplier, amount: m.amount, text: m.text, status: "probable", reason: "Monthly total, and the supplier also has separate bills that month (no exact sum)", kept: others.slice(0, 6).map(show) });
+    }
+  }
+  results.sort((a, b) => a.date.localeCompare(b.date));
+  const sumOf = (st: string) => round2(results.filter((r) => r.status === st).reduce((a, r) => a + r.amount, 0));
+  const summary = {
+    checked: bills.length,
+    duplicate: { count: results.filter((r) => r.status === "duplicate").length, amount: sumOf("duplicate") },
+    probable: { count: results.filter((r) => r.status === "probable").length, amount: sumOf("probable") },
+    removed: 0,
+  };
+  if (opts.apply) {
+    const remove = results.filter((r) => r.status === "duplicate" || (opts.includeProbable && r.status === "probable"));
+    const touched = new Set<ISODate>();
+    await prisma.$transaction(
+      (tx) =>
+        withBulkCache(
+          async () => {
+            for (const r of remove) {
+              await applyVoid(tx, actor, "expense", r.id, `Lab bill entered twice in the core accounts — ${r.reason} (${r.status})`);
+              touched.add(r.date as ISODate);
+            }
+          },
+          { allowClosed: opts.intoClosedDays },
+        ),
+      { timeout: 120_000, maxWait: 10_000 },
+    );
+    if (opts.intoClosedDays && touched.size) await refreshClosedDays(actor, [...touched], "Duplicate lab bills removed");
     summary.removed = remove.length;
   }
   return { summary, results };
