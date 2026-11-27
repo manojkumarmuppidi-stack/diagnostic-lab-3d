@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { PERIOD_PRESETS, recentMonths, wholeMonths, type CompareMode, type PeriodPreset } from "@/lib/periods";
 import { isISODate } from "@/lib/dates";
 import { useSession } from "./session";
@@ -16,13 +17,21 @@ export function PeriodPicker({ value, onChange, showCompare = true, presets }: {
   const list = PERIOD_PRESETS.filter((p) => !presets || presets.includes(p.key));
   // A whole calendar month is a custom range underneath; the menu shows it by name ("February 2026").
   const months = list.some((p) => p.key === "custom") ? recentMonths(today) : [];
-  const isMonth = value.preset === "custom" && isISODate(value.from) && isISODate(value.to) && wholeMonths(value.from, value.to) === 1;
+  // Chosen "Custom Range" while a month was showing: keep the From/To boxes even though the dates are still that month.
+  const [range, setRange] = useState(false);
+  const isMonth = !range && value.preset === "custom" && isISODate(value.from) && isISODate(value.to) && wholeMonths(value.from, value.to) === 1;
   const selected = isMonth ? `month:${value.from!.slice(0, 7)}` : value.preset;
   const pick = (v: string) => {
     if (v.startsWith("month:")) {
       const m = months.find((x) => x.value === v.slice(6));
-      if (m) onChange({ ...value, preset: "custom", from: m.from, to: m.to });
-    } else onChange({ ...value, preset: v as PeriodPreset });
+      if (m) {
+        setRange(false);
+        onChange({ ...value, preset: "custom", from: m.from, to: m.to });
+      }
+    } else {
+      setRange(v === "custom");
+      onChange({ ...value, preset: v as PeriodPreset });
+    }
   };
   return (
     <div className="flex flex-wrap items-end gap-2">

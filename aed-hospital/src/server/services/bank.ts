@@ -434,11 +434,11 @@ export async function bookFromReviewedSheet(actor: Actor, fileName: string, buf:
 
 const LAB_WORDS = /lab|reagent|diagnos|kit|scientific|pathlab|consumable|medical suppl|bio/i;
 
-/** Smallest set (up to 6 bills) whose amounts add up to `target` (to the rupee); nearest dates are tried first. */
-function subsetSum(bills: { id: string; amount: number }[], target: number): string[] | null {
+/** Smallest set (up to `maxSize`, default 6, bills) whose amounts add up to `target` (to the rupee); nearest dates are tried first. */
+function subsetSum(bills: { id: string; amount: number }[], target: number, maxSize = 6): string[] | null {
   const cents = Math.round(target * 100);
   const list = bills.slice(0, 22).map((b) => ({ id: b.id, c: Math.round(b.amount * 100) }));
-  for (let size = 1; size <= 6; size++) {
+  for (let size = 1; size <= maxSize; size++) {
     const pick: number[] = [];
     const walk = (start: number, left: number): boolean => {
       if (pick.length === size) return Math.abs(left) <= 100;
@@ -510,7 +510,10 @@ export async function labBankDuplicates(actor: Actor, opts: { apply?: boolean; i
     const same = near.filter((b) => rule && b.rule === rule).sort((a, b) => dist(a) - dist(b));
     const generic = near.filter((b) => !b.rule).sort((a, b) => dist(a) - dist(b));
     const amount = toNum(e.amount);
-    const hit = subsetSum(same, amount) ?? subsetSum(generic, amount);
+    // Bills of the same named supplier may add up to the cheque (several invoices, one cheque). Bills with no
+    // supplier rule only count one at a time: several unrelated small bills adding up to a cheque is a coincidence
+    // (lancets, strips, appraisals…), and would remove a real payment.
+    const hit = subsetSum(same, amount) ?? subsetSum(generic, amount, 1);
     const status = hit ? "duplicate" : same.length ? "probable" : "keep";
     const matched = hit ? bills.filter((b) => hit.includes(b.id)) : [];
     for (const b of matched) b.used = true;
